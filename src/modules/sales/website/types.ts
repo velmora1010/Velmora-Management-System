@@ -18,6 +18,10 @@ export interface ColumnMapping {
   phone: string;
   paymentMode: string;
   orderDate?: string;
+  fulfillmentStatus?: string;
+  financialStatus?: string;
+  awbNumber?: string;
+  courier?: string;
 }
 
 export interface WebsiteUploadBatch {
@@ -100,6 +104,11 @@ export interface WebsiteConsolidatedOrder {
   canonicalCity?: string;
   canonicalCityKey?: string;
   canonicalPincode?: string;
+  fulfillment_status?: string;
+  financial_status?: string;
+  awb_number?: string;
+  courier?: string;
+  fulfilled_date?: string;
 }
 
 export interface WebsiteSalesFilterState {

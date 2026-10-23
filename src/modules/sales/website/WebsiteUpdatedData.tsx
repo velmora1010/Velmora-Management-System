@@ -9,11 +9,14 @@ import {
   ChevronLeft, 
   ChevronRight, 
   X,
-  CreditCard
+  CreditCard,
+  Trash2
 } from 'lucide-react';
 import type { WebsiteConsolidatedOrder, WebsiteSalesFilterState } from './types';
 import { websiteSalesService } from './websiteSalesService';
 import { exportOrdersToCSV, exportOrdersToXLSX } from './websiteSalesUtils';
+import { OrderDetailsModal } from './components/OrderDetailsModal';
+import toast from 'react-hot-toast';
 
 interface WebsiteUpdatedDataProps {
   selectedBatchId?: string;
@@ -77,6 +80,30 @@ export const WebsiteUpdatedData: React.FC<WebsiteUpdatedDataProps> = ({ selected
       dateRange: 'all'
     });
     setCurrentPage(1);
+  };
+
+  const handleDeleteSingleOrder = async (order: WebsiteConsolidatedOrder) => {
+    const hasAwb = !!order.awb_number;
+    const isDispatchedOrDelivered = 
+      hasAwb || 
+      (order.fulfillment_status && ['fulfilled', 'shipped', 'delivered'].includes(order.fulfillment_status.toLowerCase()));
+
+    let confirmMsg = `Are you sure you want to permanently delete order #${order.order_id}? This will automatically remove it from Sales and Logistics.`;
+
+    if (isDispatchedOrDelivered) {
+      confirmMsg = `⚠️ WARNING: Order #${order.order_id} has already been dispatched/fulfilled${hasAwb ? ` with AWB ${order.awb_number}` : ''}.\n\nDeleting this order will permanently remove it from all operational Logistics views, counts, and Analytics while retaining shipment audit records.\n\nAre you sure you want to permanently delete this order?`;
+    }
+
+    if (!window.confirm(confirmMsg)) return;
+
+    const toastId = toast.loading(`Deleting order #${order.order_id}...`);
+    try {
+      await websiteSalesService.deleteSalesOrder(order.order_id);
+      toast.success(`Order #${order.order_id} deleted from Sales & Logistics!`, { id: toastId });
+      loadData();
+    } catch (err: any) {
+      toast.error(`Failed to delete order: ${err.message}`, { id: toastId });
+    }
   };
 
   // Derive unique lists for dropdown filters
@@ -233,7 +260,7 @@ export const WebsiteUpdatedData: React.FC<WebsiteUpdatedDataProps> = ({ selected
                   <th className="py-3 px-3.5 w-[130px] text-center">Payment Mode</th>
                   <th className="py-3 px-3.5 w-[120px] text-right">Remaining COD</th>
                   <th className="py-3 px-3.5 w-[120px]">Phone</th>
-                  <th className="py-3 px-2 w-[65px] text-center">Details</th>
+                  <th className="py-3 px-2 w-[85px] text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 font-sans">
@@ -343,17 +370,28 @@ export const WebsiteUpdatedData: React.FC<WebsiteUpdatedDataProps> = ({ selected
                       {o.phone}
                     </td>
 
-                    {/* 14. DETAILS ACTION (Centered Icon Only) */}
-                    <td className="py-3 px-2 text-center whitespace-nowrap w-[65px]">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedOrder(o)}
-                        title="View Details"
-                        aria-label="View Order Details"
-                        className="p-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-400 hover:text-cyan-300 rounded-lg transition-colors cursor-pointer inline-flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
-                      >
-                        <Eye size={15} />
-                      </button>
+                    {/* 14. DETAILS & DELETE ACTIONS */}
+                    <td className="py-3 px-2 text-center whitespace-nowrap w-[85px]">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedOrder(o)}
+                          title="View Details"
+                          aria-label="View Order Details"
+                          className="p-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-400 hover:text-cyan-300 rounded-lg transition-colors cursor-pointer inline-flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                        >
+                          <Eye size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteSingleOrder(o)}
+                          title="Delete Order"
+                          aria-label="Delete Order"
+                          className="p-1.5 bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 rounded-lg transition-colors cursor-pointer inline-flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-red-500/50"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -405,116 +443,14 @@ export const WebsiteUpdatedData: React.FC<WebsiteUpdatedDataProps> = ({ selected
       </div>
 
       {/* VIEW ORDER DETAILS MODAL */}
-      {selectedOrder && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="p-5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-              <div>
-                <h3 className="text-base font-bold text-white">Order #{selectedOrder.order_id}</h3>
-                <p className="text-xs text-slate-400">Consolidated Order & Payment Breakdown</p>
-              </div>
-              <button
-                onClick={() => setSelectedOrder(null)}
-                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4 text-xs text-slate-300">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/80">
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Customer Name</span>
-                  <span className="font-semibold text-white">{selectedOrder.customer_name}</span>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/80">
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Normalized Phone</span>
-                  <span className="font-mono text-cyan-300 font-bold">{selectedOrder.phone}</span>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/80 space-y-1">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">Shipping Location</span>
-                <div className="flex items-center gap-3 text-slate-400 pt-1 font-mono">
-                  <span>State: <strong className="text-slate-200 font-sans">{selectedOrder.state}</strong></span>
-                  <span>•</span>
-                  <span>City: <strong className="text-slate-200 font-sans">{selectedOrder.city}</strong></span>
-                  <span>•</span>
-                  <span>Pincode: <strong className="text-slate-200">{selectedOrder.pincode}</strong></span>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/80 space-y-2">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">Line Items</span>
-                {selectedOrder.items && selectedOrder.items.length > 0 ? (
-                  <div className="space-y-1 font-mono">
-                    {selectedOrder.items.map(it => (
-                      <div key={it.id} className="flex justify-between text-slate-200">
-                        <span>{it.product_name}</span>
-                        <span className="font-bold text-cyan-300">× {it.quantity}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="font-mono text-cyan-300">{selectedOrder.order_formatted}</p>
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/80">
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Payment Mode</span>
-                  <span className="font-bold text-emerald-300 flex items-center gap-1">
-                    <CreditCard size={12} /> {selectedOrder.payment_mode}
-                  </span>
-                  {selectedOrder.source_payment_mode && (
-                    <span className="text-[10px] text-slate-500 block truncate">({selectedOrder.source_payment_mode})</span>
-                  )}
-                </div>
-                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/80">
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Advance Paid</span>
-                  <span className="font-mono font-bold text-emerald-400">₹{(selectedOrder.advance_paid ?? 0).toLocaleString()}</span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/80">
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Remaining Payable</span>
-                  <span className="font-mono font-bold text-purple-300">
-                    {selectedOrder.payment_mode === 'PREPAID' ? '-' : `₹${(selectedOrder.remaining_payable ?? selectedOrder.price).toLocaleString()}`}
-                  </span>
-                </div>
-                <div className="p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/30">
-                  <span className="text-[10px] uppercase font-bold text-emerald-400 block mb-0.5">Final Order Price</span>
-                  <span className="font-mono font-bold text-emerald-300 text-sm">₹{selectedOrder.price.toLocaleString()}</span>
-                </div>
-              </div>
-
-              {selectedOrder.payment_classification_reason && (
-                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400">
-                  <span className="font-bold text-slate-300 block mb-0.5">Classification Reason:</span>
-                  <span>{selectedOrder.payment_classification_reason}</span>
-                </div>
-              )}
-
-              {selectedOrder.data_conflict && (
-                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] flex items-center gap-2">
-                  <AlertTriangle size={15} className="shrink-0" />
-                  <span>{selectedOrder.conflict_details || 'Conflict detected across raw rows'}</span>
-                </div>
-              )}
-            </div>
-
-            <div className="p-4 bg-slate-950 border-t border-slate-800 flex justify-end">
-              <button
-                onClick={() => setSelectedOrder(null)}
-                className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs rounded-xl border border-slate-700 transition-colors cursor-pointer"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <OrderDetailsModal
+        order={selectedOrder}
+        onClose={() => setSelectedOrder(null)}
+        onOrderDeleted={() => {
+          setSelectedOrder(null);
+          loadData();
+        }}
+      />
     </div>
   );
 };

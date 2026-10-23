@@ -1,17 +1,52 @@
-import React from 'react';
-import { X, User, Phone, MapPin, Tag, CreditCard, AlertTriangle, Package } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, User, Phone, MapPin, Tag, CreditCard, AlertTriangle, Package, Trash2 } from 'lucide-react';
 import type { WebsiteConsolidatedOrder } from '../types';
 import { formatPhoneNumber } from '../websiteSalesUtils';
+import { websiteSalesService } from '../websiteSalesService';
+import toast from 'react-hot-toast';
 
 interface OrderDetailsModalProps {
   order: WebsiteConsolidatedOrder | null;
   onClose: () => void;
+  onOrderDeleted?: (orderId: string) => void;
 }
 
-export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose }) => {
+export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, onOrderDeleted }) => {
+  const [isDeleting, setIsDeleting] = useState(false);
+
   if (!order) return null;
 
   const displayPhone = formatPhoneNumber(order.phone);
+
+  const handleDelete = async () => {
+    if (!order) return;
+
+    const hasAwb = !!order.awb_number;
+    const isDispatchedOrDelivered = 
+      hasAwb || 
+      (order.fulfillment_status && ['fulfilled', 'shipped', 'delivered'].includes(order.fulfillment_status.toLowerCase()));
+
+    let confirmMsg = `Are you sure you want to permanently delete order #${order.order_id}? This will automatically remove it from Sales and Logistics.`;
+
+    if (isDispatchedOrDelivered) {
+      confirmMsg = `⚠️ WARNING: Order #${order.order_id} has already been dispatched/fulfilled${hasAwb ? ` with AWB ${order.awb_number}` : ''}.\n\nDeleting this order will permanently remove it from all operational Logistics views, counts, and Analytics while retaining shipment audit records.\n\nAre you sure you want to permanently delete this order?`;
+    }
+
+    if (!window.confirm(confirmMsg)) return;
+
+    setIsDeleting(true);
+    const toastId = toast.loading(`Deleting order #${order.order_id}...`);
+    try {
+      await websiteSalesService.deleteSalesOrder(order.order_id);
+      toast.success(`Order #${order.order_id} successfully deleted from Sales & Logistics!`, { id: toastId });
+      onOrderDeleted?.(order.order_id);
+      onClose();
+    } catch (err: any) {
+      toast.error(`Failed to delete order: ${err.message}`, { id: toastId });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
@@ -135,7 +170,17 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onC
         </div>
 
         {/* Modal Footer */}
-        <div className="p-4 bg-slate-950 border-t border-slate-800 flex justify-end">
+        <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={isDeleting}
+            className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 font-semibold text-xs rounded-xl border border-red-500/30 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+          >
+            <Trash2 size={14} />
+            <span>{isDeleting ? 'Deleting...' : 'Delete Order'}</span>
+          </button>
+
           <button
             onClick={onClose}
             className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs rounded-xl border border-slate-700 transition-colors cursor-pointer"
