@@ -33,6 +33,9 @@ import { OptionItem } from './components/MultiSelectDropdown';
 import { AnalyticsSegmentedControl, SegmentOption } from './components/AnalyticsSegmentedControl';
 import { AnalyticsDonutChart } from './components/AnalyticsDonutChart';
 import { CardMatchingOrdersList } from './components/CardMatchingOrdersList';
+import { CustomerProductAnalyticsSection } from './components/CustomerProductAnalyticsSection';
+import { OperationsForecastingSection } from './components/OperationsForecastingSection';
+import { AnalyticsFullPageDataView, CustomerPurchaseProfile, OperationalOrderRecord } from './components/AnalyticsFullPageDataView';
 import { OrderDetailsModal } from './components/OrderDetailsModal';
 import { AnalyticsFilterDrawer } from './components/AnalyticsFilterDrawer';
 import { DateRangePickerModal } from './components/DateRangePickerModal';
@@ -113,7 +116,9 @@ const ANALYTICS_VIEW_OPTIONS = [
   { id: 'analytics-offer', label: 'Offer Performance' },
   { id: 'analytics-order-value', label: 'Order Value Distribution' },
   { id: 'analytics-order-composition', label: 'Order Composition' },
-  { id: 'analytics-cod-receivable', label: 'COD Receivable Overview' }
+  { id: 'analytics-cod-receivable', label: 'COD Receivable Overview' },
+  { id: 'analytics-customer-product', label: 'Customer Product Analytics' },
+  { id: 'analytics-operations-forecasting', label: 'Operations & Forecasting' }
 ];
 
 const REVENUE_MIX_SEGMENTS: SegmentOption<'Payment Mode' | 'State' | 'Product' | 'Offer' | 'Order Value Range'>[] = [
@@ -224,6 +229,42 @@ export const WebsiteAnalytics: React.FC = () => {
   const [codCardSlice, setCodCardSlice] = useState<string | null>(null);
 
   const [selectedOrderForModal, setSelectedOrderForModal] = useState<WebsiteConsolidatedOrder | null>(null);
+  const [trackingShipments, setTrackingShipments] = useState<any[]>([]);
+  const [fullPageView, setFullPageView] = useState<{
+    viewType: 'orders' | 'customers' | 'operations';
+    title: string;
+    subtitle?: string;
+    orders?: WebsiteConsolidatedOrder[];
+    customers?: CustomerPurchaseProfile[];
+    operations?: OperationalOrderRecord[];
+  } | null>(null);
+
+  const handleOpenOrdersFullPage = (title: string, list: WebsiteConsolidatedOrder[]) => {
+    setFullPageView({
+      viewType: 'orders',
+      title,
+      subtitle: `Viewing ${list.length} orders for ${title}`,
+      orders: list
+    });
+  };
+
+  const handleOpenCustomersFullPage = (title: string, list: CustomerPurchaseProfile[]) => {
+    setFullPageView({
+      viewType: 'customers',
+      title,
+      subtitle: `Viewing ${list.length} customer profiles`,
+      customers: list
+    });
+  };
+
+  const handleOpenOperationsFullPage = (title: string, list: OperationalOrderRecord[]) => {
+    setFullPageView({
+      viewType: 'operations',
+      title,
+      subtitle: `Viewing ${list.length} operational orders & shipments`,
+      operations: list
+    });
+  };
 
   // Collapsible Secondary Tables
   const [showStateTable, setShowStateTable] = useState<boolean>(false);
@@ -253,14 +294,17 @@ export const WebsiteAnalytics: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const bList = await websiteSalesService.getUploadBatches();
+      const [bList, orders, shipments] = await Promise.all([
+        websiteSalesService.getUploadBatches(),
+        websiteSalesService.getConsolidatedOrders({
+          startDate: analyticsStartDate,
+          endDate: analyticsEndDate
+        }),
+        websiteSalesService.getTrackingShipments()
+      ]);
       setBatches(bList);
-
-      const orders = await websiteSalesService.getConsolidatedOrders({
-        startDate: analyticsStartDate,
-        endDate: analyticsEndDate
-      });
       setAllOrders(orders);
+      setTrackingShipments(shipments);
     } catch (err: any) {
       console.error('Failed to load analytics data:', err);
       toast.error('Failed to load analytics orders');
@@ -951,7 +995,20 @@ export const WebsiteAnalytics: React.FC = () => {
 
   return (
     <div className="w-full space-y-6 animate-in fade-in duration-300">
-      {/* 1. COMPACT PAGE HEADER & NAVIGATION CONTROLS */}
+      {fullPageView ? (
+        <AnalyticsFullPageDataView
+          viewType={fullPageView.viewType}
+          title={fullPageView.title}
+          subtitle={fullPageView.subtitle}
+          orders={fullPageView.orders}
+          customers={fullPageView.customers}
+          operations={fullPageView.operations}
+          onBack={() => setFullPageView(null)}
+          onOrderDeleted={loadData}
+        />
+      ) : (
+        <>
+          {/* 1. COMPACT PAGE HEADER & NAVIGATION CONTROLS */}
       <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/80 border border-slate-800 flex flex-col xl:flex-row xl:items-center justify-between gap-4 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-purple-500/10 text-purple-400 rounded-xl border border-purple-500/20 flex items-center justify-center shrink-0">
@@ -1223,7 +1280,16 @@ export const WebsiteAnalytics: React.FC = () => {
             <div className="text-2xl font-bold text-white font-mono mt-2">
               {totalOrdersCount.toLocaleString('en-IN')}
             </div>
-            <div className="text-[10px] text-slate-500">Orders in selected period</div>
+            <div className="flex items-center justify-between text-[10px] text-slate-500">
+              <span>Orders in period</span>
+              <button
+                type="button"
+                onClick={() => handleOpenOrdersFullPage('All Filtered Website Orders', filteredOrders)}
+                className="text-indigo-400 hover:text-indigo-300 font-bold hover:underline cursor-pointer"
+              >
+                View All →
+              </button>
+            </div>
           </div>
 
           {/* Total Revenue */}
@@ -1373,7 +1439,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 emptyMessage="No payment data available for the selected filters"
               />
 
-              <CardMatchingOrdersList orders={paymentMatchingOrders} onOrderDeleted={loadData} />
+              <CardMatchingOrdersList onViewAll={handleOpenOrdersFullPage} orders={paymentMatchingOrders} onOrderDeleted={loadData} />
             </div>
 
             {/* REVENUE MIX DONUT CHART */}
@@ -1408,7 +1474,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 emptyMessage="No revenue data available for the selected filters"
               />
 
-              <CardMatchingOrdersList orders={revenueMixMatchingOrders} onOrderDeleted={loadData} />
+              <CardMatchingOrdersList onViewAll={handleOpenOrdersFullPage} orders={revenueMixMatchingOrders} onOrderDeleted={loadData} />
             </div>
           </div>
 
@@ -1451,7 +1517,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 emptyMessage="No state data available for the selected filters"
               />
 
-              <CardMatchingOrdersList orders={stateMatchingOrders} onOrderDeleted={loadData} />
+              <CardMatchingOrdersList onViewAll={handleOpenOrdersFullPage} orders={stateMatchingOrders} onOrderDeleted={loadData} />
 
               {/* State Table Toggle */}
               <div className="pt-1">
@@ -1526,7 +1592,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 emptyMessage="No city data available for the selected filters"
               />
 
-              <CardMatchingOrdersList orders={cityMatchingOrders} onOrderDeleted={loadData} />
+              <CardMatchingOrdersList onViewAll={handleOpenOrdersFullPage} orders={cityMatchingOrders} onOrderDeleted={loadData} />
             </div>
           </div>
 
@@ -1564,7 +1630,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 emptyMessage="No pincode data available for the selected filters"
               />
 
-              <CardMatchingOrdersList orders={pincodeMatchingOrders} onOrderDeleted={loadData} />
+              <CardMatchingOrdersList onViewAll={handleOpenOrdersFullPage} orders={pincodeMatchingOrders} onOrderDeleted={loadData} />
             </div>
 
             {/* PRODUCT PERFORMANCE DONUT CHART */}
@@ -1599,7 +1665,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 emptyMessage="No product data available for the selected filters"
               />
 
-              <CardMatchingOrdersList orders={productMatchingOrders} onOrderDeleted={loadData} />
+              <CardMatchingOrdersList onViewAll={handleOpenOrdersFullPage} orders={productMatchingOrders} onOrderDeleted={loadData} />
             </div>
           </div>
 
@@ -1637,7 +1703,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 emptyMessage="No offer data available for the selected filters"
               />
 
-              <CardMatchingOrdersList orders={offerMatchingOrders} onOrderDeleted={loadData} />
+              <CardMatchingOrdersList onViewAll={handleOpenOrdersFullPage} orders={offerMatchingOrders} onOrderDeleted={loadData} />
             </div>
 
             {/* ORDER VALUE DISTRIBUTION DONUT CHART */}
@@ -1672,7 +1738,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 emptyMessage="No order value data available for the selected filters"
               />
 
-              <CardMatchingOrdersList orders={orderValueMatchingOrders} onOrderDeleted={loadData} />
+              <CardMatchingOrdersList onViewAll={handleOpenOrdersFullPage} orders={orderValueMatchingOrders} onOrderDeleted={loadData} />
             </div>
           </div>
 
@@ -1708,7 +1774,7 @@ export const WebsiteAnalytics: React.FC = () => {
                   emptyMessage="No product composition data available"
                 />
 
-                <CardMatchingOrdersList title="Product Composition Orders" orders={prodCompMatchingOrders} onOrderDeleted={loadData} />
+                <CardMatchingOrdersList onViewAll={handleOpenOrdersFullPage} title="Product Composition Orders" orders={prodCompMatchingOrders} onOrderDeleted={loadData} />
               </div>
 
               {/* DONUT 2: QUANTITY COMPOSITION */}
@@ -1727,7 +1793,7 @@ export const WebsiteAnalytics: React.FC = () => {
                   emptyMessage="No quantity composition data available"
                 />
 
-                <CardMatchingOrdersList title="Quantity Composition Orders" orders={qtyCompMatchingOrders} onOrderDeleted={loadData} />
+                <CardMatchingOrdersList onViewAll={handleOpenOrdersFullPage} title="Quantity Composition Orders" orders={qtyCompMatchingOrders} onOrderDeleted={loadData} />
               </div>
             </div>
           </div>
@@ -1757,8 +1823,26 @@ export const WebsiteAnalytics: React.FC = () => {
               emptyMessage="No COD data available for the selected filters"
             />
 
-            <CardMatchingOrdersList orders={codMatchingOrders} onOrderDeleted={loadData} />
+            <CardMatchingOrdersList onViewAll={handleOpenOrdersFullPage} title="COD Receivable Orders" orders={codMatchingOrders} onOrderDeleted={loadData} />
           </div>
+
+          {/* 9. CUSTOMER PRODUCT ANALYTICS */}
+          <CustomerProductAnalyticsSection
+            orders={filteredOrders}
+            onViewAllCustomers={handleOpenCustomersFullPage}
+            highlighted={highlightedSectionId === 'analytics-customer-product'}
+          />
+
+          {/* 10. OPERATIONS & FORECASTING */}
+          <OperationsForecastingSection
+            orders={filteredOrders}
+            trackingShipments={trackingShipments}
+            onViewAllOperations={handleOpenOperationsFullPage}
+            highlighted={highlightedSectionId === 'analytics-operations-forecasting'}
+          />
+        </>
+      )}
+
         </>
       )}
 

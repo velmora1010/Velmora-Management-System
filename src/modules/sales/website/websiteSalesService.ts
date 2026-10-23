@@ -625,7 +625,12 @@ export class WebsiteSalesService {
         data_conflict: extra.data_conflict || false,
         conflict_details: extra.conflict_details || '',
         created_at: o.created_at,
-        items
+        items,
+        fulfillment_status: extra.fulfillment_status || o.dispatch_status || o.order_status || 'unfulfilled',
+        financial_status: extra.financial_status || '',
+        awb_number: extra.awb_number || o.awb_number || '',
+        courier: extra.courier || o.courier || '',
+        fulfilled_date: extra.fulfilled_date || o.dispatch_date || ''
       };
     });
 
@@ -820,6 +825,23 @@ export class WebsiteSalesService {
     }
 
     return true;
+  }
+
+  // Fetch customer tracking shipments for operations analytics
+  async getTrackingShipments(): Promise<any[]> {
+    try {
+      const { data, error } = await supabase
+        .from('customer_tracking_shipments')
+        .select('*');
+      if (error) {
+        console.warn('Error fetching customer_tracking_shipments:', error.message);
+        return [];
+      }
+      return data || [];
+    } catch (e) {
+      console.warn('customer_tracking_shipments query exception:', e);
+      return [];
+    }
   }
 
   // Permanently delete a single order from Sales and propagate deletion to Logistics
