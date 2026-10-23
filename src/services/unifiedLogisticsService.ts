@@ -779,159 +779,176 @@ export const syncSalesUploadToLogistics = async (
   let preservedWorkflowCount = 0;
   let skippedDeletedCount = 0;
 
-  await db.transaction('rw', db.logistics_orders, async () => {
-    for (const order of consolidatedOrders) {
-      const cleanId = cleanOrderId(order.order_id);
-      if (!cleanId) continue;
-      const lowerId = cleanId.toLowerCase();
-      const existing = existingMap.get(lowerId);
+  const toAdd: LogisticsOrder[] = [];
+  const toPut: LogisticsOrder[] = [];
 
-      const fStatus = (order.fulfillment_status || '').toLowerCase().trim();
-      const isFulfilled = fStatus === 'fulfilled' || fStatus === 'shipped' || fStatus === 'delivered';
-      const cleanPhone = normalizePhoneNumber(order.phone);
+  for (const order of consolidatedOrders) {
+    const cleanId = cleanOrderId(order.order_id);
+    if (!cleanId) continue;
+    const lowerId = cleanId.toLowerCase();
+    const existing = existingMap.get(lowerId);
 
-      const hasRequiredInfo = !!(
-        order.customer_name &&
-        order.customer_name.trim().length > 0 &&
-        order.customer_name !== '-' &&
-        order.customer_name !== 'Customer' &&
-        cleanPhone.length >= 10 &&
-        (order.pincode || order.city || order.address)
-      );
+    const fStatus = (order.fulfillment_status || '').toLowerCase().trim();
+    const isFulfilled = fStatus === 'fulfilled' || fStatus === 'shipped' || fStatus === 'delivered';
+    const cleanPhone = normalizePhoneNumber(order.phone);
 
-      const parsedOrderDate = parseAndFormatLogisticsDate(order.order_date || order.original_order_date);
-      const orderDate = parsedOrderDate.isoDate || order.order_date || new Date().toISOString().slice(0, 10);
-      const orderDateDisplay = parsedOrderDate.displayDate || orderDate;
-      const fulfilledDate = order.fulfilled_date || (isFulfilled ? orderDateDisplay : undefined);
+    const hasRequiredInfo = !!(
+      order.customer_name &&
+      order.customer_name.trim().length > 0 &&
+      order.customer_name !== '-' &&
+      order.customer_name !== 'Customer' &&
+      cleanPhone.length >= 10 &&
+      (order.pincode || order.city || order.address)
+    );
 
-      if (!existing) {
-        // CASE 1: Brand new order from Sales
-        let stage: 'active' | 'fulfilled' | 'pending' = 'active';
-        let status = 'Unfulfilled';
+    const parsedOrderDate = parseAndFormatLogisticsDate(order.order_date || order.original_order_date);
+    const orderDate = parsedOrderDate.isoDate || order.order_date || new Date().toISOString().slice(0, 10);
+    const orderDateDisplay = parsedOrderDate.displayDate || orderDate;
+    const fulfilledDate = order.fulfilled_date || (isFulfilled ? orderDateDisplay : undefined);
 
-        if (isFulfilled) {
-          stage = 'fulfilled';
-          status = 'Fulfilled';
-          fulfilledCount++;
-        } else if (!hasRequiredInfo) {
-          stage = 'pending';
-          status = 'Pending';
-          pendingCount++;
-        } else {
-          stage = 'active';
-          status = 'Unfulfilled';
-          activeCount++;
-        }
+    if (!existing) {
+      // CASE 1: Brand new order from Sales
+      let stage: 'active' | 'fulfilled' | 'pending' | 'tracking' | 'dispatched' = 'active';
+      let status = 'Unfulfilled';
 
-        const newRec: Partial<LogisticsOrder> = {
-          orderId: cleanId,
-          customerName: order.customer_name && order.customer_name !== '-' ? order.customer_name : 'Customer',
-          phoneNumber: cleanPhone || order.phone || '',
-          address: order.address && order.address !== '-' ? order.address : '',
-          city: order.city && order.city !== '-' ? order.city : '',
-          state: order.state && order.state !== '-' ? normalizeState(order.state) : '',
-          pincode: order.pincode && order.pincode !== '-' ? order.pincode : '',
-          products: order.order_formatted || order.product_name || 'Standard Products',
-          amount: String(order.price || '0'),
-          orderType: order.payment_mode || 'Prepaid',
-          awbNumber: order.awb_number || undefined,
-          courier: order.courier ? normalizeCourier(order.courier) : undefined,
-          stage,
-          status,
-          uploadedAt: new Date().toISOString(),
-          orderDate,
-          orderDateDisplay,
-          fulfilledDate,
-          fulfillmentStatus: isFulfilled ? 'fulfilled' : 'unfulfilled',
-          sourceFulfillmentStatus: isFulfilled ? 'fulfilled' : 'unfulfilled',
-          financialStatus: order.financial_status
-        };
-
-        const addedId = await db.logistics_orders.add(newRec as LogisticsOrder);
-        existingMap.set(lowerId, { ...newRec, id: addedId } as LogisticsOrder);
-        insertedCount++;
+      if (order.stage === 'tracking' || (order.awb_number && order.stage !== 'active')) {
+        stage = 'tracking';
+        status = order.status || 'Awaiting Tracking Update';
+      } else if (isFulfilled) {
+        stage = 'fulfilled';
+        status = 'Fulfilled';
+        fulfilledCount++;
+      } else if (!hasRequiredInfo) {
+        stage = 'pending';
+        status = 'Pending';
+        pendingCount++;
       } else {
-        // CASE 2: Re-import / existing order in Logistics
-        if (existing.stage === 'trash' || existing.status === 'Deleted') {
-          // STRICT TOMBSTONE POLICY:
-          // Order was deleted from Sales/Logistics. Do NOT silently recreate or resurrect it from a stale CSV upload!
-          skippedDeletedCount++;
-          continue;
-        }
+        stage = 'active';
+        status = 'Unfulfilled';
+        activeCount++;
+      }
 
-        const patch: Partial<LogisticsOrder> = {};
-        const inWorkflow = existing.stage === 'prepare_dispatch' || 
-                           existing.stage === 'dispatched' || 
-                           existing.stage === 'tracking';
+      const newRec: Partial<LogisticsOrder> = {
+        orderId: cleanId,
+        customerName: order.customer_name && order.customer_name !== '-' ? order.customer_name : 'Customer',
+        phoneNumber: cleanPhone || order.phone || '',
+        address: order.address && order.address !== '-' ? order.address : '',
+        city: order.city && order.city !== '-' ? order.city : '',
+        state: order.state && order.state !== '-' ? normalizeState(order.state) : '',
+        pincode: order.pincode && order.pincode !== '-' ? order.pincode : '',
+        products: order.order_formatted || order.product_name || 'Standard Products',
+        amount: String(order.price || '0'),
+        orderType: order.payment_mode || 'Prepaid',
+        awbNumber: order.awb_number || undefined,
+        courier: order.courier ? normalizeCourier(order.courier) : undefined,
+        dispatchDate: order.dispatch_date,
+        stage,
+        status,
+        uploadedAt: new Date().toISOString(),
+        orderDate,
+        orderDateDisplay,
+        fulfilledDate,
+        fulfillmentStatus: isFulfilled ? 'fulfilled' : 'unfulfilled',
+        sourceFulfillmentStatus: isFulfilled ? 'fulfilled' : 'unfulfilled',
+        financialStatus: order.financial_status,
+        batchId: order.batchId,
+        batchName: order.batchName
+      };
 
-        if (inWorkflow) {
-          // STRICT RULE: Preserve dispatch preparation and tracking stages!
-          // NEVER reset an order to active if it has already entered dispatch or tracking!
-          preservedWorkflowCount++;
-        } else if (existing.stage === 'fulfilled') {
-          // Already in Fulfilled: preserve fulfilled stage
-          patch.stage = 'fulfilled';
-          patch.status = 'Fulfilled';
-        } else if (isFulfilled) {
-          // Authoritative status updated to fulfilled -> move from active/pending to Fulfilled!
-          patch.stage = 'fulfilled';
-          patch.status = 'Fulfilled';
-          patch.fulfillmentStatus = 'fulfilled';
-          patch.sourceFulfillmentStatus = 'fulfilled';
-          if (!existing.fulfilledDate) patch.fulfilledDate = fulfilledDate;
-          fulfilledCount++;
-        } else if (existing.stage === 'pending' && hasRequiredInfo) {
-          // Completed missing info -> promote to Active
-          patch.stage = 'active';
-          patch.status = 'Unfulfilled';
-          activeCount++;
-        }
+      toAdd.push(newRec as LogisticsOrder);
+      insertedCount++;
+    } else {
+      // CASE 2: Re-import / existing order in Logistics
+      if (existing.stage === 'trash' || existing.status === 'Deleted') {
+        // STRICT TOMBSTONE POLICY:
+        // Order was deleted from Sales/Logistics. Do NOT silently recreate or resurrect it from a stale CSV upload!
+        skippedDeletedCount++;
+        continue;
+      }
 
-        // Safe field updates: never overwrite valid existing values with blanks/empty
-        if (order.customer_name && order.customer_name !== '-' && order.customer_name !== 'Customer') {
-          patch.customerName = order.customer_name;
-        }
-        if (cleanPhone && cleanPhone.length >= 10) {
-          patch.phoneNumber = cleanPhone;
-        }
-        if (order.address && order.address !== '-') {
-          patch.address = order.address;
-        }
-        if (order.city && order.city !== '-') {
-          patch.city = order.city;
-        }
-        if (order.state && order.state !== '-') {
-          patch.state = normalizeState(order.state);
-        }
-        if (order.pincode && order.pincode !== '-') {
-          patch.pincode = order.pincode;
-        }
-        if (order.order_formatted || order.product_name) {
-          patch.products = order.order_formatted || order.product_name;
-        }
-        if (order.price && Number(order.price) > 0) {
-          patch.amount = String(order.price);
-        }
-        if (order.payment_mode) {
-          patch.orderType = order.payment_mode;
-        }
-        if (order.financial_status) {
-          patch.financialStatus = order.financial_status;
-        }
+      const patch: Partial<LogisticsOrder> = {};
+      const inWorkflow = existing.stage === 'prepare_dispatch' || 
+                         existing.stage === 'dispatched' || 
+                         existing.stage === 'tracking';
 
-        // Preserve courier/AWB if already set in Logistics; only attach incoming AWB if existing had none
-        if (!existing.awbNumber && order.awb_number) {
-          patch.awbNumber = order.awb_number;
-          if (order.courier) patch.courier = normalizeCourier(order.courier);
-        }
+      if (inWorkflow) {
+        // STRICT RULE: Preserve dispatch preparation and tracking stages!
+        preservedWorkflowCount++;
+      } else if (order.stage === 'tracking' || order.awb_number) {
+        patch.stage = 'tracking';
+        patch.status = order.status || existing.status || 'Awaiting Tracking Update';
+        if (order.awb_number && !existing.awbNumber) patch.awbNumber = order.awb_number;
+        if (order.courier && !existing.courier) patch.courier = normalizeCourier(order.courier);
+        if (order.dispatch_date && !existing.dispatchDate) patch.dispatchDate = order.dispatch_date;
+      } else if (existing.stage === 'fulfilled') {
+        patch.stage = 'fulfilled';
+        patch.status = 'Fulfilled';
+      } else if (isFulfilled) {
+        patch.stage = 'fulfilled';
+        patch.status = 'Fulfilled';
+        patch.fulfillmentStatus = 'fulfilled';
+        patch.sourceFulfillmentStatus = 'fulfilled';
+        if (!existing.fulfilledDate) patch.fulfilledDate = fulfilledDate;
+        fulfilledCount++;
+      } else if (existing.stage === 'pending' && hasRequiredInfo) {
+        patch.stage = 'active';
+        patch.status = 'Unfulfilled';
+        activeCount++;
+      }
 
-        if (Object.keys(patch).length > 0 && existing.id) {
-          await db.logistics_orders.update(existing.id, patch);
-          updatedCount++;
-        }
+      // Safe field updates: never overwrite valid existing values with blanks/empty
+      if (order.customer_name && order.customer_name !== '-' && order.customer_name !== 'Customer') {
+        patch.customerName = order.customer_name;
+      }
+      if (cleanPhone && cleanPhone.length >= 10) {
+        patch.phoneNumber = cleanPhone;
+      }
+      if (order.address && order.address !== '-') {
+        patch.address = order.address;
+      }
+      if (order.city && order.city !== '-') {
+        patch.city = order.city;
+      }
+      if (order.state && order.state !== '-') {
+        patch.state = normalizeState(order.state);
+      }
+      if (order.pincode && order.pincode !== '-') {
+        patch.pincode = order.pincode;
+      }
+      if (order.order_formatted || order.product_name) {
+        patch.products = order.order_formatted || order.product_name;
+      }
+      if (order.price && Number(order.price) > 0) {
+        patch.amount = String(order.price);
+      }
+      if (order.payment_mode) {
+        patch.orderType = order.payment_mode;
+      }
+      if (order.financial_status) {
+        patch.financialStatus = order.financial_status;
+      }
+
+      // Preserve courier/AWB if already set in Logistics; only attach incoming AWB if existing had none
+      if (!existing.awbNumber && order.awb_number) {
+        patch.awbNumber = order.awb_number;
+        if (order.courier) patch.courier = normalizeCourier(order.courier);
+      }
+
+      if (Object.keys(patch).length > 0 && existing.id) {
+        toPut.push({ ...existing, ...patch });
+        updatedCount++;
       }
     }
-  });
+  }
+
+  // High-performance chunked bulk writes (avoids browser transaction timeout on large order sets)
+  const CHUNK_SIZE = 500;
+  for (let i = 0; i < toAdd.length; i += CHUNK_SIZE) {
+    await db.logistics_orders.bulkAdd(toAdd.slice(i, i + CHUNK_SIZE));
+  }
+  for (let i = 0; i < toPut.length; i += CHUNK_SIZE) {
+    await db.logistics_orders.bulkPut(toPut.slice(i, i + CHUNK_SIZE));
+  }
 
   // Dispatch custom window event so any mounted Logistics views re-check or update
   if (typeof window !== 'undefined') {
@@ -1014,14 +1031,38 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
       }
     }
 
+    // Fetch any existing customer tracking shipments from Supabase to preserve AWBs & dispatch states
+    const { data: shipmentsData } = await supabase
+      .from('customer_tracking_shipments')
+      .select('*');
+    
+    const shipmentMap = new Map<string, any>();
+    (shipmentsData || []).forEach(s => {
+      const cId = cleanOrderId(s.order_id || s.display_order_id).toLowerCase();
+      if (cId) shipmentMap.set(cId, s);
+    });
+
     const transformed = activeSalesOrders.map(so => {
+      const cleanId = cleanOrderId(so.order_id).toLowerCase();
+      const existingShipment = shipmentMap.get(cleanId);
       const extra = so.extra_data || {};
-      const fStatus = extra.fulfillment_status || (so.order_status === 'FULFILLED' || so.dispatch_status === 'DELIVERED' ? 'fulfilled' : 'unfulfilled');
+
+      const hasShipment = !!existingShipment;
+      const isDispatched = hasShipment || (so.dispatch_status === 'DISPATCHED' && !!extra.awb_number);
+      const isFulfilled = !isDispatched && (
+        extra.fulfillment_status === 'fulfilled' ||
+        extra.fulfillment_status === 'shipped' ||
+        so.order_status === 'FULFILLED' ||
+        so.dispatch_status === 'DELIVERED'
+      );
+
+      const fStatus = isFulfilled ? 'fulfilled' : (isDispatched ? 'dispatched' : 'unfulfilled');
+
       return {
         order_id: so.order_id,
         customer_name: so.customer_name,
         phone: so.phone,
-        address: extra.address || '',
+        address: extra.address || (existingShipment?.address) || '',
         city: so.city,
         state: so.state,
         pincode: so.pincode,
@@ -1032,9 +1073,13 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
         order_date: so.order_date,
         fulfillment_status: fStatus,
         financial_status: extra.financial_status,
-        awb_number: extra.awb_number,
-        courier: extra.courier,
-        fulfilled_date: extra.fulfilled_date
+        awb_number: existingShipment?.awb_number || extra.awb_number,
+        courier: existingShipment?.courier || extra.courier,
+        stage: isDispatched ? 'tracking' : (isFulfilled ? 'fulfilled' : undefined),
+        status: existingShipment?.status || (isDispatched ? 'Awaiting Tracking Update' : (isFulfilled ? 'Fulfilled' : 'Unfulfilled')),
+        dispatch_date: existingShipment?.dispatch_date || (isDispatched ? so.dispatch_date : undefined),
+        fulfilled_date: extra.fulfilled_date || (isFulfilled ? so.order_date : undefined),
+        batchId: so.upload_id
       };
     });
 

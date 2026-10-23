@@ -655,8 +655,12 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      await syncSalesOrdersFromSupabase();
-      toast.success('Logistics records refreshed');
+      const res = await syncSalesOrdersFromSupabase();
+      const total = res.insertedCount + res.updatedCount;
+      toast.success(
+        `Logistics synchronized from Sales: ${res.activeCount} Active, ${res.pendingCount} Pending, ${res.fulfilledCount} Fulfilled`,
+        { duration: 5000 }
+      );
     } catch (e: any) {
       console.warn('Refresh error:', e);
       toast.error('Failed to sync orders from cloud');
@@ -1390,7 +1394,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
               </h3>
               <p className="text-xs text-slate-400 max-w-md mx-auto mb-6">
                 {unifiedOrders.length === 0 
-                  ? 'Click Upload Orders above to import customer orders from Shopify or Excel/CSV spreadsheets.' 
+                  ? 'Your sales orders are stored securely in the cloud. Click Sync Orders from Sales to immediately load all uploaded customer orders into Logistics, or upload a new order file.' 
                   : currentStage === 'active'
                   ? 'All active orders have been moved to dispatch preparation or dispatched. Import new files or check other tabs.'
                   : currentStage === 'fulfilled'
@@ -1401,7 +1405,27 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                   ? 'Shipments will appear here once dispatched from Prepare Dispatch, or upload courier tracking reports.'
                   : 'Try adjusting your search query, status filters, or courier tabs above.'}
               </p>
-              {currentStage === 'active' || currentStage === 'fulfilled' || unifiedOrders.length === 0 ? (
+              {unifiedOrders.length === 0 ? (
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleRefresh}
+                    disabled={isRefreshing}
+                    className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl shadow-md shadow-purple-600/30 flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw size={15} className={isRefreshing ? 'animate-spin' : ''} />
+                    <span>{isRefreshing ? 'Syncing Orders from Sales...' : 'Sync Orders from Sales (Available in Cloud)'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsImportModalOpen(true)}
+                    className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 flex items-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <UploadCloud size={15} />
+                    <span>Upload Customer Orders</span>
+                  </button>
+                </div>
+              ) : currentStage === 'active' || currentStage === 'fulfilled' ? (
                 <button
                   type="button"
                   onClick={() => setIsImportModalOpen(true)}
