@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import type { WebsiteConsolidatedOrder, WebsiteOrderItem } from '../types';
-import { ChevronDown, ChevronUp, Package } from 'lucide-react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 
 interface AnalyticsProductCellProps {
   order?: WebsiteConsolidatedOrder;
@@ -9,6 +9,7 @@ interface AnalyticsProductCellProps {
   items?: WebsiteOrderItem[];
   totalQuantity?: number;
   maxInitialDisplay?: number;
+  compact?: boolean;
 }
 
 interface ParsedItem {
@@ -22,9 +23,11 @@ export const AnalyticsProductCell: React.FC<AnalyticsProductCellProps> = ({
   productName,
   items,
   totalQuantity,
-  maxInitialDisplay = 2
+  maxInitialDisplay,
+  compact = false
 }) => {
   const [expanded, setExpanded] = useState(false);
+  const initialLimit = maxInitialDisplay !== undefined ? maxInitialDisplay : (compact ? 1 : 2);
 
   const parsedItems: ParsedItem[] = useMemo(() => {
     // 1. If explicit items exist, use them
@@ -44,7 +47,6 @@ export const AnalyticsProductCell: React.FC<AnalyticsProductCellProps> = ({
       for (const part of parts) {
         const trimmed = part.trim();
         if (!trimmed) continue;
-        // Match product name and quantity: "Name × 2" or "Name x 2" or "Name"
         const match = trimmed.match(/^(.*?)(?:\s*[×xX*]\s*(\d+))?$/);
         if (match) {
           const name = (match[1] || trimmed).trim();
@@ -74,18 +76,18 @@ export const AnalyticsProductCell: React.FC<AnalyticsProductCellProps> = ({
     return <span className="text-slate-500 italic text-[11px]">—</span>;
   }
 
-  const visibleItems = expanded ? parsedItems : parsedItems.slice(0, maxInitialDisplay);
-  const hiddenCount = parsedItems.length - maxInitialDisplay;
+  const visibleItems = expanded ? parsedItems : parsedItems.slice(0, initialLimit);
+  const hiddenCount = parsedItems.length - initialLimit;
 
   return (
-    <div className="flex flex-col gap-1.5 py-1 min-w-[220px] max-w-[380px]">
-      <div className="flex flex-col gap-1">
+    <div className={`flex flex-col ${compact ? 'gap-0.5 py-0.5 min-w-[190px] max-w-[320px]' : 'gap-1 py-1 min-w-[220px] max-w-[380px]'}`}>
+      <div className={`flex flex-col ${compact ? 'gap-0.5' : 'gap-1'}`}>
         {visibleItems.map((item, idx) => (
-          <div key={idx} className="flex items-start justify-between gap-2 leading-snug">
+          <div key={idx} className="flex items-center justify-between gap-1.5 leading-tight">
             <span className="font-sans font-medium text-cyan-300 text-[11px] whitespace-normal break-words">
               {item.name}
             </span>
-            <span className="shrink-0 px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-400 border border-cyan-800/40 font-mono text-[10px] font-bold">
+            <span className="shrink-0 px-1 py-0.2 rounded bg-cyan-950/80 text-cyan-400 border border-cyan-800/40 font-mono text-[9px] font-bold">
               × {item.quantity}
             </span>
           </div>
@@ -99,15 +101,15 @@ export const AnalyticsProductCell: React.FC<AnalyticsProductCellProps> = ({
             e.stopPropagation();
             setExpanded(!expanded);
           }}
-          className="self-start text-[10px] font-semibold text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-0.5 mt-0.5 cursor-pointer bg-indigo-950/40 px-2 py-0.5 rounded border border-indigo-800/40"
+          className="self-start text-[9px] font-semibold text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-0.5 mt-0.5 cursor-pointer bg-indigo-950/60 px-1.5 py-0.5 rounded border border-indigo-800/40"
         >
           {expanded ? (
             <>
-              Show less <ChevronUp size={11} />
+              Show less <ChevronUp size={10} />
             </>
           ) : (
             <>
-              +{hiddenCount} more {hiddenCount === 1 ? 'item' : 'items'} <ChevronDown size={11} />
+              +{hiddenCount} more {hiddenCount === 1 ? 'item' : 'items'} <ChevronDown size={10} />
             </>
           )}
         </button>

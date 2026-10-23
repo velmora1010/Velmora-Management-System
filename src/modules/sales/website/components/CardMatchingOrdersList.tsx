@@ -72,7 +72,7 @@ export const CardMatchingOrdersList: React.FC<CardMatchingOrdersListProps> = ({
   };
 
   return (
-    <div className="border-t border-slate-800/80 pt-4 mt-2 space-y-3">
+    <div className="border-t border-slate-800/80 pt-3.5 mt-2 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <ShoppingBag size={14} className="text-indigo-400" />
@@ -86,7 +86,7 @@ export const CardMatchingOrdersList: React.FC<CardMatchingOrdersListProps> = ({
         {/* Action Controls Header */}
         <div className="flex items-center gap-2">
           {/* Compact Local Card Search Input */}
-          <div className="relative min-w-[160px] max-w-[210px]">
+          <div className="relative min-w-[150px] max-w-[200px]">
             <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
             <input
               type="text"
@@ -130,19 +130,18 @@ export const CardMatchingOrdersList: React.FC<CardMatchingOrdersListProps> = ({
             <table className="w-full text-left text-xs text-slate-300">
               <thead className="bg-slate-950 text-[10px] uppercase font-bold text-slate-400 border-b border-slate-800 whitespace-nowrap">
                 <tr>
-                  <th className="py-2.5 px-3">Order ID</th>
-                  <th className="py-2.5 px-3">Customer Name</th>
-                  <th className="py-2.5 px-3">State</th>
-                  <th className="py-2.5 px-3">City</th>
-                  <th className="py-2.5 px-3">Order Value</th>
-                  <th className="py-2.5 px-3 text-center">Payment Mode</th>
-                  <th className="py-2.5 px-3">Phone</th>
-                  <th className="py-2.5 px-3">Pincode</th>
-                  {/* WIDE COLUMN WITH COMPLETE PRODUCT NAMES */}
-                  <th className="py-2.5 px-3 min-w-[220px] max-w-[380px]">Product / Items</th>
-                  <th className="py-2.5 px-3 text-center">Quantity</th>
-                  <th className="py-2.5 px-3 text-right">Remaining COD</th>
-                  <th className="py-2.5 px-3 text-center w-[85px]">Actions</th>
+                  <th className="py-2 px-3">Order ID</th>
+                  <th className="py-2 px-3">Customer Name</th>
+                  <th className="py-2 px-3">State</th>
+                  <th className="py-2 px-3">City</th>
+                  <th className="py-2 px-3">Order Value</th>
+                  <th className="py-2 px-3 text-center">Payment Mode</th>
+                  <th className="py-2 px-3">Phone</th>
+                  <th className="py-2 px-3">Pincode</th>
+                  <th className="py-2 px-3 min-w-[200px] max-w-[340px]">Product / Items</th>
+                  <th className="py-2 px-3 text-center">Quantity</th>
+                  <th className="py-2 px-3 text-right">Remaining COD</th>
+                  <th className="py-2 px-3 text-center w-[75px]">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 font-sans">
@@ -156,30 +155,30 @@ export const CardMatchingOrdersList: React.FC<CardMatchingOrdersListProps> = ({
                   return (
                     <tr key={o.order_id} className="hover:bg-slate-800/40 transition-colors text-[11px]">
                       {/* 1. ORDER ID */}
-                      <td className="py-2.5 px-3 font-mono font-bold text-indigo-300 whitespace-nowrap">#{o.order_id}</td>
+                      <td className="py-2 px-3 font-mono font-bold text-indigo-300 whitespace-nowrap">#{o.order_id}</td>
                       
                       {/* 2. CUSTOMER NAME */}
-                      <td className="py-2.5 px-3 font-sans font-bold text-white max-w-[150px] truncate" title={o.customer_name}>
+                      <td className="py-2 px-3 font-sans font-bold text-white max-w-[140px] truncate" title={o.customer_name}>
                         {o.customer_name || 'N/A'}
                       </td>
 
                       {/* 3. STATE */}
-                      <td className="py-2.5 px-3 font-sans text-slate-300 whitespace-nowrap">
+                      <td className="py-2 px-3 font-sans text-slate-300 whitespace-nowrap">
                         {canonicalState}
                       </td>
 
                       {/* 4. CITY */}
-                      <td className="py-2.5 px-3 font-sans text-slate-300 whitespace-nowrap">
+                      <td className="py-2 px-3 font-sans text-slate-300 whitespace-nowrap">
                         {canonicalCity}
                       </td>
 
                       {/* 5. ORDER VALUE */}
-                      <td className="py-2.5 px-3 font-mono font-bold text-emerald-400 whitespace-nowrap">
+                      <td className="py-2 px-3 font-mono font-bold text-emerald-400 whitespace-nowrap">
                         ₹{(o.price ?? 0).toLocaleString('en-IN')}
                       </td>
 
                       {/* 6. PAYMENT MODE */}
-                      <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                      <td className="py-2 px-3 text-center whitespace-nowrap">
                         {o.payment_mode === 'PREPAID' ? (
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                             PREPAID
@@ -200,27 +199,27 @@ export const CardMatchingOrdersList: React.FC<CardMatchingOrdersListProps> = ({
                       </td>
 
                       {/* 7. PHONE */}
-                      <td className="py-2.5 px-3 font-mono text-slate-300 whitespace-nowrap">
+                      <td className="py-2 px-3 font-mono text-slate-300 whitespace-nowrap">
                         {o.phone || '—'}
                       </td>
 
                       {/* 8. PINCODE */}
-                      <td className="py-2.5 px-3 font-mono text-slate-300 whitespace-nowrap">
+                      <td className="py-2 px-3 font-mono text-slate-300 whitespace-nowrap">
                         {canonicalPincode}
                       </td>
 
-                      {/* 9. PRODUCT / ITEMS: Full visibility cell without ellipsis */}
-                      <td className="py-2.5 px-3">
-                        <AnalyticsProductCell order={o} />
+                      {/* 9. PRODUCT / ITEMS: Compact readable cell with inline expansion */}
+                      <td className="py-2 px-3">
+                        <AnalyticsProductCell order={o} compact={true} />
                       </td>
 
                       {/* 10. QUANTITY */}
-                      <td className="py-2.5 px-3 font-mono font-bold text-white text-center whitespace-nowrap">
+                      <td className="py-2 px-3 font-mono font-bold text-white text-center whitespace-nowrap">
                         {qtyVal}
                       </td>
 
                       {/* 11. REMAINING COD */}
-                      <td className="py-2.5 px-3 text-right font-mono font-bold whitespace-nowrap">
+                      <td className="py-2 px-3 text-right font-mono font-bold whitespace-nowrap">
                         {o.payment_mode === 'PARTIAL COD' ? (
                           <span className="text-purple-300">
                             ₹{(o.remaining_payable ?? 0).toLocaleString('en-IN')}
@@ -235,18 +234,18 @@ export const CardMatchingOrdersList: React.FC<CardMatchingOrdersListProps> = ({
                       </td>
 
                       {/* 12. ACTIONS */}
-                      <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                      <td className="py-2 px-3 text-center whitespace-nowrap">
                         <div className="flex items-center justify-center gap-1">
                           <button
                             onClick={() => setSelectedOrderForModal(o)}
-                            className="p-1.5 text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/10 rounded-md transition-colors cursor-pointer"
+                            className="p-1 text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/10 rounded-md transition-colors cursor-pointer"
                             title="View Full Details"
                           >
                             <Eye size={13} />
                           </button>
                           <button
                             onClick={() => handleDeleteSingleOrder(o)}
-                            className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-md transition-colors cursor-pointer"
+                            className="p-1 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-md transition-colors cursor-pointer"
                             title="Delete Order"
                           >
                             <Trash2 size={13} />
@@ -261,19 +260,19 @@ export const CardMatchingOrdersList: React.FC<CardMatchingOrdersListProps> = ({
           </div>
 
           {searchedOrders.length > 5 && !localSearch.trim() && (
-            <div className="pt-1 flex flex-wrap items-center justify-center gap-2">
+            <div className="pt-2 flex items-center justify-center">
               {onViewAll ? (
                 <button
                   onClick={() => onViewAll(title, searchedOrders)}
-                  className="px-3.5 py-1 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold text-[11px] rounded-lg shadow-sm transition-all cursor-pointer inline-flex items-center gap-1.5"
+                  className="px-5 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold text-xs rounded-xl shadow-sm transition-all cursor-pointer inline-flex items-center gap-1.5"
                 >
                   <span>View All Orders ({searchedOrders.length})</span>
-                  <ExternalLink size={12} />
+                  <ExternalLink size={13} />
                 </button>
               ) : (
                 <button
                   onClick={() => setShowAll(!showAll)}
-                  className="px-3.5 py-1 bg-slate-950 hover:bg-slate-800 text-indigo-300 font-bold text-[11px] rounded-lg border border-slate-800 transition-colors cursor-pointer inline-flex items-center gap-1 shadow-sm"
+                  className="px-4 py-1.5 bg-slate-950 hover:bg-slate-800 text-indigo-300 font-bold text-xs rounded-xl border border-slate-800 transition-colors cursor-pointer inline-flex items-center gap-1 shadow-sm"
                 >
                   {showAll ? (
                     <>Show Less <ChevronUp size={13} /></>

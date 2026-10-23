@@ -34,7 +34,6 @@ import { AnalyticsSegmentedControl, SegmentOption } from './components/Analytics
 import { AnalyticsDonutChart } from './components/AnalyticsDonutChart';
 import { CardMatchingOrdersList } from './components/CardMatchingOrdersList';
 import { CustomerProductAnalyticsSection } from './components/CustomerProductAnalyticsSection';
-import { OperationsForecastingSection } from './components/OperationsForecastingSection';
 import { AnalyticsFullPageDataView, CustomerPurchaseProfile, OperationalOrderRecord } from './components/AnalyticsFullPageDataView';
 import { OrderDetailsModal } from './components/OrderDetailsModal';
 import { AnalyticsFilterDrawer } from './components/AnalyticsFilterDrawer';
@@ -117,8 +116,7 @@ const ANALYTICS_VIEW_OPTIONS = [
   { id: 'analytics-order-value', label: 'Order Value Distribution' },
   { id: 'analytics-order-composition', label: 'Order Composition' },
   { id: 'analytics-cod-receivable', label: 'COD Receivable Overview' },
-  { id: 'analytics-customer-product', label: 'Customer Product Analytics' },
-  { id: 'analytics-operations-forecasting', label: 'Operations & Forecasting' }
+  { id: 'analytics-customer-product', label: 'Customer Product Analytics' }
 ];
 
 const REVENUE_MIX_SEGMENTS: SegmentOption<'Payment Mode' | 'State' | 'Product' | 'Offer' | 'Order Value Range'>[] = [
@@ -229,7 +227,6 @@ export const WebsiteAnalytics: React.FC = () => {
   const [codCardSlice, setCodCardSlice] = useState<string | null>(null);
 
   const [selectedOrderForModal, setSelectedOrderForModal] = useState<WebsiteConsolidatedOrder | null>(null);
-  const [trackingShipments, setTrackingShipments] = useState<any[]>([]);
   const [fullPageView, setFullPageView] = useState<{
     viewType: 'orders' | 'customers' | 'operations';
     title: string;
@@ -254,15 +251,6 @@ export const WebsiteAnalytics: React.FC = () => {
       title,
       subtitle: `Viewing ${list.length} customer profiles`,
       customers: list
-    });
-  };
-
-  const handleOpenOperationsFullPage = (title: string, list: OperationalOrderRecord[]) => {
-    setFullPageView({
-      viewType: 'operations',
-      title,
-      subtitle: `Viewing ${list.length} operational orders & shipments`,
-      operations: list
     });
   };
 
@@ -294,17 +282,15 @@ export const WebsiteAnalytics: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [bList, orders, shipments] = await Promise.all([
+      const [bList, orders] = await Promise.all([
         websiteSalesService.getUploadBatches(),
         websiteSalesService.getConsolidatedOrders({
           startDate: analyticsStartDate,
           endDate: analyticsEndDate
-        }),
-        websiteSalesService.getTrackingShipments()
+        })
       ]);
       setBatches(bList);
       setAllOrders(orders);
-      setTrackingShipments(shipments);
     } catch (err: any) {
       console.error('Failed to load analytics data:', err);
       toast.error('Failed to load analytics orders');
@@ -1798,13 +1784,14 @@ export const WebsiteAnalytics: React.FC = () => {
             </div>
           </div>
 
-          {/* 8. ROW 7: COD RECEIVABLE OVERVIEW DONUT CHART */}
+          {/* 8. ROW 7: COD RECEIVABLE OVERVIEW (COMPACT TWO-COLUMN LAYOUT) */}
           <div 
             id="analytics-cod-receivable"
             className={`p-5 rounded-2xl bg-slate-900/80 border border-slate-800 hover:border-slate-700/80 shadow-md space-y-4 transition-all duration-300 ${
               highlightedSectionId === 'analytics-cod-receivable' ? 'ring-2 ring-purple-500 shadow-purple-500/40 border-purple-500' : ''
             }`}
           >
+            {/* Header */}
             <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
               <div className="flex items-center gap-2 text-sm font-bold text-white">
                 <DollarSign size={17} className="text-emerald-400" />
@@ -1813,16 +1800,115 @@ export const WebsiteAnalytics: React.FC = () => {
               <span className="text-xs text-slate-400">Advance vs Balance Receivable</span>
             </div>
 
-            <AnalyticsDonutChart
-              data={codReceivableDonutData}
-              centerValue={`₹${Math.round(partialCodAdvance + totalCodReceivable).toLocaleString('en-IN')}`}
-              centerLabel="TOTAL COD VALUE"
-              valueFormatter={(val) => `₹${val.toLocaleString('en-IN')}`}
-              selectedSliceName={codCardSlice}
-              onSliceClick={entry => setCodCardSlice(prev => prev === entry.name ? null : entry.name)}
-              emptyMessage="No COD data available for the selected filters"
-            />
+            {/* A. Two-Column Compact Balanced Summary & Chart */}
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-stretch">
+              {/* Left Column: Compact Centred Donut Chart */}
+              <div className="md:col-span-5 flex flex-col items-center justify-center p-3 rounded-xl bg-slate-950/60 border border-slate-800/70">
+                <div className="w-[190px] h-[190px] relative flex items-center justify-center">
+                  <AnalyticsDonutChart
+                    data={codReceivableDonutData}
+                    centerValue={`₹${Math.round(partialCodAdvance + totalCodReceivable).toLocaleString('en-IN')}`}
+                    centerLabel="TOTAL COD VALUE"
+                    height={190}
+                    innerRadius={55}
+                    outerRadius={80}
+                    showLegend={false}
+                    selectedSliceName={codCardSlice}
+                    onSliceClick={entry => setCodCardSlice(prev => prev === entry.name ? null : entry.name)}
+                    emptyMessage="No COD data available for the selected filters"
+                  />
+                </div>
+              </div>
 
+              {/* Right Column: 3 Equal-Height Summary Rows */}
+              <div className="md:col-span-7 flex flex-col justify-between gap-2.5">
+                {/* 1. Partial COD Advance Collected */}
+                <div
+                  onClick={() => setCodCardSlice(prev => prev === 'Partial COD Advance Collected' ? null : 'Partial COD Advance Collected')}
+                  className={`flex-1 px-4 py-3 rounded-xl border flex items-center justify-between transition-all cursor-pointer ${
+                    codCardSlice === 'Partial COD Advance Collected'
+                      ? 'bg-emerald-950/30 border-emerald-500 ring-1 ring-emerald-500'
+                      : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="w-3 h-3 rounded-full bg-emerald-400 shrink-0" />
+                    <div>
+                      <span className="text-xs font-bold text-white block">Partial COD Advance Collected</span>
+                      <span className="text-[10px] text-slate-400">Advance prepaid before shipment</span>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0 font-mono">
+                    <span className="text-sm font-extrabold text-emerald-400 block">
+                      ₹{Math.round(partialCodAdvance).toLocaleString('en-IN')}
+                    </span>
+                    <span className="text-[11px] text-slate-400 font-bold">
+                      {partialCodAdvance + totalCodReceivable > 0
+                        ? `${((partialCodAdvance / (partialCodAdvance + totalCodReceivable)) * 100).toFixed(1)}%`
+                        : '0.0%'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 2. Partial COD Remaining Receivable */}
+                <div
+                  onClick={() => setCodCardSlice(prev => prev === 'Partial COD Remaining Receivable' ? null : 'Partial COD Remaining Receivable')}
+                  className={`flex-1 px-4 py-3 rounded-xl border flex items-center justify-between transition-all cursor-pointer ${
+                    codCardSlice === 'Partial COD Remaining Receivable'
+                      ? 'bg-purple-950/30 border-purple-500 ring-1 ring-purple-500'
+                      : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="w-3 h-3 rounded-full bg-purple-400 shrink-0" />
+                    <div>
+                      <span className="text-xs font-bold text-white block">Partial COD Remaining Receivable</span>
+                      <span className="text-[10px] text-slate-400">Pending balance to collect upon delivery</span>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0 font-mono">
+                    <span className="text-sm font-extrabold text-purple-300 block">
+                      ₹{Math.round(partialCodRemaining).toLocaleString('en-IN')}
+                    </span>
+                    <span className="text-[11px] text-slate-400 font-bold">
+                      {partialCodAdvance + totalCodReceivable > 0
+                        ? `${((partialCodRemaining / (partialCodAdvance + totalCodReceivable)) * 100).toFixed(1)}%`
+                        : '0.0%'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 3. Full COD Receivable */}
+                <div
+                  onClick={() => setCodCardSlice(prev => prev === 'Full COD Receivable' ? null : 'Full COD Receivable')}
+                  className={`flex-1 px-4 py-3 rounded-xl border flex items-center justify-between transition-all cursor-pointer ${
+                    codCardSlice === 'Full COD Receivable'
+                      ? 'bg-amber-950/30 border-amber-500 ring-1 ring-amber-500'
+                      : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="w-3 h-3 rounded-full bg-amber-400 shrink-0" />
+                    <div>
+                      <span className="text-xs font-bold text-white block">Full COD Receivable</span>
+                      <span className="text-[10px] text-slate-400">100% order amount to collect upon delivery</span>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0 font-mono">
+                    <span className="text-sm font-extrabold text-amber-300 block">
+                      ₹{Math.round(fullCodReceivable).toLocaleString('en-IN')}
+                    </span>
+                    <span className="text-[11px] text-slate-400 font-bold">
+                      {partialCodAdvance + totalCodReceivable > 0
+                        ? `${((fullCodReceivable / (partialCodAdvance + totalCodReceivable)) * 100).toFixed(1)}%`
+                        : '0.0%'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* B. COD Receivable Orders Compact Preview Table */}
             <CardMatchingOrdersList onViewAll={handleOpenOrdersFullPage} title="COD Receivable Orders" orders={codMatchingOrders} onOrderDeleted={loadData} />
           </div>
 
@@ -1831,14 +1917,6 @@ export const WebsiteAnalytics: React.FC = () => {
             orders={filteredOrders}
             onViewAllCustomers={handleOpenCustomersFullPage}
             highlighted={highlightedSectionId === 'analytics-customer-product'}
-          />
-
-          {/* 10. OPERATIONS & FORECASTING */}
-          <OperationsForecastingSection
-            orders={filteredOrders}
-            trackingShipments={trackingShipments}
-            onViewAllOperations={handleOpenOperationsFullPage}
-            highlighted={highlightedSectionId === 'analytics-operations-forecasting'}
           />
         </>
       )}
