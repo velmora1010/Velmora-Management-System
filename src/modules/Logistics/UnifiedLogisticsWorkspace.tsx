@@ -1356,8 +1356,13 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                 setLogisticsFilters(INITIAL_LOGISTICS_FILTER_STATE);
                 setSelectedCourier('All');
               }}
+              onUpdateFilters={(updater) => setLogisticsFilters(updater)}
               onNavigateStage={(st) => setCurrentStage(st)}
               onOpenDateCalendar={() => setIsDateCalendarOpen(true)}
+              onTrackOrder={handleTrackOrder}
+              onViewCustomer={(key) => setSelectedCustomerKey(key)}
+              onRefresh={handleRefresh}
+              isRefreshing={isRefreshing}
             />
           ) : currentStage === 'prepare_dispatch' ? (
             <PrepareDispatchGroupedView
