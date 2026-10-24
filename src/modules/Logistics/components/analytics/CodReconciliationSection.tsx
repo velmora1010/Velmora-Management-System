@@ -23,7 +23,8 @@ import {
   Cell, 
   PieChart, 
   Pie, 
-  Legend 
+  Legend,
+  CartesianGrid
 } from 'recharts';
 import type { UnifiedLogisticsOrder } from '../../../../types/unifiedLogistics';
 import { 
