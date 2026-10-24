@@ -9,7 +9,6 @@ import { CourierPerformanceSection } from './analytics/CourierPerformanceSection
 import { DeliverySlaSection } from './analytics/DeliverySlaSection';
 import { CodReconciliationSection } from './analytics/CodReconciliationSection';
 import { GeographicLogisticsSection } from './analytics/GeographicLogisticsSection';
-import { LogisticsWorkloadForecastSection } from './analytics/LogisticsWorkloadForecastSection';
 import { TrackingExceptionsSection } from './analytics/TrackingExceptionsSection';
 import { LogisticsFullPageDetailView } from './analytics/LogisticsFullPageDetailView';
 
@@ -59,7 +58,6 @@ export const LogisticsAnalyticsDashboard: React.FC<LogisticsAnalyticsDashboardPr
   const slaRef = useRef<HTMLDivElement>(null);
   const codRef = useRef<HTMLDivElement>(null);
   const geoRef = useRef<HTMLDivElement>(null);
-  const forecastRef = useRef<HTMLDivElement>(null);
   const exceptionsRef = useRef<HTMLDivElement>(null);
 
   const handleSelectSection = (section: AnalyticsSectionKey) => {
@@ -72,7 +70,6 @@ export const LogisticsAnalyticsDashboard: React.FC<LogisticsAnalyticsDashboardPr
       sla_delays: slaRef,
       cod_reconciliation: codRef,
       geographic: geoRef,
-      operations_forecasting: forecastRef,
       tracking_exceptions: exceptionsRef
     };
 
@@ -184,16 +181,7 @@ export const LogisticsAnalyticsDashboard: React.FC<LogisticsAnalyticsDashboardPr
         />
       </div>
 
-      {/* 9. SECTION 8: WORKLOAD & OPERATIONAL FORECASTING */}
-      <div ref={forecastRef} className="scroll-mt-4">
-        <LogisticsWorkloadForecastSection
-          orders={orders}
-          onDrillDown={handleOpenDrillDown}
-          onNavigateStage={onNavigateStage}
-        />
-      </div>
-
-      {/* 10. SECTION 9: TRACKING & EXCEPTION INTELLIGENCE */}
+      {/* 9. SECTION 8: TRACKING & EXCEPTION INTELLIGENCE */}
       <div ref={exceptionsRef} className="scroll-mt-4">
         <TrackingExceptionsSection
           orders={orders}

@@ -30,7 +30,6 @@ export type AnalyticsSectionKey =
   | 'sla_delays'
   | 'cod_reconciliation'
   | 'geographic'
-  | 'operations_forecasting'
   | 'tracking_exceptions';
 
 interface LogisticsFilterBarProps {
@@ -83,7 +82,6 @@ export const LogisticsFilterBar: React.FC<LogisticsFilterBarProps> = ({
     { key: 'sla_delays', label: 'SLA & Delays', icon: <Clock size={13} /> },
     { key: 'cod_reconciliation', label: 'COD Reconciliation', icon: <IndianRupee size={13} /> },
     { key: 'geographic', label: 'Geographic Logistics', icon: <MapPin size={13} /> },
-    { key: 'operations_forecasting', label: 'Workload & Forecasting', icon: <TrendingUp size={13} /> },
     { key: 'tracking_exceptions', label: 'Exceptions & Actions', icon: <ShieldAlert size={13} /> }
   ];
 
