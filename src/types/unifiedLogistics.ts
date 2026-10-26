@@ -84,6 +84,10 @@ export interface UnifiedLogisticsOrder {
   dispatchDate?: string;
   estimatedDeliveryDate?: string;
   deliveredDate?: string;
+  pickupLocation?: string;
+  transportMode?: 'Surface' | 'Air' | string;
+  zone?: string;
+  cancellationStatus?: 'Requested' | 'Approved' | 'Rejected' | 'Completed' | string;
   remarks?: string;
   // Batch & fulfillment metadata
   batchId?: string;

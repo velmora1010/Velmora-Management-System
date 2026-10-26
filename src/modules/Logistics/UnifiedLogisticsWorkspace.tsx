@@ -55,6 +55,8 @@ import { CONFIGURED_COURIERS, normalizeCourier } from '../../config/courierConfi
 import { parseAndFormatLogisticsDate } from '../../utils/logisticsDateUtils';
 import { normalizeState, resolveStateFromPincode, isDispatchedOrder } from '../../utils/logisticsOrderUtils';
 import { LogisticsFilterDrawer } from './components/LogisticsFilterDrawer';
+import { LogisticsFilterToolbar } from './components/filters/LogisticsFilterToolbar';
+import { AllFiltersModal } from './components/filters/AllFiltersModal';
 import { LogisticsAnalyticsDashboard } from './components/LogisticsAnalyticsDashboard';
 import { DateRangeCalendarModal } from './components/DateRangeCalendarModal';
 import { 
@@ -98,6 +100,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
   const [selectedCourier, setSelectedCourier] = useState<string>('All');
   const [logisticsFilters, setLogisticsFilters] = useState<LogisticsFilterState>(INITIAL_LOGISTICS_FILTER_STATE);
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
+  const [isAllFiltersModalOpen, setIsAllFiltersModalOpen] = useState(false);
   const [isDateCalendarOpen, setIsDateCalendarOpen] = useState(false);
 
   // Bulk Selection Mode
@@ -435,9 +438,10 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
     // 1. Advanced Drawer Filters
     let result = applyLogisticsFilters(stageShipments, logisticsFilters);
 
-    // 2. Search Query (Top toolbar search bar)
+    // 2. Search Query (Top toolbar search bar with searchMode support)
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase().trim();
+      const mode = logisticsFilters.searchMode;
       result = result.filter(order => {
         const matchesId = (order.displayOrderId || '').toLowerCase().includes(q) || (order.orderId || '').toLowerCase().includes(q);
         const matchesCust = (order.customerName || '').toLowerCase().includes(q);
@@ -445,6 +449,10 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         const matchesAwb = (order.awbNumber || '').toLowerCase().includes(q);
         const matchesCity = (order.city || order.shippingCity || '').toLowerCase().includes(q);
         const matchesState = (order.state || order.shippingState || '').toLowerCase().includes(q);
+
+        if (mode === 'awb') return matchesAwb;
+        if (mode === 'order') return matchesId;
+        if (mode === 'customer') return matchesCust || matchesPhone;
         return matchesId || matchesCust || matchesPhone || matchesAwb || matchesCity || matchesState;
       });
     }
@@ -747,8 +755,8 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         counts={counts}
         searchTerm={searchTerm}
         onSearchChange={setSearchTerm}
-        onToggleFilters={() => setIsFilterDrawerOpen(prev => !prev)}
-        isFilterOpen={isFilterDrawerOpen}
+        onToggleFilters={() => setIsAllFiltersModalOpen(true)}
+        isFilterOpen={isAllFiltersModalOpen || isFilterDrawerOpen}
         activeFilterCount={activeFilterCount}
         onRefresh={handleRefresh}
         isRefreshing={isRefreshing}
@@ -1346,7 +1354,22 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
       <div className="flex-1 flex gap-4 min-h-0 overflow-hidden pb-1">
         
         {/* Left Column: Table View (or Analytics Dashboard or Prepare Dispatch Grouped View) */}
-        <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
+        <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden gap-2">
+          {currentStage !== 'analytics' && currentStage !== 'prepare_dispatch' && (
+            <LogisticsFilterToolbar
+              filters={logisticsFilters}
+              onUpdateFilters={(updater) => setLogisticsFilters(updater)}
+              onResetFilters={() => {
+                setLogisticsFilters(INITIAL_LOGISTICS_FILTER_STATE);
+                setSelectedCourier('All');
+                toast.success('Filters cleared');
+              }}
+              orders={stageShipments}
+              onOpenAllFilters={() => setIsAllFiltersModalOpen(true)}
+              searchTerm={searchTerm}
+              onSearchTermChange={setSearchTerm}
+            />
+          )}
           {currentStage === 'analytics' ? (
             <LogisticsAnalyticsDashboard
               orders={filteredOrders}
@@ -1510,6 +1533,18 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
           setSelectedCourier('All');
           toast.success('All filters reset');
         }}
+      />
+
+      {/* All Filters Modal (Courier Dashboard Reference) */}
+      <AllFiltersModal
+        isOpen={isAllFiltersModalOpen}
+        onClose={() => setIsAllFiltersModalOpen(false)}
+        filters={logisticsFilters}
+        onApply={(nextFilters) => {
+          setLogisticsFilters(nextFilters);
+          toast.success('Filters applied');
+        }}
+        orders={stageShipments}
       />
 
       {/* Customer Detail Drawer Modal */}

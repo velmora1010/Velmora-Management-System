@@ -79,7 +79,7 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(20);
 
   // Reset to page 1 if orders or filter changes
   React.useEffect(() => {
@@ -272,7 +272,7 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                 onClick={() => handleSort('orderId')}
               >
                 <div className="flex items-center gap-1.5 text-slate-300 group-hover:text-white">
-                  <span>ORDER ID</span>
+                  <span>{isTrackingView ? 'ORDER ID / AWB' : 'ORDER ID'}</span>
                   {renderSortArrow('orderId')}
                 </div>
               </th>
@@ -339,25 +339,15 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                   </th>
                 </>
               ) : isTrackingView ? (
-                /* TRACKING COLUMNS (Matching Tracking section) */
+                /* TRACKING COLUMNS (Matching Courier Dashboard Reference) */
                 <>
                   <th 
                     className="px-3.5 py-3.5 bg-[#0e1626] cursor-pointer group"
-                    onClick={() => handleSort('awb')}
+                    onClick={() => handleSort('date')}
                   >
                     <div className="flex items-center gap-1.5 text-slate-300 group-hover:text-white">
-                      <span>AWB NUMBER</span>
-                      {renderSortArrow('awb')}
-                    </div>
-                  </th>
-
-                  <th 
-                    className="px-3.5 py-3.5 bg-[#0e1626] cursor-pointer group"
-                    onClick={() => handleSort('courier')}
-                  >
-                    <div className="flex items-center gap-1.5 text-slate-300 group-hover:text-white">
-                      <span>COURIER</span>
-                      {renderSortArrow('courier')}
+                      <span>MANIFESTED DATE</span>
+                      {renderSortArrow('date')}
                     </div>
                   </th>
 
@@ -366,29 +356,31 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                     onClick={() => handleSort('status')}
                   >
                     <div className="flex items-center gap-1.5 text-slate-300 group-hover:text-white">
-                      <span>TRACKING STATUS</span>
+                      <span>STATUS</span>
                       {renderSortArrow('status')}
                     </div>
                   </th>
 
                   <th className="px-3.5 py-3.5 bg-[#0e1626] text-slate-300">
-                    <span>LATEST REMARKS</span>
+                    <span>PICKUP & DELIVERY</span>
                   </th>
 
-                  <th className="px-3.5 py-3.5 bg-[#0e1626] text-slate-300 whitespace-nowrap">
-                    <span>DISPATCHED DATE</span>
+                  <th className="px-3.5 py-3.5 bg-[#0e1626] text-slate-300">
+                    <span>TRANSPORT & ZONE</span>
                   </th>
 
-                  <th className="px-3.5 py-3.5 bg-[#0e1626] text-slate-300 leading-tight whitespace-nowrap">
-                    <span>ESTIMATED DELIVERY DATE</span>
+                  <th 
+                    className="px-3.5 py-3.5 bg-[#0e1626] cursor-pointer group"
+                    onClick={() => handleSort('payment')}
+                  >
+                    <div className="flex items-center gap-1.5 text-slate-300 group-hover:text-white">
+                      <span>PAYMENT MODE</span>
+                      {renderSortArrow('payment')}
+                    </div>
                   </th>
 
-                  <th className="px-3.5 py-3.5 bg-[#0e1626] text-slate-300 whitespace-nowrap">
-                    <span>DELIVERED DATE</span>
-                  </th>
-
-                  <th className="px-3.5 py-3.5 bg-[#0e1626] text-slate-300 whitespace-nowrap">
-                    <span>LAST SYNCED</span>
+                  <th className="px-3.5 py-3.5 bg-[#0e1626] text-slate-300">
+                    <span>LAST UPDATE</span>
                   </th>
                 </>
               ) : isFulfilledView ? (
@@ -583,15 +575,57 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                     </td>
                   )}
 
-                  {/* 1. ORDER ID */}
-                  <td className="px-3.5 py-3.5 font-mono font-bold text-slate-200">
-                    <div className="flex items-center gap-1.5">
-                      <span className="whitespace-nowrap text-slate-100 font-bold hover:text-purple-300 cursor-pointer transition-colors"
-                        onClick={() => onViewCustomer && onViewCustomer(order.customerKey)}
-                      >
-                        {order.displayOrderId}
-                      </span>
-                    </div>
+                  {/* 1. ORDER ID / AWB */}
+                  <td className="px-3.5 py-3.5 whitespace-nowrap">
+                    {isTrackingView ? (
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-1.5">
+                          <span 
+                            onClick={() => onViewCustomer && onViewCustomer(order.customerKey)}
+                            className="font-bold text-purple-300 text-xs hover:text-purple-200 cursor-pointer"
+                          >
+                            {order.displayOrderId || (order.orderId ? `#${order.orderId}` : '—')}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopy(order.displayOrderId || order.orderId, order.id + '-ord', 'Order ID')}
+                            className="p-0.5 text-slate-500 hover:text-purple-300 transition-colors cursor-pointer"
+                            title="Copy Order ID"
+                          >
+                            {copiedId === order.id + '-ord' ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                          </button>
+                        </div>
+                        {order.awbNumber ? (
+                          <div className="flex items-center gap-1.5 font-mono text-[11px] text-cyan-300">
+                            <span>{order.awbNumber}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleCopy(order.awbNumber!, order.id + '-awb', 'AWB')}
+                              className="p-0.5 text-slate-500 hover:text-cyan-300 transition-colors cursor-pointer"
+                              title="Copy AWB"
+                            >
+                              {copiedId === order.id + '-awb' ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                            </button>
+                            {order.courier && (
+                              <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 font-sans">
+                                {order.courier}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-slate-500 italic text-[11px]">No AWB</span>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <span 
+                          onClick={() => onViewCustomer && onViewCustomer(order.customerKey)}
+                          className="whitespace-nowrap text-slate-100 font-bold hover:text-purple-300 cursor-pointer transition-colors"
+                        >
+                          {order.displayOrderId}
+                        </span>
+                      </div>
+                    )}
                   </td>
 
                   {/* DISPATCHED VIEW ROW COLUMNS */}
@@ -683,97 +717,89 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                       </td>
                     </>
                   ) : isTrackingView ? (
-                    /* TRACKING VIEW ROW COLUMNS */
+                    /* TRACKING VIEW ROW COLUMNS (Matching Courier Dashboard Reference) */
                     <>
-                      {/* AWB NUMBER */}
-                      <td className="px-3.5 py-3.5 font-mono font-bold text-slate-200">
-                        {order.awbNumber ? (
-                          <div className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
-                            <span className="truncate" title={order.awbNumber}>{order.awbNumber}</span>
-                            <button
-                              type="button"
-                              onClick={() => handleCopy(order.awbNumber!, order.id, 'AWB')}
-                              className="p-1 text-slate-500 hover:text-purple-300 rounded transition-colors cursor-pointer shrink-0"
-                              title="Copy AWB Number"
-                            >
-                              {copiedId === order.id ? (
-                                <Check size={12} className="text-emerald-400" />
-                              ) : (
-                                <Copy size={11} />
-                              )}
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-slate-500 italic text-[11px]">Unassigned</span>
-                        )}
+                      {/* 2. MANIFESTED DATE */}
+                      <td className="px-3.5 py-3.5 whitespace-nowrap">
+                        <div className="flex flex-col">
+                          <span className="text-slate-200 font-medium text-xs">
+                            {order.dispatchDate ? parseAndFormatLogisticsDate(order.dispatchDate).displayDate || order.dispatchDate : 'Pending Manifest'}
+                          </span>
+                          {order.dispatchDate && (
+                            <span className="text-[11px] text-slate-400 font-mono mt-0.5">
+                              {parseAndFormatLogisticsDate(order.dispatchDate).timeStr || '11:50 AM'}
+                            </span>
+                          )}
+                        </div>
                       </td>
 
-                      {/* COURIER */}
+                      {/* 3. STATUS */}
                       <td className="px-3.5 py-3.5 whitespace-nowrap">
-                        <span className={`inline-block px-2.5 py-0.5 rounded text-[11px] font-semibold border ${getCourierBadgeClass(order.courier)}`}>
-                          {order.courier || 'Unassigned'}
-                        </span>
-                      </td>
-
-                      {/* TRACKING STATUS */}
-                      <td className="px-3.5 py-3.5 whitespace-nowrap">
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${badgeStyle.bg} ${badgeStyle.text} ${badgeStyle.border}`}>
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border ${badgeStyle.bg} ${badgeStyle.text} ${badgeStyle.border}`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${badgeStyle.dot} shrink-0`} />
                           <span className="truncate">{effectiveStatus}</span>
                         </span>
                       </td>
 
-                      {/* LATEST REMARKS */}
-                      <td className="px-3.5 py-3.5 text-slate-300 max-w-[180px]">
-                        {order.remarks && order.remarks.trim() ? (
-                          <span className="block truncate text-slate-300 font-medium text-[11px]" title={order.remarks.trim()}>
-                            {order.remarks.trim()}
-                          </span>
-                        ) : (
-                          <span className="text-slate-500 italic text-[11px]">—</span>
-                        )}
+                      {/* 4. PICKUP & DELIVERY */}
+                      <td className="px-3.5 py-3.5 min-w-[220px] max-w-[280px]">
+                        <div className="flex flex-col gap-1 text-[11px]">
+                          <div className="flex items-start gap-1 text-slate-400">
+                            <MapPin size={11} className="text-purple-400 shrink-0 mt-0.5" />
+                            <span className="truncate font-medium text-slate-300" title={order.pickupLocation || 'VELMORA CONSUMER B2C Erode 638002'}>
+                              {order.pickupLocation || 'VELMORA CONSUMER B2C Erode 638002'}
+                            </span>
+                          </div>
+                          <div className="flex items-start gap-1 pl-1 border-l-2 border-slate-700/60 ml-1 py-0.5 text-slate-300">
+                            <span className="truncate">
+                              <strong className="text-slate-200">{order.customerName}</strong>
+                              {resolveCustomerLocationDisplay(order.state || order.shippingState, order.city || order.shippingCity, order.pincode) && (
+                                <span className="text-slate-400"> • {resolveCustomerLocationDisplay(order.state || order.shippingState, order.city || order.shippingCity, order.pincode)}</span>
+                              )}
+                            </span>
+                          </div>
+                        </div>
                       </td>
 
-                      {/* DISPATCHED DATE */}
-                      <td className="px-3.5 py-3.5 font-medium text-slate-200 whitespace-nowrap text-[11px]">
-                        {order.dispatchDate ? (
-                          <span className="text-slate-200 font-mono">
-                            {parseAndFormatLogisticsDate(order.dispatchDate).displayDate || order.dispatchDate}
+                      {/* 5. TRANSPORT & ZONE */}
+                      <td className="px-3.5 py-3.5 whitespace-nowrap">
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-1 font-semibold text-slate-200 text-xs">
+                            <Truck size={12} className="text-indigo-400 shrink-0" />
+                            <span>{order.transportMode || 'Surface'}</span>
+                          </div>
+                          <span className="text-[10px] font-mono text-slate-400">
+                            {order.zone || (order.state ? `${order.state.slice(0, 8)} Zone` : 'Zone S4')}
                           </span>
-                        ) : (
-                          <span className="text-slate-500 italic text-[11px]">—</span>
-                        )}
+                        </div>
                       </td>
 
-                      {/* ESTIMATED DELIVERY DATE */}
-                      <td className="px-3.5 py-3.5 font-medium text-slate-200 whitespace-nowrap text-[11px]">
-                        {order.estimatedDeliveryDate ? (
-                          <span className="text-slate-200 font-mono">
-                            {parseAndFormatLogisticsDate(order.estimatedDeliveryDate).displayDate || order.estimatedDeliveryDate}
+                      {/* 6. PAYMENT MODE */}
+                      <td className="px-3.5 py-3.5 whitespace-nowrap">
+                        <div className="flex flex-col gap-0.5">
+                          <span className={`px-2 py-0.5 rounded text-[11px] font-bold w-fit ${
+                            isCod 
+                              ? 'bg-amber-950/60 text-amber-300 border border-amber-700/60' 
+                              : 'bg-emerald-950/60 text-emerald-300 border border-emerald-700/60'
+                          }`}>
+                            {isCod ? 'Cash on Delivery' : 'Prepaid'}
                           </span>
-                        ) : (
-                          <span className="text-slate-500 italic text-[11px]">—</span>
-                        )}
+                          <span className="text-xs font-mono font-bold text-slate-200 mt-0.5">
+                            {formatOrderAmountDisplay(order.amount ?? order.totalAmount)}
+                          </span>
+                        </div>
                       </td>
 
-                      {/* DELIVERED DATE */}
-                      <td className="px-3.5 py-3.5 font-medium text-slate-200 whitespace-nowrap text-[11px]">
-                        {order.deliveredDate ? (
-                          <span className="text-emerald-400 font-mono font-semibold">
-                            {parseAndFormatLogisticsDate(order.deliveredDate).displayDate || order.deliveredDate}
+                      {/* 7. LAST UPDATE */}
+                      <td className="px-3.5 py-3.5 max-w-[200px]">
+                        <div className="flex flex-col text-[11px]">
+                          <span className="truncate text-slate-200 font-medium" title={order.lastEvent || order.remarks || 'Order processed'}>
+                            {order.lastEvent || order.remarks || 'Order processed and ready'}
                           </span>
-                        ) : (
-                          <span className="text-slate-500 italic text-[11px]">—</span>
-                        )}
-                      </td>
-
-                      {/* LAST SYNCED */}
-                      <td className="px-3.5 py-3.5 text-slate-400 whitespace-nowrap text-[11px] font-mono">
-                        {order.syncedAt ? (
-                          <span>{parseAndFormatLogisticsDate(order.syncedAt).displayDate}</span>
-                        ) : (
-                          <span className="text-slate-500 italic">—</span>
-                        )}
+                          <span className="text-slate-400 font-mono text-[10px] mt-0.5">
+                            {order.syncedAt || order.lastUpdated ? parseAndFormatLogisticsDate(order.syncedAt || order.lastUpdated).displayDate : 'Updated recently'}
+                          </span>
+                        </div>
                       </td>
                     </>
                   ) : isFulfilledView ? (
@@ -962,46 +988,62 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                   )}
 
                   {/* ACTIONS COLUMN */}
-                  <td className="px-3.5 py-3.5 text-center">
-                    <div className="flex items-center justify-center gap-1.5">
-                      
-                      {/* View Order / Customer Details Modal */}
-                      <button
-                        type="button"
-                        onClick={() => onViewCustomer && onViewCustomer(order.customerKey)}
-                        className="w-7 h-7 rounded-lg bg-slate-900/80 hover:bg-purple-950/70 text-slate-400 hover:text-purple-300 border border-slate-700/80 hover:border-purple-600/60 transition-all flex items-center justify-center cursor-pointer shadow-sm group shrink-0"
-                        title="View Customer & Order Details"
-                        aria-label="View Details"
-                      >
-                        <Eye size={13} className="group-hover:scale-110 transition-transform text-slate-400 group-hover:text-purple-300" />
-                      </button>
-
-
-                      {/* Official Courier Tracking Page Link if tracking or fulfilled with AWB */}
-                      {(isTrackingView || isFulfilledView) && order.awbNumber && getCourierTrackingUrl(order.courier, order.awbNumber) && (
-                        <a
-                          href={getCourierTrackingUrl(order.courier, order.awbNumber)!}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="w-7 h-7 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-cyan-300 border border-slate-700/80 hover:border-cyan-600/60 transition-all flex items-center justify-center cursor-pointer shadow-sm group shrink-0"
-                          title={`Open ${order.courier || 'Courier'} Tracking`}
+                  <td className="px-3.5 py-3.5 text-center whitespace-nowrap">
+                    {isTrackingView ? (
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => onTrackOrder(order)}
+                          className="h-7 px-2.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-bold shadow-sm transition-all cursor-pointer flex items-center gap-1"
+                          title="View full tracking lifecycle"
                         >
-                          <ExternalLink size={12} className="text-slate-400 group-hover:text-cyan-300" />
-                        </a>
-                      )}
+                          <Truck size={12} />
+                          <span>Track</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onViewCustomer && onViewCustomer(order.customerKey)}
+                          className="h-7 px-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 text-[11px] font-semibold transition-colors cursor-pointer"
+                          title="View Customer Details"
+                        >
+                          Customer
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => onViewCustomer && onViewCustomer(order.customerKey)}
+                          className="w-7 h-7 rounded-lg bg-slate-900/80 hover:bg-purple-950/70 text-slate-400 hover:text-purple-300 border border-slate-700/80 hover:border-purple-600/60 transition-all flex items-center justify-center cursor-pointer shadow-sm group shrink-0"
+                          title="View Customer & Order Details"
+                          aria-label="View Details"
+                        >
+                          <Eye size={13} className="group-hover:scale-110 transition-transform text-slate-400 group-hover:text-purple-300" />
+                        </button>
 
-                      {/* More Menu / Actions */}
-                      <button
-                        type="button"
-                        onClick={() => onTrackOrder(order)}
-                        className="w-7 h-7 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700/80 transition-colors flex items-center justify-center cursor-pointer shrink-0"
-                        title="More Actions"
-                        aria-label="More"
-                      >
-                        <MoreHorizontal size={13} />
-                      </button>
+                        {(isFulfilledView) && order.awbNumber && getCourierTrackingUrl(order.courier, order.awbNumber) && (
+                          <a
+                            href={getCourierTrackingUrl(order.courier, order.awbNumber)!}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-7 h-7 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-cyan-300 border border-slate-700/80 hover:border-cyan-600/60 transition-all flex items-center justify-center cursor-pointer shadow-sm group shrink-0"
+                            title={`Open ${order.courier || 'Courier'} Tracking`}
+                          >
+                            <ExternalLink size={12} className="text-slate-400 group-hover:text-cyan-300" />
+                          </a>
+                        )}
 
-                    </div>
+                        <button
+                          type="button"
+                          onClick={() => onTrackOrder(order)}
+                          className="w-7 h-7 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700/80 transition-colors flex items-center justify-center cursor-pointer shrink-0"
+                          title="More Actions"
+                          aria-label="More"
+                        >
+                          <MoreHorizontal size={13} />
+                        </button>
+                      </div>
+                    )}
                   </td>
 
                 </tr>
@@ -1016,9 +1058,8 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
         
         {/* Left: Showing range */}
         <div>
-          Showing <span className="font-bold text-white font-mono">{totalOrders > 0 ? startIndex + 1 : 0}</span> to{' '}
-          <span className="font-bold text-white font-mono">{endIndex}</span> of{' '}
-          <span className="font-bold text-white font-mono">{totalOrders}</span> orders
+          Showing <span className="font-bold text-white font-mono">{totalOrders > 0 ? startIndex + 1 : 0}-{endIndex}</span> of{' '}
+          <span className="font-bold text-white font-mono">{totalOrders}</span>
         </div>
 
         {/* Center: Rows per page selector */}
@@ -1033,7 +1074,7 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
             className="h-8 px-2.5 rounded-lg bg-slate-900 border border-slate-700/80 text-white font-semibold text-xs outline-none focus:border-purple-500 cursor-pointer"
           >
             <option value={10}>10</option>
-            <option value={25}>25</option>
+            <option value={20}>20</option>
             <option value={50}>50</option>
             <option value={100}>100</option>
           </select>

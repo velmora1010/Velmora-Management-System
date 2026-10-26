@@ -8,60 +8,102 @@ export type LogisticsDatePreset =
   | 'today' 
   | 'yesterday' 
   | 'this_week'
+  | 'last_week'
   | '7d' 
   | 'this_month' 
   | 'prev_month' 
+  | 'last_month'
   | '30d' 
+  | 'last_90_days'
   | 'this_year'
   | 'custom';
 
 export type LogisticsDateField = 'orderDate' | 'dispatchDate' | 'deliveredDate' | 'syncedAt';
 
 export interface LogisticsFilterState {
-  // 1. Date & Time
+  // 1. General Date & Time
   datePreset: LogisticsDatePreset;
   dateField: LogisticsDateField;
   startDate: string; // YYYY-MM-DD
   endDate: string; // YYYY-MM-DD
 
-  // 2. Order & Customer
+  // 1b. Manifested Date (Dedicated courier filter matching reference)
+  manifestDatePreset: LogisticsDatePreset;
+  manifestStartDate: string; // YYYY-MM-DD
+  manifestEndDate: string; // YYYY-MM-DD
+
+  // 2. Search & Bulk AWBs
+  searchMode: 'awb' | 'order' | 'customer' | 'all';
+  bulkAwbs: string[]; // up to 100 AWBs
   orderIdSearch: string;
   customerNameSearch: string;
   phoneSearch: string;
   productSearch: string;
   fulfillmentStatus: string; // 'all' | 'active' | 'prepare_dispatch' | 'dispatched' | 'tracking'
 
-  // 3. Customer Location
+  // 3. Shipment Status Multi-Select
+  shipmentStatuses: string[]; // ['Ready to Ship', 'Ready for Pickup', 'In-transit', 'Out for Delivery', 'Delivered', 'RTO - In Transit', 'Returned to Origin', 'Cancelled']
+
+  // 4. Pickup Location
+  pickupLocations: string[];
+
+  // 5. Transport Mode
+  transportModes: string[]; // ['Surface', 'Air']
+
+  // 6. Cancellation Workflow Filter
+  cancellationStatuses: string[]; // ['Requested', 'Approved', 'Rejected', 'Completed']
+
+  // 7. Customer Location
   states: string[];
   cities: string[];
   pincode: string;
 
-  // 4. Dispatch & Courier
+  // 8. Dispatch & Courier
   dispatchStatus: 'all' | 'dispatched' | 'pending';
   couriers: string[];
   missingAwbOnly: boolean;
   batchId: string;
 
-  // 5. Shipment Tracking
+  // 9. Shipment Tracking
   trackingStatuses: string[];
   syncStatus: 'all' | 'synced' | 'never_synced';
 
-  // 6. Payment & Amount
+  // 10. Payment & Amount
   paymentModes: string[]; // e.g. ['PREPAID', 'COD', 'PARTIAL COD', 'UNKNOWN']
   minAmount: string;
   maxAmount: string;
 }
+
+export const CANONICAL_SHIPMENT_STATUSES = [
+  'Ready to Ship',
+  'Ready for Pickup',
+  'In-transit',
+  'Out for Delivery',
+  'Delivered',
+  'RTO - In Transit',
+  'Returned to Origin',
+  'Cancelled'
+] as const;
 
 export const INITIAL_LOGISTICS_FILTER_STATE: LogisticsFilterState = {
   datePreset: 'all',
   dateField: 'orderDate',
   startDate: '',
   endDate: '',
+  manifestDatePreset: 'all',
+  manifestStartDate: '',
+  manifestEndDate: '',
+  searchMode: 'awb',
+  bulkAwbs: [],
   orderIdSearch: '',
   customerNameSearch: '',
   phoneSearch: '',
   productSearch: '',
   fulfillmentStatus: 'all',
+  shipmentStatuses: [],
+  pickupLocations: [],
+  transportModes: [],
+  cancellationStatuses: [],
   states: [],
   cities: [],
   pincode: '',
@@ -204,6 +246,14 @@ export function resolveDateRangeForPreset(preset: LogisticsDatePreset): { start:
     return { start: formatLocalYMD(mon), end: formatLocalYMD(sun) };
   }
 
+  if (preset === 'last_week') {
+    const day = now.getDay();
+    const diff = (day + 6) % 7; // Monday = 0
+    const lastMon = new Date(now.getFullYear(), now.getMonth(), now.getDate() - diff - 7);
+    const lastSun = new Date(lastMon.getFullYear(), lastMon.getMonth(), lastMon.getDate() + 6);
+    return { start: formatLocalYMD(lastMon), end: formatLocalYMD(lastSun) };
+  }
+
   if (preset === '7d') {
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
     return { start: formatLocalYMD(start), end: formatLocalYMD(now) };
@@ -215,7 +265,7 @@ export function resolveDateRangeForPreset(preset: LogisticsDatePreset): { start:
     return { start: formatLocalYMD(start), end: formatLocalYMD(end) };
   }
 
-  if (preset === 'prev_month') {
+  if (preset === 'prev_month' || preset === 'last_month') {
     const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const end = new Date(now.getFullYear(), now.getMonth(), 0); // last day of previous month
     return { start: formatLocalYMD(start), end: formatLocalYMD(end) };
@@ -223,6 +273,11 @@ export function resolveDateRangeForPreset(preset: LogisticsDatePreset): { start:
 
   if (preset === '30d') {
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29);
+    return { start: formatLocalYMD(start), end: formatLocalYMD(now) };
+  }
+
+  if (preset === 'last_90_days') {
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 89);
     return { start: formatLocalYMD(start), end: formatLocalYMD(now) };
   }
 
@@ -236,11 +291,53 @@ export function resolveDateRangeForPreset(preset: LogisticsDatePreset): { start:
 }
 
 /**
+ * Determines canonical shipment status for an order based on current data
+ */
+export function getOrderShipmentStatus(order: UnifiedLogisticsOrder): string {
+  const st = (order.status || '').trim();
+  const lower = st.toLowerCase();
+  const stage = order.workflowStage || order.stage;
+
+  if (lower === 'cancelled' || stage === 'trash' || (order.cancellationStatus && order.cancellationStatus.toLowerCase() === 'completed')) {
+    return 'Cancelled';
+  }
+  if (lower.includes('returned') || lower.includes('rto delivered') || lower === 'rto - delivered') {
+    return 'Returned to Origin';
+  }
+  if (lower.includes('rto') || lower.includes('return') || lower.includes('exception')) {
+    return 'RTO - In Transit';
+  }
+  if (lower.includes('delivered') || order.deliveredDate) {
+    return 'Delivered';
+  }
+  if (lower.includes('out for delivery') || lower.includes('dispatched for delivery')) {
+    return 'Out for Delivery';
+  }
+  if (lower.includes('in transit') || lower.includes('in-transit') || lower.includes('shipped') || lower.includes('transit') || lower.includes('handed over')) {
+    return 'In-transit';
+  }
+  if (lower.includes('ready for pickup') || lower.includes('pickup pending') || lower.includes('info received') || lower.includes('awaiting tracking') || (isDispatchedOrder(order) && !order.lastEvent)) {
+    return 'Ready for Pickup';
+  }
+  if (stage === 'prepare_dispatch' || stage === 'active' || lower.includes('unfulfilled') || lower.includes('ready to ship') || lower.includes('pending')) {
+    return 'Ready to Ship';
+  }
+
+  return 'Ready to Ship';
+}
+
+/**
  * Counts how many filter conditions are actively restricting data
  */
 export function countActiveLogisticsFilters(filters: LogisticsFilterState): number {
   let count = 0;
   if (filters.datePreset !== 'all' || filters.startDate || filters.endDate) count++;
+  if (filters.manifestDatePreset !== 'all' || filters.manifestStartDate || filters.manifestEndDate) count++;
+  if (filters.bulkAwbs.length > 0) count++;
+  if (filters.shipmentStatuses.length > 0) count++;
+  if (filters.pickupLocations.length > 0) count++;
+  if (filters.transportModes.length > 0) count++;
+  if (filters.cancellationStatuses.length > 0) count++;
   if (filters.orderIdSearch.trim()) count++;
   if (filters.customerNameSearch.trim()) count++;
   if (filters.phoneSearch.trim()) count++;
@@ -267,7 +364,7 @@ export function applyLogisticsFilters(
   orders: UnifiedLogisticsOrder[],
   filters: LogisticsFilterState
 ): UnifiedLogisticsOrder[] {
-  // Resolve effective date boundaries
+  // 1. Resolve effective date boundaries for general date filter
   let effectiveStart = filters.startDate;
   let effectiveEnd = filters.endDate;
 
@@ -277,8 +374,18 @@ export function applyLogisticsFilters(
     effectiveEnd = resolved.end;
   }
 
+  // 1b. Resolve effective date boundaries for manifested date filter
+  let manifestStart = filters.manifestStartDate;
+  let manifestEnd = filters.manifestEndDate;
+
+  if (filters.manifestDatePreset !== 'all' && filters.manifestDatePreset !== 'custom') {
+    const resolvedManifest = resolveDateRangeForPreset(filters.manifestDatePreset);
+    manifestStart = resolvedManifest.start;
+    manifestEnd = resolvedManifest.end;
+  }
+
   return orders.filter(order => {
-    // 1. DATE & TIME FILTER
+    // 1. GENERAL DATE & TIME FILTER
     if (effectiveStart || effectiveEnd) {
       let rawTargetDate = '';
       if (filters.dateField === 'orderDate') {
@@ -292,7 +399,6 @@ export function applyLogisticsFilters(
       }
 
       if (rawTargetDate) {
-        // Universal parser normalizes Excel serials, ISO stamps, and display strings to YYYY-MM-DD
         const parsed = parseAndFormatLogisticsDate(rawTargetDate);
         const ymd = parsed.isoDate || (rawTargetDate.length >= 10 && rawTargetDate.includes('-') ? rawTargetDate.slice(0, 10) : '');
 
@@ -300,16 +406,72 @@ export function applyLogisticsFilters(
           if (effectiveStart && ymd < effectiveStart) return false;
           if (effectiveEnd && ymd > effectiveEnd) return false;
         } else {
-          // If date is unparseable and field is specified, exclude
           return false;
         }
       } else {
-        // If filtering by a date field and the record does not have that date, exclude
         return false;
       }
     }
 
-    // 2. ORDER SEARCH
+    // 1b. MANIFESTED DATE FILTER (Never substitute orderDate silently)
+    if (manifestStart || manifestEnd) {
+      const rawManifest = order.dispatchDate || '';
+      if (!rawManifest) {
+        // Exclude orders that do not have a manifested / dispatch date
+        return false;
+      }
+      const parsed = parseAndFormatLogisticsDate(rawManifest);
+      const ymd = parsed.isoDate || (rawManifest.length >= 10 && rawManifest.includes('-') ? rawManifest.slice(0, 10) : '');
+      if (!ymd) return false;
+      if (manifestStart && ymd < manifestStart) return false;
+      if (manifestEnd && ymd > manifestEnd) return false;
+    }
+
+    // 2. BULK AWB SEARCH (Up to 100 AWBs)
+    if (filters.bulkAwbs.length > 0) {
+      const cleanAwb = (order.awbNumber || '').trim().toLowerCase();
+      const cleanId = (order.orderId || '').trim().toLowerCase();
+      const cleanDisplay = (order.displayOrderId || '').trim().toLowerCase();
+      
+      const matched = filters.bulkAwbs.some(rawItem => {
+        const item = rawItem.trim().toLowerCase();
+        if (!item) return false;
+        return cleanAwb === item || cleanId === item || cleanDisplay === item || cleanAwb.includes(item);
+      });
+      if (!matched) return false;
+    }
+
+    // 3. SHIPMENT STATUS MULTI-SELECT
+    if (filters.shipmentStatuses.length > 0) {
+      const currentShipmentStatus = getOrderShipmentStatus(order);
+      const matchedStatus = filters.shipmentStatuses.some(
+        st => st.toLowerCase() === currentShipmentStatus.toLowerCase()
+      );
+      if (!matchedStatus) return false;
+    }
+
+    // 4. PICKUP LOCATION FILTER
+    if (filters.pickupLocations.length > 0) {
+      const loc = (order.pickupLocation || 'VELMORA CONSUMER B2C Erode 638002').toLowerCase();
+      const matchedLoc = filters.pickupLocations.some(pl => loc.includes(pl.toLowerCase()));
+      if (!matchedLoc) return false;
+    }
+
+    // 5. TRANSPORT MODE FILTER
+    if (filters.transportModes.length > 0) {
+      const tm = (order.transportMode || 'Surface').toLowerCase();
+      const matchedTm = filters.transportModes.some(m => tm === m.toLowerCase());
+      if (!matchedTm) return false;
+    }
+
+    // 6. CANCELLATION STATUS FILTER
+    if (filters.cancellationStatuses.length > 0) {
+      const cs = (order.cancellationStatus || (order.status === 'Cancelled' ? 'Completed' : '')).toLowerCase();
+      const matchedCs = filters.cancellationStatuses.some(c => cs === c.toLowerCase());
+      if (!matchedCs) return false;
+    }
+
+    // 7. ORDER SEARCH
     if (filters.orderIdSearch.trim()) {
       const q = filters.orderIdSearch.trim().toLowerCase();
       const matchId = (order.orderId || '').toLowerCase().includes(q) ||
@@ -338,7 +500,7 @@ export function applyLogisticsFilters(
       if (order.workflowStage !== filters.fulfillmentStatus) return false;
     }
 
-    // 3. LOCATION
+    // 8. LOCATION
     if (filters.states.length > 0) {
       const orderState = (order.state || order.shippingState || '').toLowerCase();
       const matchState = filters.states.some(s => orderState.includes(s.toLowerCase()));
@@ -356,7 +518,7 @@ export function applyLogisticsFilters(
       if (!pin.includes(filters.pincode.trim())) return false;
     }
 
-    // 4. DISPATCH & COURIER
+    // 9. DISPATCH & COURIER
     if (filters.dispatchStatus === 'dispatched') {
       if (!isDispatchedOrder(order)) return false;
     } else if (filters.dispatchStatus === 'pending') {
@@ -378,7 +540,7 @@ export function applyLogisticsFilters(
       if (!bId.toLowerCase().includes(filters.batchId.trim().toLowerCase())) return false;
     }
 
-    // 5. SHIPMENT TRACKING
+    // 10. SHIPMENT TRACKING
     if (filters.trackingStatuses.length > 0) {
       const st = order.status || '';
       const matchSt = filters.trackingStatuses.some(ts => {
@@ -399,7 +561,7 @@ export function applyLogisticsFilters(
       if (order.syncedAt) return false;
     }
 
-    // 6. PAYMENT & AMOUNT
+    // 11. PAYMENT & AMOUNT
     if (filters.paymentModes.length > 0) {
       const mode = (order.orderType || '').toUpperCase();
       const matchesMode = filters.paymentModes.some(m => {
