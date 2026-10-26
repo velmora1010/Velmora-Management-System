@@ -1,4 +1,5 @@
 import { supabase } from '../../../lib/supabase';
+import db from '../../../lib/db';
 import type { 
   WebsiteUploadBatch, 
   WebsiteRawOrderRow, 
@@ -6,7 +7,10 @@ import type {
   WebsiteOrderItem,
   WebsiteSalesFilterState,
   PriceInterpretationMode,
-  ColumnMapping
+  ColumnMapping,
+  GetOrdersPaginatedParams,
+  PaginatedOrdersResult,
+  WebsiteFullOrderDetails
 } from './types';
 import { 
   syncSalesUploadToLogistics,
@@ -930,6 +934,449 @@ export class WebsiteSalesService {
       console.error('[Delete Sales Order Failed]', err);
       throw err;
     }
+  }
+
+  // Get the most recent sales order date present in the database
+  async getLatestSalesDate(): Promise<string> {
+    try {
+      const { data, error } = await supabase
+        .from('sales_orders')
+        .select('order_date')
+        .eq('channel', 'WEBSITE')
+        .neq('order_status', 'DELETED')
+        .order('order_date', { ascending: false })
+        .limit(1);
+
+      if (!error && data && data.length > 0 && data[0].order_date) {
+        return data[0].order_date;
+      }
+    } catch (e) {
+      console.warn('Failed to get latest sales date:', e);
+    }
+    return getTodayInBusinessTimezone();
+  }
+
+  // Fast server-side paginated, searchable, sortable orders query
+  async getOrdersPaginated(params: GetOrdersPaginatedParams): Promise<PaginatedOrdersResult> {
+    await this.checkAndMigrateLocalStorage();
+
+    const page = Math.max(1, params.page || 1);
+    const pageSize = Math.max(1, Math.min(params.pageSize || 25, 100));
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    let query = supabase
+      .from('sales_orders')
+      .select('*', { count: 'exact' })
+      .eq('channel', 'WEBSITE')
+      .neq('order_status', 'DELETED');
+
+    if (params.search && params.search.trim()) {
+      const q = params.search.trim().replace(/^#/, '');
+      query = query.or(`order_id.ilike.%${q}%,customer_name.ilike.%${q}%,phone.ilike.%${q}%`);
+    }
+
+    if (params.dateFrom && params.dateTo) {
+      query = query.gte('order_date', params.dateFrom).lte('order_date', params.dateTo);
+    } else if (params.dateFrom) {
+      query = query.gte('order_date', params.dateFrom);
+    } else if (params.dateTo) {
+      query = query.lte('order_date', params.dateTo);
+    }
+
+    if (params.paymentMode && params.paymentMode !== 'ALL') {
+      query = query.eq('payment_mode', params.paymentMode);
+    }
+
+    if (params.state && params.state !== 'ALL') {
+      query = query.ilike('state', `%${params.state}%`);
+    }
+
+    if (params.fulfillmentStatus && params.fulfillmentStatus !== 'ALL') {
+      const fs = params.fulfillmentStatus.toUpperCase();
+      if (fs === 'FULFILLED') {
+        query = query.eq('dispatch_status', 'DELIVERED');
+      } else if (fs === 'UNFULFILLED') {
+        query = query.eq('dispatch_status', 'UNFULFILLED');
+      }
+    }
+
+    const sortBy = params.sortBy || 'order_date';
+    const ascending = params.sortOrder === 'asc';
+
+    query = query.order(sortBy, { ascending }).order('id', { ascending: true }).range(from, to);
+
+    const { data: orderRows, count, error } = await query;
+
+    if (error) {
+      console.error('[Supabase Error] getOrdersPaginated failed:', error);
+      throw new Error(error.message || 'Failed to fetch paginated orders');
+    }
+
+    const totalCount = count ?? 0;
+    const totalPages = Math.ceil(totalCount / pageSize) || 1;
+
+    if (!orderRows || orderRows.length === 0) {
+      return {
+        orders: [],
+        totalCount,
+        page,
+        pageSize,
+        totalPages
+      };
+    }
+
+    // Fetch line items for this specific page of orders
+    const salesOrderIds = orderRows.map(o => o.id);
+    const { data: itemRows } = await supabase
+      .from('sales_order_items')
+      .select('*')
+      .in('sales_order_id', salesOrderIds)
+      .order('id', { ascending: true });
+
+    const itemsByOrderId = new Map<string, WebsiteOrderItem[]>();
+    (itemRows || []).forEach(it => {
+      if (!itemsByOrderId.has(it.sales_order_id)) {
+        itemsByOrderId.set(it.sales_order_id, []);
+      }
+      itemsByOrderId.get(it.sales_order_id)!.push({
+        id: it.id,
+        website_order_id: it.sales_order_id,
+        product_name: it.product_name,
+        product_code: it.product_code,
+        quantity: Number(it.quantity) || 1,
+        unit_price: it.unit_price != null ? Number(it.unit_price) : null,
+        line_total: it.line_total != null ? Number(it.line_total) : null
+      });
+    });
+
+    // Fetch upload batch file names for this page
+    const uploadIds = Array.from(new Set(orderRows.map(o => o.upload_id).filter(Boolean)));
+    const uploadMap = new Map<string, string>();
+    if (uploadIds.length > 0) {
+      const { data: uploadRows } = await supabase
+        .from('sales_uploads')
+        .select('id, file_name')
+        .in('id', uploadIds);
+      (uploadRows || []).forEach(u => uploadMap.set(u.id, u.file_name));
+    }
+
+    // Fetch Logistics records from Dexie for shipment status / AWB
+    let logisticsMap = new Map<string, any>();
+    try {
+      const rawIds = orderRows.map(o => cleanOrderId(o.order_id));
+      const dbRecs = await db.logistics_orders.where('orderId').anyOfIgnoreCase(rawIds).toArray();
+      dbRecs.forEach(rec => {
+        const cid = cleanOrderId(rec.orderId).toLowerCase();
+        logisticsMap.set(cid, rec);
+      });
+    } catch (e) {
+      // Dexie read fallback
+    }
+
+    const orders: WebsiteConsolidatedOrder[] = orderRows.map(o => {
+      const extra = o.extra_data || {};
+      const items = itemsByOrderId.get(o.id) || [];
+      const logRec = logisticsMap.get(cleanOrderId(o.order_id).toLowerCase());
+
+      const productNames = items.length > 0
+        ? Array.from(new Set(items.map(it => it.product_name))).join(', ')
+        : extra.product_name || 'N/A';
+
+      const orderFormatted = items.length > 0
+        ? items.map(it => `${it.product_name} × ${it.quantity}`).join(' | ')
+        : extra.order_formatted || `${productNames} × ${o.total_quantity || 1}`;
+
+      const rawState = o.state || 'Unspecified';
+      const rawCity = o.city || 'Unspecified';
+      const rawPincode = o.pincode || '';
+      const canonicalLoc = resolveCanonicalLocation(rawState, rawCity, rawPincode);
+
+      const awb = logRec?.awbNumber || extra.awb_number || o.awb_number || '';
+      const courier = logRec?.courier || extra.courier || o.courier || '';
+      const shipmentStatus = logRec?.status || logRec?.stage || (awb ? 'Dispatched' : (o.dispatch_status === 'DELIVERED' ? 'Delivered' : 'Pending Manifest'));
+
+      return {
+        id: o.id,
+        order_id: o.order_id,
+        customer_name: o.customer_name || 'N/A',
+        address: extra.address || '',
+        state: rawState,
+        city: rawCity,
+        pincode: rawPincode,
+        canonicalState: canonicalLoc.stateName,
+        canonicalStateKey: canonicalLoc.stateKey || normalizeLocationKey(canonicalLoc.stateName),
+        canonicalCity: canonicalLoc.cityName,
+        canonicalCityKey: canonicalLoc.cityKey || normalizeLocationKey(canonicalLoc.cityName),
+        canonicalPincode: canonicalLoc.pincode || rawPincode,
+        order_formatted: orderFormatted,
+        product_name: productNames,
+        total_quantity: Number(o.total_quantity) || 1,
+        offer: o.offer || 'No Offer',
+        price: Number(o.order_total) || 0,
+        phone: o.phone || '',
+        payment_mode: o.payment_mode || 'UNKNOWN',
+        source_payment_mode: o.source_payment_method || 'Unknown',
+        source_payment_method: o.source_payment_method || 'Unknown',
+        advance_paid: Number(o.advance_paid) || 0,
+        remaining_payable: Number(o.remaining_cod) || 0,
+        payment_classification_reason: extra.payment_classification_reason || '',
+        order_date: o.order_date,
+        original_order_date: extra.original_order_date || o.order_date,
+        upload_batch_id: o.upload_id,
+        batch_file_name: uploadMap.get(o.upload_id) || '',
+        data_conflict: extra.data_conflict || false,
+        conflict_details: extra.conflict_details || '',
+        created_at: o.created_at,
+        items,
+        fulfillment_status: extra.fulfillment_status || (o.dispatch_status === 'DELIVERED' ? 'fulfilled' : 'unfulfilled'),
+        financial_status: extra.financial_status || (o.payment_mode === 'PREPAID' ? 'paid' : 'pending'),
+        awb_number: awb,
+        courier: courier,
+        shipment_status: shipmentStatus,
+        fulfilled_date: extra.fulfilled_date || o.dispatch_date || ''
+      };
+    });
+
+    return {
+      orders,
+      totalCount,
+      page,
+      pageSize,
+      totalPages
+    };
+  }
+
+  // Fetch complete details for a single order including raw rows, line items, and logistics
+  async getFullOrderDetails(orderId: string): Promise<WebsiteFullOrderDetails> {
+    const cleanId = cleanOrderId(orderId);
+
+    // 1. Fetch sales_order
+    const { data: orderRow, error: orderErr } = await supabase
+      .from('sales_orders')
+      .select('*')
+      .eq('channel', 'WEBSITE')
+      .eq('order_id', cleanId)
+      .single();
+
+    if (orderErr || !orderRow) {
+      throw new Error(`Order #${cleanId} not found in database: ${orderErr?.message || 'Not found'}`);
+    }
+
+    // 2. Fetch sales_order_items
+    const { data: itemRows } = await supabase
+      .from('sales_order_items')
+      .select('*')
+      .eq('sales_order_id', orderRow.id)
+      .order('id', { ascending: true });
+
+    // 3. Fetch sales_raw_data for deep metadata
+    const { data: rawRows } = await supabase
+      .from('sales_raw_data')
+      .select('raw_data')
+      .eq('order_id', cleanId);
+
+    // 4. Fetch source upload batch
+    let sourceFile: any = undefined;
+    if (orderRow.upload_id) {
+      const { data: uploadRow } = await supabase
+        .from('sales_uploads')
+        .select('id, file_name, uploaded_at')
+        .eq('id', orderRow.upload_id)
+        .single();
+      if (uploadRow) sourceFile = uploadRow;
+    }
+
+    // 5. Fetch Dexie logistics order
+    let logisticsData: any = {};
+    try {
+      const logRec = await db.logistics_orders.where('orderId').equals(cleanId).first();
+      if (logRec) logisticsData = logRec;
+    } catch (e) {}
+
+    // Extract deep fields from rawRows
+    const raw0 = rawRows && rawRows.length > 0 ? (rawRows[0].raw_data || {}) : {};
+    const email = raw0.Email || raw0.email || '';
+    const subtotal = Number(raw0.Subtotal || raw0.subtotal) || Number(orderRow.order_total) || 0;
+    const shipping = Number(raw0.Shipping || raw0.shipping) || 0;
+    const taxes = Number(raw0.Taxes || raw0.taxes) || 0;
+    const discountAmount = Number(raw0['Discount Amount'] || raw0.discount_amount) || 0;
+    const discountCode = raw0['Discount Code'] || raw0.discount_code || orderRow.offer || 'No Offer';
+    const refundedAmount = Number(raw0['Refunded Amount'] || raw0.refunded_amount) || 0;
+    const financialStatus = (raw0['Financial Status'] || orderRow.extra_data?.financial_status || (orderRow.payment_mode === 'PREPAID' ? 'paid' : 'pending')).toLowerCase();
+    const fulfillmentStatus = (raw0['Fulfillment Status'] || orderRow.extra_data?.fulfillment_status || (orderRow.dispatch_status === 'DELIVERED' ? 'fulfilled' : 'unfulfilled')).toLowerCase();
+
+    // Map items with SKU and unit prices
+    const items = (itemRows && itemRows.length > 0) ? itemRows.map((it: any, i: number) => {
+      const matchingRaw = (rawRows || [])[i]?.raw_data || {};
+      return {
+        id: it.id,
+        product_name: it.product_name,
+        sku: matchingRaw['Lineitem sku'] || it.product_code || '-',
+        quantity: Number(it.quantity) || 1,
+        unit_price: Number(it.unit_price) || (Number(matchingRaw['Lineitem price']) || 0),
+        line_total: Number(it.line_total) || ((Number(it.unit_price) || 0) * (Number(it.quantity) || 1)),
+        fulfillment_status: matchingRaw['Lineitem fulfillment status'] || fulfillmentStatus
+      };
+    }) : [{
+      id: 'default-item',
+      product_name: orderRow.extra_data?.product_name || 'Standard Products',
+      sku: raw0['Lineitem sku'] || '-',
+      quantity: Number(orderRow.total_quantity) || 1,
+      unit_price: Number(orderRow.order_total) || 0,
+      line_total: Number(orderRow.order_total) || 0,
+      fulfillment_status: fulfillmentStatus
+    }];
+
+    // Construct addresses
+    const shippingAddress = {
+      name: raw0['Shipping Name'] || orderRow.customer_name || 'N/A',
+      street: raw0['Shipping Street'] || raw0['Shipping Address1'] || orderRow.extra_data?.address || '-',
+      city: raw0['Shipping City'] || orderRow.city || '-',
+      state: raw0['Shipping Province Name'] || raw0['Shipping Province'] || orderRow.state || '-',
+      pincode: String(raw0['Shipping Zip'] || orderRow.pincode || '-').replace(/^'/, ''),
+      country: raw0['Shipping Country'] || 'India',
+      phone: String(raw0['Shipping Phone'] || orderRow.phone || '')
+    };
+
+    const billingAddress = {
+      name: raw0['Billing Name'] || orderRow.customer_name || 'N/A',
+      street: raw0['Billing Street'] || raw0['Billing Address1'] || shippingAddress.street,
+      city: raw0['Billing City'] || orderRow.city || shippingAddress.city,
+      state: raw0['Billing Province Name'] || raw0['Billing Province'] || orderRow.state || shippingAddress.state,
+      pincode: String(raw0['Billing Zip'] || orderRow.pincode || shippingAddress.pincode).replace(/^'/, ''),
+      country: raw0['Billing Country'] || 'India',
+      phone: String(raw0['Billing Phone'] || orderRow.phone || '')
+    };
+
+    // Tracking URL generator
+    const awb = logisticsData.awbNumber || orderRow.extra_data?.awb_number || '';
+    const courier = logisticsData.courier || orderRow.extra_data?.courier || '';
+    let trackingUrl = '';
+    if (awb) {
+      if (courier.toLowerCase().includes('delhivery')) {
+        trackingUrl = `https://www.delhivery.com/track/package/${awb}`;
+      } else if (courier.toLowerCase().includes('bluedart')) {
+        trackingUrl = `https://www.bluedart.com/tracking?handler=traking&trackFor=0&action=awb&awbNo=${awb}`;
+      }
+    }
+
+    // Timeline events
+    const timeline: any[] = [];
+    if (raw0['Created at'] || orderRow.created_at) {
+      timeline.push({
+        title: 'Order Placed by Customer',
+        timestamp: raw0['Created at'] || orderRow.created_at,
+        description: `Customer placed order #${cleanId} via Website (${orderRow.payment_mode})`,
+        type: 'order'
+      });
+    }
+    if (raw0['Paid at']) {
+      timeline.push({
+        title: 'Payment Confirmed',
+        timestamp: raw0['Paid at'],
+        description: `Full payment received via ${orderRow.source_payment_method}`,
+        type: 'payment'
+      });
+    }
+    if (sourceFile?.uploaded_at) {
+      timeline.push({
+        title: 'Imported to Velmora Sales System',
+        timestamp: sourceFile.uploaded_at,
+        description: `File batch: ${sourceFile.file_name}`,
+        type: 'system'
+      });
+    }
+    if (logisticsData.manifestedDate || logisticsData.dispatchDate) {
+      timeline.push({
+        title: 'Handed Over to Courier',
+        timestamp: logisticsData.manifestedDate || logisticsData.dispatchDate,
+        description: `Courier: ${courier || 'Assigned Courier'}, AWB: ${awb}`,
+        type: 'fulfillment'
+      });
+    }
+    if (logisticsData.deliveredDate) {
+      timeline.push({
+        title: 'Delivered to Customer',
+        timestamp: logisticsData.deliveredDate,
+        description: 'Shipment marked delivered in Logistics',
+        type: 'fulfillment'
+      });
+    }
+
+    return {
+      order: {
+        id: orderRow.id,
+        order_id: cleanId,
+        customer_name: orderRow.customer_name,
+        address: shippingAddress.street,
+        state: orderRow.state,
+        city: orderRow.city,
+        pincode: orderRow.pincode,
+        order_formatted: orderRow.extra_data?.order_formatted || items.map(it => `${it.product_name} × ${it.quantity}`).join(' | '),
+        product_name: items.map(it => it.product_name).join(', '),
+        total_quantity: Number(orderRow.total_quantity) || 1,
+        offer: orderRow.offer || 'No Offer',
+        price: Number(orderRow.order_total) || 0,
+        phone: orderRow.phone,
+        payment_mode: orderRow.payment_mode,
+        source_payment_mode: orderRow.source_payment_method,
+        source_payment_method: orderRow.source_payment_method,
+        advance_paid: Number(orderRow.advance_paid) || 0,
+        remaining_payable: Number(orderRow.remaining_cod) || 0,
+        payment_classification_reason: orderRow.extra_data?.payment_classification_reason || '',
+        order_date: orderRow.order_date,
+        original_order_date: orderRow.extra_data?.original_order_date || orderRow.order_date,
+        upload_batch_id: orderRow.upload_id,
+        batch_file_name: sourceFile?.file_name || '',
+        created_at: orderRow.created_at,
+        items,
+        fulfillment_status: fulfillmentStatus,
+        financial_status: financialStatus,
+        awb_number: awb,
+        courier: courier,
+        fulfilled_date: orderRow.extra_data?.fulfilled_date || orderRow.dispatch_date || '',
+        email,
+        subtotal,
+        shipping_charges: shipping,
+        taxes,
+        discount_amount: discountAmount,
+        refund_amount: refundedAmount,
+        shipment_status: logisticsData.status || (awb ? 'In Transit' : 'Unfulfilled'),
+        tracking_url: trackingUrl
+      },
+      rawRows: rawRows ? rawRows.map(r => r.raw_data) : [],
+      email,
+      billingAddress,
+      shippingAddress,
+      items,
+      financials: {
+        subtotal,
+        discount_amount: discountAmount,
+        discount_code: discountCode,
+        shipping_charges: shipping,
+        taxes,
+        total: Number(orderRow.order_total) || 0,
+        advance_paid: Number(orderRow.advance_paid) || 0,
+        remaining_cod: Number(orderRow.remaining_cod) || 0,
+        refunded_amount: refundedAmount,
+        payment_method: orderRow.source_payment_method || orderRow.payment_mode,
+        financial_status: financialStatus
+      },
+      logistics: {
+        stage: logisticsData.stage,
+        status: logisticsData.status || (awb ? 'In Transit' : 'Unfulfilled'),
+        courier,
+        awb_number: awb,
+        tracking_url: trackingUrl,
+        manifested_date: logisticsData.manifestedDate,
+        dispatched_date: logisticsData.dispatchDate,
+        delivered_date: logisticsData.deliveredDate,
+        tracking_history: logisticsData.trackingHistory || []
+      },
+      sourceFile,
+      timeline
+    };
   }
 }
 

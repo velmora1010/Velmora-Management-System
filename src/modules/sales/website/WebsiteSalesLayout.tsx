@@ -4,9 +4,11 @@ import {
   ArrowLeft, 
   LayoutDashboard, 
   UploadCloud, 
-  BarChart3 
+  BarChart3,
+  ShoppingBag
 } from 'lucide-react';
 import { WebsiteDashboard } from './WebsiteDashboard';
+import { WebsiteOrders } from './WebsiteOrders';
 import { WebsiteUpload } from './WebsiteUpload';
 import { WebsiteFiles } from './WebsiteFiles';
 import { WebsiteAnalytics } from './WebsiteAnalytics';
@@ -18,9 +20,10 @@ export const WebsiteSalesLayout: React.FC = () => {
   const location = useLocation();
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
 
-  // Simplified navigation: Only Dashboard and Analytics tabs
+  // Required 3-tab navigation: Dashboard, Orders, Analytics
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', path: '/sales/website/dashboard', icon: LayoutDashboard },
+    { id: 'orders', label: 'Orders', path: '/sales/website/orders', icon: ShoppingBag },
     { id: 'analytics', label: 'Analytics', path: '/sales/website/analytics', icon: BarChart3 }
   ];
 
@@ -69,7 +72,7 @@ export const WebsiteSalesLayout: React.FC = () => {
 
         {/* NAVIGATION ROW (LEFT: TABS | RIGHT: UPLOAD BUTTON) */}
         <div className="flex items-center justify-between gap-3 py-1">
-          {/* Left: Dashboard and Analytics navigation tabs */}
+          {/* Left: Dashboard, Orders, and Analytics navigation tabs */}
           <div className="flex items-center gap-3 overflow-x-auto">
             {tabs.map(tab => {
               const Icon = tab.icon;
@@ -109,6 +112,7 @@ export const WebsiteSalesLayout: React.FC = () => {
         <Routes>
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<WebsiteDashboard />} />
+          <Route path="orders" element={<WebsiteOrders />} />
           <Route path="upload" element={<WebsiteUpload />} />
           <Route path="files" element={<WebsiteFiles />} />
           <Route path="raw-data" element={<Navigate to="/sales/website/files?view=raw" replace />} />
@@ -122,7 +126,12 @@ export const WebsiteSalesLayout: React.FC = () => {
           isOpen={isUploadModalOpen}
           onClose={() => setIsUploadModalOpen(false)}
           onUploadSuccess={(orderDate) => {
-            navigate(`/sales/website/dashboard?date=${orderDate}`);
+            window.dispatchEvent(new CustomEvent('velmora:website_sales_updated', { detail: { orderDate } }));
+            if (activeTabId === 'orders') {
+              // Stay on orders tab with refreshed data
+            } else {
+              navigate(`/sales/website/dashboard?date=${orderDate}`);
+            }
           }}
         />
       </div>

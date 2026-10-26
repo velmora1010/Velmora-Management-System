@@ -109,6 +109,113 @@ export interface WebsiteConsolidatedOrder {
   awb_number?: string;
   courier?: string;
   fulfilled_date?: string;
+  email?: string;
+  billing_address?: string;
+  subtotal?: number;
+  shipping_charges?: number;
+  taxes?: number;
+  discount_amount?: number;
+  refund_amount?: number;
+  shipment_status?: string;
+  tracking_url?: string;
+  manifested_date?: string;
+  dispatched_date?: string;
+  delivered_date?: string;
+}
+
+export interface WebsiteFullOrderDetails {
+  order: WebsiteConsolidatedOrder;
+  rawRows?: Record<string, any>[];
+  email?: string;
+  billingAddress?: {
+    name?: string;
+    street?: string;
+    city?: string;
+    state?: string;
+    pincode?: string;
+    country?: string;
+    phone?: string;
+  };
+  shippingAddress?: {
+    name?: string;
+    street?: string;
+    city?: string;
+    state?: string;
+    pincode?: string;
+    country?: string;
+    phone?: string;
+  };
+  items: Array<{
+    id: string;
+    product_name: string;
+    sku?: string;
+    quantity: number;
+    unit_price?: number;
+    line_total?: number;
+    compare_at_price?: number;
+    fulfillment_status?: string;
+  }>;
+  financials: {
+    subtotal: number;
+    discount_amount: number;
+    discount_code?: string;
+    shipping_charges: number;
+    taxes: number;
+    total: number;
+    advance_paid: number;
+    remaining_cod: number;
+    refunded_amount: number;
+    payment_method: string;
+    financial_status: string;
+  };
+  logistics: {
+    stage?: string;
+    status?: string;
+    courier?: string;
+    awb_number?: string;
+    tracking_url?: string;
+    manifested_date?: string;
+    dispatched_date?: string;
+    delivered_date?: string;
+    tracking_history?: Array<{
+      status: string;
+      location?: string;
+      timestamp: string;
+      activity?: string;
+    }>;
+  };
+  sourceFile?: {
+    id?: string;
+    file_name?: string;
+    uploaded_at?: string;
+  };
+  timeline: Array<{
+    title: string;
+    timestamp: string;
+    description?: string;
+    type?: 'order' | 'payment' | 'fulfillment' | 'system';
+  }>;
+}
+
+export interface GetOrdersPaginatedParams {
+  page: number;
+  pageSize: number;
+  search?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  paymentMode?: string;
+  fulfillmentStatus?: string;
+  state?: string;
+  sortBy?: 'order_date' | 'order_id' | 'customer_name' | 'order_total' | 'created_at';
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface PaginatedOrdersResult {
+  orders: WebsiteConsolidatedOrder[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
 }
 
 export interface WebsiteSalesFilterState {

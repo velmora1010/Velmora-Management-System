@@ -156,6 +156,8 @@ export const WebsiteAnalytics: React.FC = () => {
     endDate: analyticsEndDate, 
     setDateRange,
     resetToToday,
+    resetToLatestSalesDate,
+    latestAvailableDate,
     shiftRange 
   } = useWebsiteSalesDateRange();
 
@@ -340,7 +342,12 @@ export const WebsiteAnalytics: React.FC = () => {
     setProdCompCardSlice(null);
     setQtyCompCardSlice(null);
     setCodCardSlice(null);
-    toast.success('Filters reset to default');
+    if (resetToLatestSalesDate) {
+      resetToLatestSalesDate();
+    } else {
+      resetToToday();
+    }
+    toast.success('Filters reset to latest sales period');
   };
 
   const handleApplyFilters = () => {
@@ -1389,12 +1396,23 @@ export const WebsiteAnalytics: React.FC = () => {
           <p className="text-xs text-slate-500 max-w-md mx-auto">
             Try choosing a different date range or click Reset Filters to view sales activity.
           </p>
-          <button
-            onClick={handleResetFilters}
-            className="px-4 py-2 bg-purple-600 text-white font-bold text-xs rounded-xl hover:bg-purple-500 transition-colors cursor-pointer"
-          >
-            Reset Filters
-          </button>
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            <button
+              onClick={handleResetFilters}
+              className="px-4 py-2 bg-purple-600 text-white font-bold text-xs rounded-xl hover:bg-purple-500 transition-colors cursor-pointer"
+            >
+              Reset Filters
+            </button>
+            {latestAvailableDate && latestAvailableDate !== todayStr && (
+              <button
+                type="button"
+                onClick={resetToLatestSalesDate}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm"
+              >
+                <span>Jump to Latest Sales ({formatSalesDateShort(latestAvailableDate)})</span>
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <>

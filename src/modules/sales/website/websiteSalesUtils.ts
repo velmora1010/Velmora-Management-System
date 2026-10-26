@@ -489,6 +489,16 @@ export function normalizeOrderId(val: any): string {
   return str.replace(/^#+/, '').toLowerCase();
 }
 
+export const cleanOrderId = (val: any): string => {
+  if (val === null || val === undefined) return '';
+  let str = String(val).trim().replace(/[\r\n\t]/g, '');
+  if (str.startsWith('#')) str = str.slice(1).trim();
+  if ((str.startsWith('"') && str.endsWith('"')) || (str.startsWith("'") && str.endsWith("'"))) {
+    str = str.slice(1, -1).trim();
+  }
+  return str.replace(/^#+/, '');
+};
+
 export function normalizeIndianPhoneNumber(val: any): string {
   if (val === null || val === undefined) return '-';
   let str = String(val).replace(/^'/, '').trim();
