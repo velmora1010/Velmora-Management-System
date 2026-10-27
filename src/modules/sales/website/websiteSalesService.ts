@@ -1087,19 +1087,19 @@ export class WebsiteSalesService {
       }
     }
 
-    if (params.shipmentStatus && params.shipmentStatus !== 'All shipments' && params.shipmentStatus !== 'ALL') {
-      const ss = params.shipmentStatus.trim();
-      if (ss === 'Delivered') {
+    if (params.shipmentStatus && params.shipmentStatus.toLowerCase() !== 'all shipments' && params.shipmentStatus.toUpperCase() !== 'ALL') {
+      const ss = params.shipmentStatus.trim().toLowerCase();
+      if (ss === 'delivered') {
         query = query.eq('dispatch_status', 'DELIVERED');
-      } else if (ss === 'Pending AWB') {
+      } else if (ss === 'pending awb') {
         query = query.eq('dispatch_status', 'UNFULFILLED');
-      } else if (ss === 'Ready to ship') {
+      } else if (ss === 'ready to ship') {
         query = query.eq('dispatch_status', 'UNFULFILLED');
-      } else if (ss === 'In transit') {
+      } else if (ss === 'in transit') {
         query = query.eq('dispatch_status', 'DISPATCHED');
-      } else if (ss === 'RTO - In transit') {
+      } else if (ss === 'rto - in transit') {
         query = query.ilike('dispatch_status', '%RTO%');
-      } else if (ss === 'Ready for pickup') {
+      } else if (ss === 'ready for pickup') {
         query = query.ilike('dispatch_status', '%PICKUP%');
       }
     }
