@@ -1089,18 +1089,52 @@ export class WebsiteSalesService {
       query = query.lte('dispatch_date', params.deliveredDateTo);
     }
 
-    // 2. Payment Modes Filter
+    // 2. Payment Modes Filter (Prepaid, COD, Partial COD)
+    const rawModes: string[] = [];
     if (params.paymentModes && params.paymentModes.length > 0) {
-      const modes = params.paymentModes.map(m => m.toUpperCase());
-      const hasCod = modes.includes('COD');
-      const hasPrepaid = modes.includes('PREPAID');
-      if (hasCod && !hasPrepaid) {
-        query = query.ilike('payment_mode', '%COD%');
-      } else if (hasPrepaid && !hasCod) {
-        query = query.not('payment_mode', 'ilike', '%COD%');
+      rawModes.push(...params.paymentModes);
+    } else if (params.paymentMode && params.paymentMode.toUpperCase() !== 'ALL') {
+      rawModes.push(params.paymentMode);
+    }
+
+    if (rawModes.length > 0) {
+      const selectedDbModes = new Set<string>();
+      rawModes.forEach(m => {
+        const norm = m.trim().toUpperCase();
+        if (norm === 'PREPAID') {
+          selectedDbModes.add('PREPAID');
+        } else if (norm === 'PARTIAL COD' || norm === 'PARTIAL' || norm === 'PARTIAL_COD') {
+          selectedDbModes.add('PARTIAL COD');
+        } else if (norm === 'COD' || norm === 'FULL COD') {
+          selectedDbModes.add('COD');
+        }
+      });
+
+      const modesArr = Array.from(selectedDbModes);
+      // If user selected a proper subset of the 3 payment modes, apply exact in() filter
+      if (modesArr.length > 0 && modesArr.length < 3) {
+        query = query.in('payment_mode', modesArr);
       }
-    } else if (params.paymentMode && params.paymentMode !== 'ALL') {
-      query = query.eq('payment_mode', params.paymentMode);
+    }
+
+    // 2b. Fulfillment Status Filter (Fulfilled, Unfulfilled) - kept distinct from courier dispatch_status!
+    const rawFulfillment: string[] = [];
+    if (params.fulfillmentStatuses && params.fulfillmentStatuses.length > 0) {
+      rawFulfillment.push(...params.fulfillmentStatuses);
+    } else if (params.fulfillmentStatus && params.fulfillmentStatus.toUpperCase() !== 'ALL') {
+      rawFulfillment.push(params.fulfillmentStatus);
+    }
+
+    if (rawFulfillment.length > 0) {
+      const norms = rawFulfillment.map(f => f.trim().toUpperCase());
+      const hasFulfilled = norms.includes('FULFILLED');
+      const hasUnfulfilled = norms.includes('UNFULFILLED');
+
+      if (hasFulfilled && !hasUnfulfilled) {
+        query = query.eq('order_status', 'FULFILLED');
+      } else if (hasUnfulfilled && !hasFulfilled) {
+        query = query.neq('order_status', 'FULFILLED');
+      }
     }
 
     // 3. Zones / States Filter
@@ -1118,15 +1152,6 @@ export class WebsiteSalesService {
       }
     } else if (params.state && params.state !== 'ALL') {
       query = query.ilike('state', `%${params.state}%`);
-    }
-
-    if (params.fulfillmentStatus && params.fulfillmentStatus !== 'ALL') {
-      const fs = params.fulfillmentStatus.toUpperCase();
-      if (fs === 'FULFILLED') {
-        query = query.eq('dispatch_status', 'DELIVERED');
-      } else if (fs === 'UNFULFILLED') {
-        query = query.eq('dispatch_status', 'UNFULFILLED');
-      }
     }
 
     if (params.shipmentStatus && params.shipmentStatus.toLowerCase() !== 'all shipments' && params.shipmentStatus.toUpperCase() !== 'ALL') {

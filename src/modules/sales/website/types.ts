@@ -19,6 +19,7 @@ export interface ColumnMapping {
   paymentMode: string;
   orderDate?: string;
   fulfillmentStatus?: string;
+  fulfillmentStatuses?: string[];
   financialStatus?: string;
   awbNumber?: string;
   courier?: string;
