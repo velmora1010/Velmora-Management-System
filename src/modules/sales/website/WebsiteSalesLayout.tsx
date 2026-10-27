@@ -133,16 +133,28 @@ export const WebsiteSalesLayout: React.FC = () => {
           onChooseDelhivery={() => setIsDelhiveryModalOpen(true)}
         />
 
-        {/* DELHIVERY ONE PLACEHOLDER MODAL */}
+        {/* DELHIVERY ONE DEDICATED UPLOAD MODAL */}
         <DelhiveryUploadModal
           isOpen={isDelhiveryModalOpen}
           onClose={() => setIsDelhiveryModalOpen(false)}
+          onBackToSourceSelect={() => {
+            setIsDelhiveryModalOpen(false);
+            setIsChoiceModalOpen(true);
+          }}
+          onImportSuccess={() => {
+            window.dispatchEvent(new CustomEvent('velmora:website_sales_updated'));
+            window.dispatchEvent(new CustomEvent('velmora:logistics_updated'));
+          }}
         />
 
         {/* SHOPIFY ORDER FILES MODAL */}
         <WebsiteOrderFilesModal
           isOpen={isUploadModalOpen}
           onClose={() => setIsUploadModalOpen(false)}
+          onBackToSourceSelect={() => {
+            setIsUploadModalOpen(false);
+            setIsChoiceModalOpen(true);
+          }}
           onUploadSuccess={(orderDate) => {
             window.dispatchEvent(new CustomEvent('velmora:website_sales_updated', { detail: { orderDate } }));
             if (activeTabId === 'orders') {

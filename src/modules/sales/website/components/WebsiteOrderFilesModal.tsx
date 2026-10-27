@@ -31,12 +31,14 @@ interface WebsiteOrderFilesModalProps {
   isOpen: boolean;
   onClose: () => void;
   onUploadSuccess?: (orderDate: string) => void;
+  onBackToSourceSelect?: () => void;
 }
 
 export const WebsiteOrderFilesModal: React.FC<WebsiteOrderFilesModalProps> = ({
   isOpen,
   onClose,
-  onUploadSuccess
+  onUploadSuccess,
+  onBackToSourceSelect
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -276,6 +278,16 @@ export const WebsiteOrderFilesModal: React.FC<WebsiteOrderFilesModalProps> = ({
         {/* MODAL HEADER */}
         <div className="p-4 sm:p-5 bg-slate-950 border-b border-slate-800/80 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
+            {onBackToSourceSelect && (
+              <button
+                type="button"
+                onClick={onBackToSourceSelect}
+                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer mr-1"
+                title="Back to source selection"
+              >
+                <ArrowRight size={16} className="rotate-180" />
+              </button>
+            )}
             <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center justify-center shadow-inner">
               <UploadCloud size={20} />
             </div>
