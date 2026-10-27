@@ -1343,12 +1343,14 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         </div>
       )}
 
-      {/* 3. MAIN WORKSPACE CONTENT: Left Section Sidebar + Table View (Side-by-Side on Desktop) */}
+      {/* 3. MAIN WORKSPACE CONTENT: Reclaimed Full Width Table View + Horizontal Status Navigation */}
       <div className="flex-1 flex gap-3.5 min-h-0 overflow-hidden pb-1">
-        
-        {/* Left Navigation Sidebar (desktop) */}
-        {currentStage !== 'analytics' && currentStage !== 'prepare_dispatch' && (
-          <div className="hidden md:flex w-56 lg:w-64 shrink-0 flex-col h-full">
+
+        {/* Main Table / View Area (Reclaiming full width from previous vertical sidebar) */}
+        <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden gap-2.5">
+          
+          {/* Horizontal Shipment Status Navigation Row (Orders title + 8 status items) */}
+          {currentStage !== 'analytics' && currentStage !== 'prepare_dispatch' && (
             <LogisticsSectionSidebar
               activeSection={logisticsFilters.activeSection}
               onSelectSection={(sec) => {
@@ -1369,54 +1371,9 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
               }}
               counts={sectionCounts}
             />
-          </div>
-        )}
-
-        {/* Main Table / View Area */}
-        <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden gap-2">
-          
-          {/* Mobile horizontal section selector */}
-          {currentStage !== 'analytics' && currentStage !== 'prepare_dispatch' && (
-            <div className="md:hidden flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-1 shrink-0">
-              {[
-                { id: 'pending_awb', label: 'Pending AWB' },
-                { id: 'ready_to_ship', label: 'Ready to ship' },
-                { id: 'ready_for_pickup', label: 'Ready for pickup' },
-                { id: 'in_transit', label: 'In transit' },
-                { id: 'rto_in_transit', label: 'RTO - In transit' },
-                { id: 'delivered', label: 'Delivered' },
-                { id: 'all_shipments', label: 'All shipments' },
-                { id: 'third_party', label: 'Shipped via third party' }
-              ].map(item => {
-                const isSelected = logisticsFilters.activeSection === item.id;
-                const count = sectionCounts[item.id as LogisticsSection] || 0;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setLogisticsFilters(prev => ({
-                      ...prev,
-                      activeSection: item.id as LogisticsSection,
-                      shipmentStatuses: []
-                    }))}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 shrink-0 border ${
-                      isSelected
-                        ? 'bg-purple-600 text-white border-purple-500 shadow-sm'
-                        : 'bg-[#0b1220] border-slate-800 text-slate-300 hover:text-white'
-                    }`}
-                  >
-                    <span>{item.label}</span>
-                    <span className={`px-1.5 py-0.2 rounded text-[10px] font-mono ${
-                      isSelected ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'
-                    }`}>
-                      {count}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
           )}
 
+          {/* Search Controls & Shipment Status-Specific Filters */}
           {currentStage !== 'analytics' && currentStage !== 'prepare_dispatch' && (
             <LogisticsFilterToolbar
               filters={logisticsFilters}
