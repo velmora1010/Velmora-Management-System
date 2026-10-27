@@ -9,6 +9,7 @@ import type {
   PriceInterpretationMode,
   ColumnMapping,
   GetOrdersPaginatedParams,
+  ShipmentStatusCounts,
   PaginatedOrdersResult,
   WebsiteFullOrderDetails
 } from './types';
@@ -956,6 +957,91 @@ export class WebsiteSalesService {
     return getTodayInBusinessTimezone();
   }
 
+  // Get dynamic shipment status counts directly from database & logistics
+  async getShipmentStatusCounts(): Promise<ShipmentStatusCounts> {
+    try {
+      const [totalRes, deliveredRes, dispatchedRes, unfulfilledRes] = await Promise.all([
+        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').neq('order_status', 'DELETED'),
+        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').neq('order_status', 'DELETED').eq('dispatch_status', 'DELIVERED'),
+        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').neq('order_status', 'DELETED').eq('dispatch_status', 'DISPATCHED'),
+        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').neq('order_status', 'DELETED').eq('dispatch_status', 'UNFULFILLED')
+      ]);
+
+      const all = totalRes.count ?? 0;
+      let delivered = deliveredRes.count ?? 0;
+      let inTransit = dispatchedRes.count ?? 0;
+      let unfulfilled = unfulfilledRes.count ?? Math.max(0, all - delivered - inTransit);
+
+      let pendingAwb = unfulfilled;
+      let readyToShip = unfulfilled;
+      let readyForPickup = 0;
+      let rtoInTransit = 0;
+
+      // Merge Dexie logistics_orders if available for live tracking stages
+      try {
+        const dexieOrders = await db.logistics_orders.toArray();
+        if (dexieOrders && dexieOrders.length > 0) {
+          let dPendingAwb = 0;
+          let dReadyToShip = 0;
+          let dReadyForPickup = 0;
+          let dInTransit = 0;
+          let dRto = 0;
+          let dDelivered = 0;
+
+          for (const o of dexieOrders) {
+            if (o.stage === 'trash' || o.status === 'Deleted' || o.status === 'Cancelled') continue;
+            const st = (o.status || '').toLowerCase();
+            const hasAwb = !!(o.awbNumber && o.awbNumber.trim().length > 0);
+
+            if (st.includes('delivered') || o.stage === 'fulfilled' || o.deliveredDate) {
+              dDelivered++;
+            } else if (st.includes('rto') || st.includes('return')) {
+              dRto++;
+            } else if (st.includes('transit') || st.includes('shipped') || o.stage === 'dispatched' || o.stage === 'tracking') {
+              dInTransit++;
+            } else if (st.includes('pickup')) {
+              dReadyForPickup++;
+            } else if (hasAwb || st.includes('ready to ship') || o.stage === 'prepare_dispatch') {
+              dReadyToShip++;
+            } else {
+              dPendingAwb++;
+              dReadyToShip++;
+            }
+          }
+
+          if (dReadyForPickup > 0) readyForPickup = dReadyForPickup;
+          if (dRto > 0) rtoInTransit = dRto;
+          if (dInTransit > 0) inTransit = Math.max(inTransit, dInTransit);
+          if (dPendingAwb > 0) pendingAwb = dPendingAwb;
+          if (dReadyToShip > 0) readyToShip = dReadyToShip;
+        }
+      } catch (e) {
+        // Fallback gracefully
+      }
+
+      return {
+        all,
+        pendingAwb,
+        readyToShip,
+        readyForPickup,
+        inTransit,
+        rtoInTransit,
+        delivered
+      };
+    } catch (err) {
+      console.error('Failed to get shipment status counts:', err);
+      return {
+        all: 0,
+        pendingAwb: 0,
+        readyToShip: 0,
+        readyForPickup: 0,
+        inTransit: 0,
+        rtoInTransit: 0,
+        delivered: 0
+      };
+    }
+  }
+
   // Fast server-side paginated, searchable, sortable orders query
   async getOrdersPaginated(params: GetOrdersPaginatedParams): Promise<PaginatedOrdersResult> {
     await this.checkAndMigrateLocalStorage();
@@ -998,6 +1084,23 @@ export class WebsiteSalesService {
         query = query.eq('dispatch_status', 'DELIVERED');
       } else if (fs === 'UNFULFILLED') {
         query = query.eq('dispatch_status', 'UNFULFILLED');
+      }
+    }
+
+    if (params.shipmentStatus && params.shipmentStatus !== 'All shipments' && params.shipmentStatus !== 'ALL') {
+      const ss = params.shipmentStatus.trim();
+      if (ss === 'Delivered') {
+        query = query.eq('dispatch_status', 'DELIVERED');
+      } else if (ss === 'Pending AWB') {
+        query = query.eq('dispatch_status', 'UNFULFILLED');
+      } else if (ss === 'Ready to ship') {
+        query = query.eq('dispatch_status', 'UNFULFILLED');
+      } else if (ss === 'In transit') {
+        query = query.eq('dispatch_status', 'DISPATCHED');
+      } else if (ss === 'RTO - In transit') {
+        query = query.ilike('dispatch_status', '%RTO%');
+      } else if (ss === 'Ready for pickup') {
+        query = query.ilike('dispatch_status', '%PICKUP%');
       }
     }
 

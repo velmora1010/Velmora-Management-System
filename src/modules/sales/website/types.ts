@@ -205,9 +205,20 @@ export interface GetOrdersPaginatedParams {
   dateTo?: string;
   paymentMode?: string;
   fulfillmentStatus?: string;
+  shipmentStatus?: string;
   state?: string;
   sortBy?: 'order_date' | 'order_id' | 'customer_name' | 'order_total' | 'created_at';
   sortOrder?: 'asc' | 'desc';
+}
+
+export interface ShipmentStatusCounts {
+  all: number;
+  pendingAwb: number;
+  readyToShip: number;
+  readyForPickup: number;
+  inTransit: number;
+  rtoInTransit: number;
+  delivered: number;
 }
 
 export interface PaginatedOrdersResult {

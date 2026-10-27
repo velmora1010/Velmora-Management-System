@@ -14,11 +14,15 @@ import { WebsiteFiles } from './WebsiteFiles';
 import { WebsiteAnalytics } from './WebsiteAnalytics';
 import { WebsiteSalesDateRangeProvider } from './context/WebsiteSalesDateRangeContext';
 import { WebsiteOrderFilesModal } from './components/WebsiteOrderFilesModal';
+import { WebsiteUploadChoiceModal } from './components/WebsiteUploadChoiceModal';
+import { DelhiveryUploadModal } from './components/DelhiveryUploadModal';
 
 export const WebsiteSalesLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const [isChoiceModalOpen, setIsChoiceModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isDelhiveryModalOpen, setIsDelhiveryModalOpen] = useState(false);
 
   // Required 3-tab navigation: Dashboard, Orders, Analytics
   const tabs = [
@@ -27,9 +31,9 @@ export const WebsiteSalesLayout: React.FC = () => {
     { id: 'analytics', label: 'Analytics', path: '/sales/website/analytics', icon: BarChart3 }
   ];
 
-  // Global listener to open upload modal from dashboard or anywhere in website sales
+  // Global listener to open upload selector modal from dashboard or anywhere in website sales
   useEffect(() => {
-    const handleOpenModal = () => setIsUploadModalOpen(true);
+    const handleOpenModal = () => setIsChoiceModalOpen(true);
     window.addEventListener('velmora:open_website_upload_modal', handleOpenModal);
     return () => window.removeEventListener('velmora:open_website_upload_modal', handleOpenModal);
   }, []);
@@ -98,7 +102,7 @@ export const WebsiteSalesLayout: React.FC = () => {
           <div className="ml-auto flex items-center shrink-0">
             <button
               type="button"
-              onClick={() => setIsUploadModalOpen(true)}
+              onClick={() => setIsChoiceModalOpen(true)}
               className="h-[42px] px-4 sm:px-5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md shadow-purple-600/30 border border-purple-400/30 transition-all flex items-center gap-2 cursor-pointer shrink-0 active:scale-95"
               title="Upload Website Order Files"
             >
@@ -121,7 +125,21 @@ export const WebsiteSalesLayout: React.FC = () => {
           <Route path="*" element={<Navigate to="dashboard" replace />} />
         </Routes>
 
-        {/* UNIFIED ORDER FILES MODAL */}
+        {/* UPLOAD FORMAT SELECTION MODAL */}
+        <WebsiteUploadChoiceModal
+          isOpen={isChoiceModalOpen}
+          onClose={() => setIsChoiceModalOpen(false)}
+          onChooseShopify={() => setIsUploadModalOpen(true)}
+          onChooseDelhivery={() => setIsDelhiveryModalOpen(true)}
+        />
+
+        {/* DELHIVERY ONE PLACEHOLDER MODAL */}
+        <DelhiveryUploadModal
+          isOpen={isDelhiveryModalOpen}
+          onClose={() => setIsDelhiveryModalOpen(false)}
+        />
+
+        {/* SHOPIFY ORDER FILES MODAL */}
         <WebsiteOrderFilesModal
           isOpen={isUploadModalOpen}
           onClose={() => setIsUploadModalOpen(false)}
