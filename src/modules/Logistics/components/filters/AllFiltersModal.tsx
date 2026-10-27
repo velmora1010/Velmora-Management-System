@@ -1,11 +1,36 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, Search, Check, Calendar, RotateCcw } from 'lucide-react';
+import { 
+  X, 
+  Search, 
+  Check, 
+  Calendar, 
+  RotateCcw, 
+  MapPin, 
+  ShieldAlert, 
+  Globe, 
+  CreditCard, 
+  BadgeCheck, 
+  Tags, 
+  Compass, 
+  Truck, 
+  Layers,
+  ChevronLeft,
+  ChevronRight
+} from 'lucide-react';
 import type { LogisticsFilterState, LogisticsDatePreset } from '../../types/logisticsFilters';
 import { 
-  CANONICAL_SHIPMENT_STATUSES, 
-  getOrderShipmentStatus, 
-  resolveDateRangeForPreset,
-  formatRangeDisplay 
+  formatLocalYMD, 
+  parseLocalYMD, 
+  resolveDateRangeForPreset, 
+  formatRangeDisplay,
+  calculateOrderRiskOfReturn,
+  calculateOrderChannel,
+  calculateOrderPaymentMode,
+  calculateOrderVerified,
+  calculateOrderAddressScore,
+  calculateOrderZone,
+  MONTH_NAMES_SHORT,
+  MONTH_NAMES_FULL
 } from '../../types/logisticsFilters';
 import type { UnifiedLogisticsOrder } from '../../../../types/unifiedLogistics';
 
@@ -17,35 +42,38 @@ interface AllFiltersModalProps {
   orders?: UnifiedLogisticsOrder[];
 }
 
-type FilterCategory = 
-  | 'shipment_status'
+export type AllFilterCategory = 
+  | 'date_range'
   | 'pickup_location'
-  | 'manifested_date'
-  | 'transport_mode'
+  | 'risk_of_return'
+  | 'channel'
   | 'payment_mode'
-  | 'cancellation_status';
+  | 'verified'
+  | 'order_tags'
+  | 'address_score'
+  | 'transport_mode'
+  | 'zone';
 
-const CATEGORIES: Array<{ id: FilterCategory; label: string }> = [
-  { id: 'shipment_status', label: 'Shipment status' },
-  { id: 'pickup_location', label: 'Pickup location' },
-  { id: 'manifested_date', label: 'Manifested date' },
-  { id: 'transport_mode', label: 'Transport mode' },
-  { id: 'payment_mode', label: 'Payment mode' },
-  { id: 'cancellation_status', label: 'Order Cancellation Status' }
+interface CategoryConfig {
+  id: AllFilterCategory;
+  label: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+}
+
+const CATEGORIES: CategoryConfig[] = [
+  { id: 'date_range', label: 'Date range', icon: Calendar },
+  { id: 'pickup_location', label: 'Pickup location', icon: MapPin },
+  { id: 'risk_of_return', label: 'Risk of return', icon: ShieldAlert },
+  { id: 'channel', label: 'Channel', icon: Globe },
+  { id: 'payment_mode', label: 'Payment mode', icon: CreditCard },
+  { id: 'verified', label: 'Verified', icon: BadgeCheck },
+  { id: 'order_tags', label: 'Order tags', icon: Tags },
+  { id: 'address_score', label: 'Address score', icon: Compass },
+  { id: 'transport_mode', label: 'Transport mode', icon: Truck },
+  { id: 'zone', label: 'Zone', icon: Layers }
 ];
 
-const DEFAULT_PICKUP_LOCATIONS = [
-  'VELMORA CONSUMER B2C Erode 638002',
-  'VELMORA MAIN WAREHOUSE Erode',
-  'VELMORA DISPATCH HUB Erode 638001'
-];
-
-const TRANSPORT_MODES = ['Surface', 'Air'] as const;
-const PAYMENT_MODES = ['Prepaid', 'Cash on Delivery'] as const;
-const CANCELLATION_STATUSES = ['Requested', 'Approved', 'Rejected', 'Completed'] as const;
-
-const MANIFEST_PRESETS: Array<{ id: LogisticsDatePreset; label: string }> = [
-  { id: 'all', label: 'All Dates' },
+const DATE_PRESETS: Array<{ id: LogisticsDatePreset; label: string }> = [
   { id: 'today', label: 'Today' },
   { id: 'yesterday', label: 'Yesterday' },
   { id: 'this_week', label: 'This Week' },
@@ -56,6 +84,35 @@ const MANIFEST_PRESETS: Array<{ id: LogisticsDatePreset; label: string }> = [
   { id: 'custom', label: 'Custom Range' }
 ];
 
+const DEFAULT_PICKUP_LOCATIONS = [
+  'VELMORA CONSUMER B2C Erode 638002',
+  'VELMORA MAIN WAREHOUSE Erode',
+  'VELMORA DISPATCH HUB Erode 638001'
+];
+
+const ZONE_OPTIONS = [
+  'Zone A',
+  'Zone B',
+  'Zone C',
+  'Zone D',
+  'Zone E',
+  'Zone F',
+  'S1',
+  'S2',
+  'S3',
+  'S4'
+];
+
+const COMMON_TAGS = [
+  'VIP',
+  'Express Delivery',
+  'Bulk Order',
+  'Fragile',
+  'Repeat Customer',
+  'High Priority',
+  'Gift Wrap'
+];
+
 export const AllFiltersModal: React.FC<AllFiltersModalProps> = ({
   isOpen,
   onClose,
@@ -63,21 +120,30 @@ export const AllFiltersModal: React.FC<AllFiltersModalProps> = ({
   onApply,
   orders = []
 }) => {
-  const [activeCategory, setActiveCategory] = useState<FilterCategory>('shipment_status');
+  const [activeCategory, setActiveCategory] = useState<AllFilterCategory>('date_range');
   const [draft, setDraft] = useState<LogisticsFilterState>(filters);
-  const [statusSearch, setStatusSearch] = useState('');
-  const [locationSearch, setLocationSearch] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
 
-  // Sync draft when opened
+  // Calendar view for custom range
+  const [viewYear, setViewYear] = useState<number>(() => new Date().getFullYear());
+  const [viewMonth, setViewMonth] = useState<number>(() => new Date().getMonth());
+  const [rangeStage, setRangeStage] = useState<'idle' | 'selecting_end'>('idle');
+  const [hoverDate, setHoverDate] = useState<string | null>(null);
+
+  // Sync draft state on open
   useEffect(() => {
     if (isOpen) {
       setDraft(filters);
-      setStatusSearch('');
-      setLocationSearch('');
+      setSearchTerm('');
+      setRangeStage('idle');
+      setHoverDate(null);
+      const refDate = filters.startDate ? parseLocalYMD(filters.startDate) : new Date();
+      setViewYear(refDate.getFullYear());
+      setViewMonth(refDate.getMonth());
     }
   }, [isOpen, filters]);
 
-  // Escape key to close
+  // Escape key listener
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isOpen) onClose();
@@ -86,7 +152,7 @@ export const AllFiltersModal: React.FC<AllFiltersModalProps> = ({
     return () => window.removeEventListener('keydown', handleKey);
   }, [isOpen, onClose]);
 
-  // Distinct pickup locations
+  // Pickup locations list
   const availableLocations = useMemo(() => {
     const set = new Set<string>(DEFAULT_PICKUP_LOCATIONS);
     orders.forEach(o => {
@@ -97,107 +163,221 @@ export const AllFiltersModal: React.FC<AllFiltersModalProps> = ({
     return Array.from(set);
   }, [orders]);
 
-  // Calculate live counts
-  const shipmentCounts = useMemo(() => {
-    const map: Record<string, number> = {};
-    CANONICAL_SHIPMENT_STATUSES.forEach(st => { map[st] = 0; });
+  // Order tags list
+  const availableTags = useMemo(() => {
+    const set = new Set<string>(COMMON_TAGS);
     orders.forEach(o => {
-      const canonical = getOrderShipmentStatus(o);
-      if (map[canonical] !== undefined) map[canonical]++;
+      (o.tags || []).forEach(t => {
+        if (t && t.trim()) set.add(t.trim());
+      });
     });
-    return map;
+    return Array.from(set);
   }, [orders]);
 
-  const locationCounts = useMemo(() => {
-    const map: Record<string, number> = {};
-    availableLocations.forEach(loc => { map[loc] = 0; });
-    orders.forEach(o => {
-      const loc = o.pickupLocation?.trim() || 'VELMORA CONSUMER B2C Erode 638002';
-      if (map[loc] !== undefined) {
-        map[loc]++;
-      } else {
-        const found = availableLocations.find(l => loc.toLowerCase().includes(l.toLowerCase()));
-        if (found) map[found] = (map[found] || 0) + 1;
-      }
-    });
-    return map;
-  }, [availableLocations, orders]);
+  // Live item counts across categories
+  const counts = useMemo(() => {
+    // 1. Pickup locations
+    const locMap: Record<string, number> = {};
+    availableLocations.forEach(l => { locMap[l] = 0; });
 
-  const transportCounts = useMemo(() => {
-    let surface = 0;
-    let air = 0;
-    orders.forEach(o => {
-      const tm = (o.transportMode || 'Surface').toLowerCase();
-      if (tm.includes('air')) air++;
-      else surface++;
-    });
-    return { Surface: surface, Air: air };
-  }, [orders]);
-
-  const paymentCounts = useMemo(() => {
-    let prepaid = 0;
-    let cod = 0;
-    orders.forEach(o => {
-      const type = (o.orderType || '').toLowerCase();
-      if (type.includes('cod')) cod++;
-      else prepaid++;
-    });
-    return { Prepaid: prepaid, 'Cash on Delivery': cod };
-  }, [orders]);
-
-  const cancellationCounts = useMemo(() => {
-    const map: Record<string, number> = {
-      Requested: 0,
-      Approved: 0,
-      Rejected: 0,
-      Completed: 0
+    // 2. Risk of return
+    const riskMap: Record<string, number> = {
+      'Low (0 - 20)': 0,
+      'Medium (21 - 51)': 0,
+      'High (52+)': 0
     };
+
+    // 3. Channel
+    const chMap: Record<string, number> = {
+      'Online Store / Shopify': 0,
+      'Website': 0,
+      'Manual / Direct': 0,
+      'Delhivery Direct': 0
+    };
+
+    // 4. Payment mode
+    const payMap: Record<string, number> = {
+      'COD': 0,
+      'Pickup': 0,
+      'Prepaid': 0,
+      'Replacement': 0
+    };
+
+    // 5. Verified
+    const verMap: Record<string, number> = {
+      'Verified': 0,
+      'Unverified': 0
+    };
+
+    // 6. Address score
+    const addrMap: Record<string, number> = {
+      'Complete (100%)': 0,
+      'Good (75-99%)': 0,
+      'Partial (50-74%)': 0,
+      'Poor (<50%)': 0
+    };
+
+    // 7. Transport mode
+    const tmMap: Record<string, number> = {
+      'Surface': 0,
+      'Express': 0
+    };
+
+    // 8. Zone
+    const zoneMap: Record<string, number> = {};
+    ZONE_OPTIONS.forEach(z => { zoneMap[z] = 0; });
+
+    // 9. Tags
+    const tagMap: Record<string, number> = {};
+    availableTags.forEach(t => { tagMap[t] = 0; });
+
     orders.forEach(o => {
-      const cs = o.cancellationStatus || (o.status === 'Cancelled' ? 'Completed' : '');
-      if (map[cs] !== undefined) map[cs]++;
-    });
-    return map;
-  }, [orders]);
-
-  // Count active selections per category
-  const categoryCounts: Record<FilterCategory, number> = {
-    shipment_status: draft.shipmentStatuses.length,
-    pickup_location: draft.pickupLocations.length,
-    manifested_date: (draft.manifestDatePreset !== 'all' || draft.manifestStartDate || draft.manifestEndDate) ? 1 : 0,
-    transport_mode: draft.transportModes.length,
-    payment_mode: draft.paymentModes.length,
-    cancellation_status: draft.cancellationStatuses.length
-  };
-
-  const totalActiveDraftCount = Object.values(categoryCounts).reduce((a, b) => a + b, 0);
-
-  // Clear specific category
-  const handleClearCategory = (cat: FilterCategory) => {
-    setDraft(prev => {
-      switch (cat) {
-        case 'shipment_status': return { ...prev, shipmentStatuses: [] };
-        case 'pickup_location': return { ...prev, pickupLocations: [] };
-        case 'manifested_date': return { ...prev, manifestDatePreset: 'all', manifestStartDate: '', manifestEndDate: '' };
-        case 'transport_mode': return { ...prev, transportModes: [] };
-        case 'payment_mode': return { ...prev, paymentModes: [] };
-        case 'cancellation_status': return { ...prev, cancellationStatuses: [] };
-        default: return prev;
+      // Location
+      const loc = o.pickupLocation?.trim() || 'VELMORA CONSUMER B2C Erode 638002';
+      if (locMap[loc] !== undefined) locMap[loc]++;
+      else {
+        const found = availableLocations.find(l => loc.toLowerCase().includes(l.toLowerCase()));
+        if (found) locMap[found] = (locMap[found] || 0) + 1;
       }
+
+      // Risk
+      const risk = calculateOrderRiskOfReturn(o);
+      if (riskMap[risk] !== undefined) riskMap[risk]++;
+
+      // Channel
+      const ch = calculateOrderChannel(o);
+      if (chMap[ch] !== undefined) chMap[ch]++;
+      else chMap['Website']++;
+
+      // Payment
+      const pm = calculateOrderPaymentMode(o);
+      if (payMap[pm] !== undefined) payMap[pm]++;
+
+      // Verified
+      const ver = calculateOrderVerified(o);
+      if (verMap[ver] !== undefined) verMap[ver]++;
+
+      // Address score
+      const score = calculateOrderAddressScore(o);
+      if (addrMap[score] !== undefined) addrMap[score]++;
+
+      // Transport mode
+      const tm = (o.transportMode || 'Surface').toLowerCase();
+      if (tm.includes('express') || tm.includes('air')) tmMap['Express']++;
+      else tmMap['Surface']++;
+
+      // Zone
+      const z = calculateOrderZone(o);
+      if (zoneMap[z] !== undefined) zoneMap[z]++;
+
+      // Tags
+      (o.tags || []).forEach(t => {
+        if (tagMap[t] !== undefined) tagMap[t]++;
+      });
+    });
+
+    return {
+      locations: locMap,
+      risk: riskMap,
+      channel: chMap,
+      payment: payMap,
+      verified: verMap,
+      address: addrMap,
+      transport: tmMap,
+      zone: zoneMap,
+      tags: tagMap
+    };
+  }, [orders, availableLocations, availableTags]);
+
+  // Active counts per category for badges in the left sidebar
+  const activeCategoryCounts = useMemo(() => {
+    return {
+      date_range: (draft.datePreset !== 'all' || Boolean(draft.startDate)) ? 1 : 0,
+      pickup_location: draft.pickupLocations.length,
+      risk_of_return: draft.riskOfReturn.length,
+      channel: draft.channels.length,
+      payment_mode: draft.paymentModes.length,
+      verified: draft.verifiedStatuses.length,
+      order_tags: draft.orderTags.length,
+      address_score: draft.addressScores.length,
+      transport_mode: draft.transportModes.length,
+      zone: draft.zones.length
+    };
+  }, [draft]);
+
+  // Total active count in draft
+  const totalDraftCount = useMemo(() => {
+    return Object.values(activeCategoryCounts).reduce((a, b) => a + b, 0);
+  }, [activeCategoryCounts]);
+
+  // Calendar days calculation
+  const calendarDays = useMemo(() => {
+    const firstDay = new Date(viewYear, viewMonth, 1);
+    const lastDay = new Date(viewYear, viewMonth + 1, 0);
+    const daysInMonth = lastDay.getDate();
+
+    let startDayOfWeek = firstDay.getDay() - 1; // Monday = 0
+    if (startDayOfWeek === -1) startDayOfWeek = 6;
+
+    const days: Array<{ dayNumber: number; ymd: string; isCurrentMonth: boolean }> = [];
+    const prevMonthLastDay = new Date(viewYear, viewMonth, 0).getDate();
+    for (let i = startDayOfWeek - 1; i >= 0; i--) {
+      const dNum = prevMonthLastDay - i;
+      const prevD = new Date(viewYear, viewMonth - 1, dNum);
+      days.push({ dayNumber: dNum, ymd: formatLocalYMD(prevD), isCurrentMonth: false });
+    }
+    for (let i = 1; i <= daysInMonth; i++) {
+      const curD = new Date(viewYear, viewMonth, i);
+      days.push({ dayNumber: i, ymd: formatLocalYMD(curD), isCurrentMonth: true });
+    }
+    const totalCells = Math.ceil(days.length / 7) * 7;
+    let nextDNum = 1;
+    while (days.length < totalCells) {
+      const nextD = new Date(viewYear, viewMonth + 1, nextDNum);
+      days.push({ dayNumber: nextDNum, ymd: formatLocalYMD(nextD), isCurrentMonth: false });
+      nextDNum++;
+    }
+    return days;
+  }, [viewYear, viewMonth]);
+
+  // Toggle helpers
+  const toggleArrayItem = <K extends keyof LogisticsFilterState>(
+    key: K,
+    item: string
+  ) => {
+    setDraft(prev => {
+      const arr = (prev[key] as unknown as string[]) || [];
+      const nextArr = arr.includes(item)
+        ? arr.filter(x => x !== item)
+        : [...arr, item];
+      return { ...prev, [key]: nextArr };
     });
   };
 
-  // Clear all
   const handleClearAll = () => {
     setDraft(prev => ({
       ...prev,
-      shipmentStatuses: [],
-      pickupLocations: [],
+      datePreset: 'all',
+      startDate: '',
+      endDate: '',
       manifestDatePreset: 'all',
       manifestStartDate: '',
       manifestEndDate: '',
+      deliveredDatePreset: 'all',
+      deliveredStartDate: '',
+      deliveredEndDate: '',
+      returnedDatePreset: 'all',
+      returnedStartDate: '',
+      returnedEndDate: '',
+      pickupLocations: [],
       transportModes: [],
       paymentModes: [],
-      cancellationStatuses: []
+      riskOfReturn: [],
+      channels: [],
+      verifiedStatuses: [],
+      orderTags: [],
+      addressScores: [],
+      zones: []
     }));
   };
 
@@ -209,54 +389,61 @@ export const AllFiltersModal: React.FC<AllFiltersModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-150">
-      <div 
-        className="w-full max-w-3xl bg-[#0e1626] border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[580px] max-h-[90vh]"
-        onClick={e => e.stopPropagation()}
-      >
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
+      
+      {/* Modal Container */}
+      <div className="w-full max-w-4xl h-[620px] max-h-[92vh] bg-[#0b1220] border border-slate-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-150">
         
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-[#0b1220]/80 shrink-0">
+        {/* Modal Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800/80 bg-[#0e1626]">
           <div className="flex items-center gap-2.5">
-            <h2 className="text-base font-bold text-slate-100">All Filters</h2>
-            {totalActiveDraftCount > 0 && (
-              <span className="px-2 py-0.5 rounded-full bg-purple-600/30 border border-purple-500/50 text-purple-300 text-xs font-bold font-mono">
-                {totalActiveDraftCount} active
+            <h2 className="text-base font-bold text-white tracking-tight">All Filters</h2>
+            {totalDraftCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-purple-600/30 border border-purple-500/50 text-purple-300 text-xs font-semibold">
+                {totalDraftCount} active
               </span>
             )}
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <X size={18} />
           </button>
         </div>
 
-        {/* Body: Left Categories Navigation + Right Content */}
-        <div className="flex-1 flex min-h-0 divide-x divide-slate-800/80 overflow-hidden">
+        {/* Modal Body: Left Sidebar + Right Options */}
+        <div className="flex-1 flex min-h-0 overflow-hidden">
           
-          {/* Left Navigation */}
-          <div className="w-56 bg-[#0b1220]/50 p-2.5 flex flex-col gap-1 overflow-y-auto custom-scrollbar shrink-0">
+          {/* Left Categories List */}
+          <div className="w-56 sm:w-64 border-r border-slate-800/80 bg-[#070c14] p-2 flex flex-col gap-1 overflow-y-auto custom-scrollbar shrink-0">
             {CATEGORIES.map(cat => {
-              const isSelected = activeCategory === cat.id;
-              const count = categoryCounts[cat.id];
+              const Icon = cat.icon;
+              const isActive = activeCategory === cat.id;
+              const catCount = activeCategoryCounts[cat.id];
+
               return (
                 <button
                   key={cat.id}
                   type="button"
-                  onClick={() => setActiveCategory(cat.id)}
-                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all text-left cursor-pointer ${
-                    isSelected
-                      ? 'bg-purple-600/20 text-purple-200 border border-purple-500/40 shadow-sm'
-                      : 'text-slate-300 hover:bg-slate-800/50 hover:text-white border border-transparent'
+                  onClick={() => {
+                    setActiveCategory(cat.id);
+                    setSearchTerm('');
+                  }}
+                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
+                    isActive
+                      ? 'bg-purple-950/60 text-purple-200 border border-purple-800/60 font-semibold shadow-sm'
+                      : 'text-slate-300 hover:bg-slate-800/50 hover:text-white'
                   }`}
                 >
-                  <span className="truncate">{cat.label}</span>
-                  {count > 0 && (
-                    <span className="ml-1.5 px-1.5 py-0.2 rounded-full bg-purple-600 text-white text-[10px] font-bold">
-                      {count}
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <Icon size={14} className={isActive ? 'text-purple-400' : 'text-slate-400'} />
+                    <span className="truncate">{cat.label}</span>
+                  </div>
+                  {catCount > 0 && (
+                    <span className="w-5 h-5 rounded-full bg-purple-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+                      {catCount}
                     </span>
                   )}
                 </button>
@@ -265,382 +452,640 @@ export const AllFiltersModal: React.FC<AllFiltersModalProps> = ({
           </div>
 
           {/* Right Content Panel */}
-          <div className="flex-1 p-5 flex flex-col min-h-0 overflow-y-auto custom-scrollbar">
+          <div className="flex-1 flex flex-col min-w-0 bg-[#0b1220] overflow-hidden">
             
-            {/* Top Bar inside Category */}
-            <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-800/80 shrink-0">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
+            {/* Header of Active Category */}
+            <div className="px-6 pt-5 pb-3 flex items-center justify-between border-b border-slate-800/60 shrink-0">
+              <h3 className="text-sm font-bold text-slate-100">
                 {CATEGORIES.find(c => c.id === activeCategory)?.label}
-              </span>
-              {categoryCounts[activeCategory] > 0 && (
-                <button
-                  type="button"
-                  onClick={() => handleClearCategory(activeCategory)}
-                  className="text-xs text-rose-400 hover:text-rose-300 font-semibold cursor-pointer"
-                >
-                  Clear category
-                </button>
-              )}
+              </h3>
             </div>
 
-            {/* Category: Shipment Status */}
-            {activeCategory === 'shipment_status' && (
-              <div className="flex flex-col gap-3 flex-1 min-h-0">
-                <div className="relative">
-                  <Search size={14} className="absolute left-3 top-2.5 text-slate-500" />
-                  <input
-                    type="text"
-                    value={statusSearch}
-                    onChange={e => setStatusSearch(e.target.value)}
-                    placeholder="Search shipment status"
-                    className="w-full h-8 pl-9 pr-3 bg-[#0b1220] border border-slate-700/80 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
-                  />
-                </div>
-
-                <div className="space-y-1 overflow-y-auto custom-scrollbar pr-1 flex-1">
-                  {CANONICAL_SHIPMENT_STATUSES.filter(s => s.toLowerCase().includes(statusSearch.toLowerCase())).map(st => {
-                    const checked = draft.shipmentStatuses.includes(st);
-                    const count = shipmentCounts[st] || 0;
-                    return (
-                      <label
-                        key={st}
-                        onClick={() => {
-                          setDraft(prev => ({
-                            ...prev,
-                            shipmentStatuses: checked
-                              ? prev.shipmentStatuses.filter(s => s !== st)
-                              : [...prev.shipmentStatuses, st]
-                          }));
-                        }}
-                        className="flex items-center justify-between px-3 py-2 rounded-xl hover:bg-slate-800/60 cursor-pointer text-xs transition-colors"
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <div
-                            className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
-                              checked
-                                ? 'bg-purple-600 border-purple-500 text-white'
-                                : 'border-slate-600 bg-[#0b1220]'
-                            }`}
-                          >
-                            {checked && <Check size={11} strokeWidth={3} />}
-                          </div>
-                          <span className={checked ? 'text-purple-200 font-semibold' : 'text-slate-300'}>
-                            {st}
-                          </span>
-                        </div>
-                        {count > 0 && (
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800/80 text-slate-400">
-                            {count}
-                          </span>
-                        )}
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Category: Pickup Location */}
-            {activeCategory === 'pickup_location' && (
-              <div className="flex flex-col gap-3 flex-1 min-h-0">
-                <div className="relative">
-                  <Search size={14} className="absolute left-3 top-2.5 text-slate-500" />
-                  <input
-                    type="text"
-                    value={locationSearch}
-                    onChange={e => setLocationSearch(e.target.value)}
-                    placeholder="Search pickup locations"
-                    className="w-full h-8 pl-9 pr-3 bg-[#0b1220] border border-slate-700/80 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
-                  />
-                </div>
-
-                <div className="space-y-1 overflow-y-auto custom-scrollbar pr-1 flex-1">
-                  {availableLocations.filter(l => l.toLowerCase().includes(locationSearch.toLowerCase())).map(loc => {
-                    const checked = draft.pickupLocations.includes(loc);
-                    const count = locationCounts[loc] || 0;
-                    return (
-                      <label
-                        key={loc}
-                        onClick={() => {
-                          setDraft(prev => ({
-                            ...prev,
-                            pickupLocations: checked
-                              ? prev.pickupLocations.filter(l => l !== loc)
-                              : [...prev.pickupLocations, loc]
-                          }));
-                        }}
-                        className="flex items-center justify-between px-3 py-2 rounded-xl hover:bg-slate-800/60 cursor-pointer text-xs transition-colors"
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0 pr-2">
-                          <div
-                            className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-all ${
-                              checked
-                                ? 'bg-purple-600 border-purple-500 text-white'
-                                : 'border-slate-600 bg-[#0b1220]'
-                            }`}
-                          >
-                            {checked && <Check size={11} strokeWidth={3} />}
-                          </div>
-                          <span className={`truncate ${checked ? 'text-purple-200 font-semibold' : 'text-slate-300'}`}>
-                            {loc}
-                          </span>
-                        </div>
-                        {count > 0 && (
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800/80 text-slate-400 shrink-0">
-                            {count}
-                          </span>
-                        )}
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Category: Manifested Date */}
-            {activeCategory === 'manifested_date' && (
-              <div className="flex flex-col gap-4 flex-1">
-                <div>
-                  <span className="text-[11px] font-bold text-slate-400 block mb-2">
-                    Quick Preset Range
-                  </span>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {MANIFEST_PRESETS.map(p => {
-                      const isSelected = draft.manifestDatePreset === p.id;
+            {/* Content Switcher */}
+            <div className="flex-1 overflow-y-auto p-6 custom-scrollbar min-h-0">
+              
+              {/* 1. DATE RANGE */}
+              {activeCategory === 'date_range' && (
+                <div className="flex flex-col gap-4">
+                  <span className="text-xs text-slate-400">Choose a preset or select custom date boundaries:</span>
+                  
+                  {/* Preset Pills */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {DATE_PRESETS.map(p => {
+                      const isSelected = draft.datePreset === p.id;
                       return (
                         <button
                           key={p.id}
                           type="button"
                           onClick={() => {
-                            if (p.id === 'all') {
-                              setDraft(prev => ({ ...prev, manifestDatePreset: 'all', manifestStartDate: '', manifestEndDate: '' }));
-                            } else if (p.id === 'custom') {
-                              setDraft(prev => ({ ...prev, manifestDatePreset: 'custom' }));
-                            } else {
+                            setDraft(prev => {
+                              if (p.id === 'custom') {
+                                return { ...prev, datePreset: 'custom' };
+                              }
                               const res = resolveDateRangeForPreset(p.id);
-                              setDraft(prev => ({
+                              return {
                                 ...prev,
-                                manifestDatePreset: p.id,
-                                manifestStartDate: res.start,
-                                manifestEndDate: res.end
-                              }));
-                            }
+                                datePreset: p.id,
+                                startDate: res.start,
+                                endDate: res.end
+                              };
+                            });
                           }}
-                          className={`h-9 px-3 rounded-xl text-xs font-semibold transition-all border text-left flex items-center justify-between cursor-pointer ${
+                          className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
                             isSelected
-                              ? 'bg-purple-600 text-white border-purple-500 shadow-sm'
-                              : 'bg-[#0b1220] border-slate-700/80 text-slate-300 hover:border-slate-600 hover:text-white'
+                              ? 'bg-purple-600 border-purple-500 text-white shadow-sm'
+                              : 'bg-[#0e1626] border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white'
                           }`}
                         >
-                          <span>{p.label}</span>
-                          {isSelected && <Check size={12} />}
+                          {p.label}
                         </button>
                       );
                     })}
                   </div>
-                </div>
 
-                <div className="p-3 bg-[#0b1220] border border-slate-800 rounded-xl flex flex-col gap-2.5">
-                  <span className="text-[11px] font-bold text-slate-400">Custom Manifest Date Boundaries</span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[10px] text-slate-400 block mb-1">Start Date</label>
-                      <input
-                        type="date"
-                        value={draft.manifestStartDate}
-                        onChange={e => {
-                          setDraft(prev => ({
-                            ...prev,
-                            manifestDatePreset: 'custom',
-                            manifestStartDate: e.target.value
-                          }));
-                        }}
-                        className="w-full h-8 px-2.5 bg-[#111c30] border border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-purple-500"
-                      />
+                  {/* Active Selected Range Display */}
+                  <div className="p-3 bg-[#0e1626] border border-slate-800 rounded-xl flex items-center justify-between">
+                    <span className="text-xs text-slate-300">
+                      <strong>Current Range:</strong> {formatRangeDisplay(draft.startDate, draft.endDate)}
+                    </span>
+                    {(draft.datePreset !== 'all' || draft.startDate) && (
+                      <button
+                        type="button"
+                        onClick={() => setDraft(prev => ({ ...prev, datePreset: 'all', startDate: '', endDate: '' }))}
+                        className="text-xs text-rose-400 hover:text-rose-300 font-medium cursor-pointer"
+                      >
+                        Reset Date
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Calendar for Custom Range */}
+                  <div className="p-4 bg-[#070c14] border border-slate-800 rounded-2xl flex flex-col gap-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-200">
+                        {MONTH_NAMES_FULL[viewMonth]} {viewYear}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (viewMonth === 0) {
+                              setViewMonth(11);
+                              setViewYear(y => y - 1);
+                            } else setViewMonth(m => m - 1);
+                          }}
+                          className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800"
+                        >
+                          <ChevronLeft size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (viewMonth === 11) {
+                              setViewMonth(0);
+                              setViewYear(y => y + 1);
+                            } else setViewMonth(m => m + 1);
+                          }}
+                          className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800"
+                        >
+                          <ChevronRight size={16} />
+                        </button>
+                      </div>
                     </div>
-                    <div>
-                      <label className="text-[10px] text-slate-400 block mb-1">End Date</label>
-                      <input
-                        type="date"
-                        value={draft.manifestEndDate}
-                        onChange={e => {
-                          setDraft(prev => ({
-                            ...prev,
-                            manifestDatePreset: 'custom',
-                            manifestEndDate: e.target.value
-                          }));
-                        }}
-                        className="w-full h-8 px-2.5 bg-[#111c30] border border-slate-700 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-purple-500"
-                      />
+
+                    <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-semibold text-slate-500">
+                      {['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map(d => (
+                        <span key={d}>{d}</span>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-7 gap-1">
+                      {calendarDays.map(item => {
+                        const isStart = draft.startDate === item.ymd;
+                        const isEnd = draft.endDate === item.ymd;
+                        const effectiveEnd = draft.endDate || (rangeStage === 'selecting_end' ? hoverDate : null);
+                        const inRange = Boolean(
+                          draft.startDate && 
+                          effectiveEnd && 
+                          item.ymd > draft.startDate && 
+                          item.ymd < effectiveEnd
+                        );
+
+                        let cellClass = 'text-slate-300 hover:bg-slate-800';
+                        if (!item.isCurrentMonth) cellClass = 'text-slate-600 hover:bg-slate-800/40';
+                        if (isStart || isEnd) cellClass = 'bg-purple-600 text-white font-bold shadow-sm';
+                        else if (inRange) cellClass = 'bg-purple-950/60 text-purple-200';
+
+                        return (
+                          <button
+                            key={item.ymd}
+                            type="button"
+                            onClick={() => {
+                              setDraft(prev => {
+                                if (rangeStage === 'idle') {
+                                  setRangeStage('selecting_end');
+                                  return { ...prev, datePreset: 'custom', startDate: item.ymd, endDate: '' };
+                                } else {
+                                  setRangeStage('idle');
+                                  setHoverDate(null);
+                                  if (prev.startDate && item.ymd < prev.startDate) {
+                                    return { ...prev, datePreset: 'custom', startDate: item.ymd, endDate: prev.startDate };
+                                  }
+                                  return { ...prev, datePreset: 'custom', endDate: item.ymd };
+                                }
+                              });
+                            }}
+                            onMouseEnter={() => {
+                              if (rangeStage === 'selecting_end') setHoverDate(item.ymd);
+                            }}
+                            className={`h-8 rounded text-xs flex items-center justify-center transition-all cursor-pointer ${cellClass}`}
+                          >
+                            {item.dayNumber}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
-                  {draft.manifestStartDate && (
-                    <p className="text-[11px] text-purple-300 font-medium">
-                      Active Manifest Range: {formatRangeDisplay(draft.manifestStartDate, draft.manifestEndDate || draft.manifestStartDate)}
-                    </p>
-                  )}
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Category: Transport Mode */}
-            {activeCategory === 'transport_mode' && (
-              <div className="space-y-1 flex-1">
-                {TRANSPORT_MODES.map(tm => {
-                  const checked = draft.transportModes.includes(tm);
-                  const count = transportCounts[tm] || 0;
-                  return (
-                    <label
-                      key={tm}
-                      onClick={() => {
-                        setDraft(prev => ({
-                          ...prev,
-                          transportModes: checked
-                            ? prev.transportModes.filter(m => m !== tm)
-                            : [...prev.transportModes, tm]
-                        }));
-                      }}
-                      className="flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-slate-800/60 cursor-pointer text-xs transition-colors"
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <div
-                          className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
-                            checked
-                              ? 'bg-purple-600 border-purple-500 text-white'
-                              : 'border-slate-600 bg-[#0b1220]'
-                          }`}
-                        >
-                          {checked && <Check size={11} strokeWidth={3} />}
-                        </div>
-                        <span className={checked ? 'text-purple-200 font-semibold' : 'text-slate-300'}>
-                          {tm}
-                        </span>
-                      </div>
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800/80 text-slate-400">
-                        {count}
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
-            )}
+              {/* 2. PICKUP LOCATION */}
+              {activeCategory === 'pickup_location' && (
+                <div className="flex flex-col gap-3">
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3 top-3 text-slate-400" />
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={e => setSearchTerm(e.target.value)}
+                      placeholder="Search for Pickup location"
+                      className="w-full h-9 pl-9 pr-8 bg-[#070c14] border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                    />
+                    {searchTerm && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchTerm('')}
+                        className="absolute right-3 top-3 text-slate-400 hover:text-slate-200"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
 
-            {/* Category: Payment Mode */}
-            {activeCategory === 'payment_mode' && (
-              <div className="space-y-1 flex-1">
-                {PAYMENT_MODES.map(pm => {
-                  const checked = draft.paymentModes.includes(pm);
-                  const count = paymentCounts[pm] || 0;
-                  return (
-                    <label
-                      key={pm}
-                      onClick={() => {
-                        setDraft(prev => ({
-                          ...prev,
-                          paymentModes: checked
-                            ? prev.paymentModes.filter(m => m !== pm)
-                            : [...prev.paymentModes, pm]
-                        }));
-                      }}
-                      className="flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-slate-800/60 cursor-pointer text-xs transition-colors"
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <div
-                          className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
-                            checked
-                              ? 'bg-purple-600 border-purple-500 text-white'
-                              : 'border-slate-600 bg-[#0b1220]'
-                          }`}
-                        >
-                          {checked && <Check size={11} strokeWidth={3} />}
-                        </div>
-                        <span className={checked ? 'text-purple-200 font-semibold' : 'text-slate-300'}>
-                          {pm}
-                        </span>
-                      </div>
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800/80 text-slate-400">
-                        {count}
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
-            )}
+                  <div className="flex flex-col gap-1.5 mt-1">
+                    {availableLocations
+                      .filter(l => !searchTerm || l.toLowerCase().includes(searchTerm.toLowerCase()))
+                      .map(loc => {
+                        const checked = draft.pickupLocations.includes(loc);
+                        const count = counts.locations[loc] || 0;
 
-            {/* Category: Order Cancellation Status */}
-            {activeCategory === 'cancellation_status' && (
-              <div className="space-y-1 flex-1">
-                {CANCELLATION_STATUSES.map(cs => {
-                  const checked = draft.cancellationStatuses.includes(cs);
-                  const count = cancellationCounts[cs] || 0;
-                  return (
-                    <label
-                      key={cs}
-                      onClick={() => {
-                        setDraft(prev => ({
-                          ...prev,
-                          cancellationStatuses: checked
-                            ? prev.cancellationStatuses.filter(s => s !== cs)
-                            : [...prev.cancellationStatuses, cs]
-                        }));
-                      }}
-                      className="flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-slate-800/60 cursor-pointer text-xs transition-colors"
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <div
-                          className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
-                            checked
-                              ? 'bg-purple-600 border-purple-500 text-white'
-                              : 'border-slate-600 bg-[#0b1220]'
-                          }`}
+                        return (
+                          <label
+                            key={loc}
+                            onClick={() => toggleArrayItem('pickupLocations', loc)}
+                            className="flex items-center justify-between px-3.5 py-2.5 rounded-xl hover:bg-slate-800/50 cursor-pointer text-xs select-none transition-colors border border-transparent hover:border-slate-800"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                                checked
+                                  ? 'bg-purple-600 border-purple-500 text-white'
+                                  : 'border-slate-700 bg-slate-900/60'
+                              }`}>
+                                {checked && <Check size={11} strokeWidth={3} />}
+                              </div>
+                              <span className={checked ? 'text-white font-semibold' : 'text-slate-300'}>
+                                {loc}
+                              </span>
+                            </div>
+                            <span className="text-[11px] font-mono text-slate-400 bg-slate-900 px-2 py-0.5 rounded">
+                              {count}
+                            </span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+
+              {/* 3. RISK OF RETURN (Image 1 reference) */}
+              {activeCategory === 'risk_of_return' && (
+                <div className="flex flex-col gap-3">
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3 top-3 text-slate-400" />
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={e => setSearchTerm(e.target.value)}
+                      placeholder="Search for Risk of return"
+                      className="w-full h-9 pl-9 pr-8 bg-[#070c14] border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                    />
+                    {searchTerm && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchTerm('')}
+                        className="absolute right-3 top-3 text-slate-400 hover:text-slate-200"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col gap-2 mt-1">
+                    {[
+                      { id: 'Low (0 - 20)', label: 'Low (0 - 20)', color: 'bg-emerald-500', count: counts.risk['Low (0 - 20)'] },
+                      { id: 'Medium (21 - 51)', label: 'Medium (21 - 51)', color: 'bg-amber-500', count: counts.risk['Medium (21 - 51)'] },
+                      { id: 'High (52+)', label: 'High (52+)', color: 'bg-rose-500', count: counts.risk['High (52+)'] }
+                    ]
+                      .filter(item => !searchTerm || item.label.toLowerCase().includes(searchTerm.toLowerCase()))
+                      .map(item => {
+                        const checked = draft.riskOfReturn.includes(item.id);
+                        return (
+                          <label
+                            key={item.id}
+                            onClick={() => toggleArrayItem('riskOfReturn', item.id)}
+                            className="flex items-center justify-between px-3.5 py-3 rounded-xl hover:bg-slate-800/50 cursor-pointer text-xs select-none transition-colors border border-slate-800/60"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                                checked
+                                  ? 'bg-purple-600 border-purple-500 text-white'
+                                  : 'border-slate-700 bg-slate-900/60'
+                              }`}>
+                                {checked && <Check size={11} strokeWidth={3} />}
+                              </div>
+                              <span className={`w-2.5 h-2.5 rounded-full ${item.color} shrink-0`} />
+                              <span className={checked ? 'text-white font-semibold' : 'text-slate-300'}>
+                                {item.label}
+                              </span>
+                            </div>
+                            <span className="text-[11px] font-mono text-slate-400 bg-slate-900 px-2 py-0.5 rounded">
+                              {item.count}
+                            </span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+
+              {/* 4. CHANNEL */}
+              {activeCategory === 'channel' && (
+                <div className="flex flex-col gap-3">
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3 top-3 text-slate-400" />
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={e => setSearchTerm(e.target.value)}
+                      placeholder="Search for Channel"
+                      className="w-full h-9 pl-9 pr-8 bg-[#070c14] border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-2 mt-1">
+                    {[
+                      { id: 'Online Store / Shopify', label: 'Online Store / Shopify', count: counts.channel['Online Store / Shopify'] },
+                      { id: 'Website', label: 'Website (Direct)', count: counts.channel['Website'] },
+                      { id: 'Manual / Direct', label: 'Manual / Direct Order', count: counts.channel['Manual / Direct'] },
+                      { id: 'Delhivery Direct', label: 'Delhivery Direct', count: counts.channel['Delhivery Direct'] }
+                    ]
+                      .filter(item => !searchTerm || item.label.toLowerCase().includes(searchTerm.toLowerCase()))
+                      .map(item => {
+                        const checked = draft.channels.includes(item.id);
+                        return (
+                          <label
+                            key={item.id}
+                            onClick={() => toggleArrayItem('channels', item.id)}
+                            className="flex items-center justify-between px-3.5 py-3 rounded-xl hover:bg-slate-800/50 cursor-pointer text-xs select-none transition-colors border border-slate-800/60"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                                checked
+                                  ? 'bg-purple-600 border-purple-500 text-white'
+                                  : 'border-slate-700 bg-slate-900/60'
+                              }`}>
+                                {checked && <Check size={11} strokeWidth={3} />}
+                              </div>
+                              <span className={checked ? 'text-white font-semibold' : 'text-slate-300'}>
+                                {item.label}
+                              </span>
+                            </div>
+                            <span className="text-[11px] font-mono text-slate-400 bg-slate-900 px-2 py-0.5 rounded">
+                              {item.count}
+                            </span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+
+              {/* 5. PAYMENT MODE (Image 2 reference) */}
+              {activeCategory === 'payment_mode' && (
+                <div className="flex flex-col gap-3">
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3 top-3 text-slate-400" />
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={e => setSearchTerm(e.target.value)}
+                      placeholder="Search for Payment mode"
+                      className="w-full h-9 pl-9 pr-8 bg-[#070c14] border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                    />
+                    {searchTerm && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchTerm('')}
+                        className="absolute right-3 top-3 text-slate-400 hover:text-slate-200"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col gap-2 mt-1">
+                    {[
+                      { id: 'COD', label: 'COD', count: counts.payment['COD'] },
+                      { id: 'Pickup', label: 'Pickup', count: counts.payment['Pickup'] },
+                      { id: 'Prepaid', label: 'Prepaid', count: counts.payment['Prepaid'] },
+                      { id: 'Replacement', label: 'Replacement', count: counts.payment['Replacement'] }
+                    ]
+                      .filter(item => !searchTerm || item.label.toLowerCase().includes(searchTerm.toLowerCase()))
+                      .map(item => {
+                        const checked = draft.paymentModes.includes(item.id);
+                        return (
+                          <label
+                            key={item.id}
+                            onClick={() => toggleArrayItem('paymentModes', item.id)}
+                            className="flex items-center justify-between px-3.5 py-3 rounded-xl hover:bg-slate-800/50 cursor-pointer text-xs select-none transition-colors border border-slate-800/60"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                                checked
+                                  ? 'bg-purple-600 border-purple-500 text-white'
+                                  : 'border-slate-700 bg-slate-900/60'
+                              }`}>
+                                {checked && <Check size={11} strokeWidth={3} />}
+                              </div>
+                              <span className={checked ? 'text-white font-semibold' : 'text-slate-300'}>
+                                {item.label}
+                              </span>
+                            </div>
+                            <span className="text-[11px] font-mono text-slate-400 bg-slate-900 px-2 py-0.5 rounded">
+                              {item.count}
+                            </span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+
+              {/* 6. VERIFIED */}
+              {activeCategory === 'verified' && (
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-2 mt-1">
+                    {[
+                      { id: 'Verified', label: 'Verified', count: counts.verified['Verified'] },
+                      { id: 'Unverified', label: 'Unverified', count: counts.verified['Unverified'] }
+                    ].map(item => {
+                      const checked = draft.verifiedStatuses.includes(item.id);
+                      return (
+                        <label
+                          key={item.id}
+                          onClick={() => toggleArrayItem('verifiedStatuses', item.id)}
+                          className="flex items-center justify-between px-3.5 py-3 rounded-xl hover:bg-slate-800/50 cursor-pointer text-xs select-none transition-colors border border-slate-800/60"
                         >
-                          {checked && <Check size={11} strokeWidth={3} />}
-                        </div>
-                        <span className={checked ? 'text-purple-200 font-semibold' : 'text-slate-300'}>
-                          {cs}
-                        </span>
-                      </div>
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800/80 text-slate-400">
-                        {count}
-                      </span>
-                    </label>
-                  );
-                })}
+                          <div className="flex items-center gap-3">
+                            <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                              checked
+                                ? 'bg-purple-600 border-purple-500 text-white'
+                                : 'border-slate-700 bg-slate-900/60'
+                            }`}>
+                              {checked && <Check size={11} strokeWidth={3} />}
+                            </div>
+                            <span className={checked ? 'text-white font-semibold' : 'text-slate-300'}>
+                              {item.label}
+                            </span>
+                          </div>
+                          <span className="text-[11px] font-mono text-slate-400 bg-slate-900 px-2 py-0.5 rounded">
+                            {item.count}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* 7. ORDER TAGS */}
+              {activeCategory === 'order_tags' && (
+                <div className="flex flex-col gap-3">
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3 top-3 text-slate-400" />
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={e => setSearchTerm(e.target.value)}
+                      placeholder="Search for Order tags"
+                      className="w-full h-9 pl-9 pr-8 bg-[#070c14] border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5 mt-1">
+                    {availableTags
+                      .filter(t => !searchTerm || t.toLowerCase().includes(searchTerm.toLowerCase()))
+                      .map(tag => {
+                        const checked = draft.orderTags.includes(tag);
+                        const count = counts.tags[tag] || 0;
+                        return (
+                          <label
+                            key={tag}
+                            onClick={() => toggleArrayItem('orderTags', tag)}
+                            className="flex items-center justify-between px-3.5 py-2.5 rounded-xl hover:bg-slate-800/50 cursor-pointer text-xs select-none transition-colors border border-transparent hover:border-slate-800"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                                checked
+                                  ? 'bg-purple-600 border-purple-500 text-white'
+                                  : 'border-slate-700 bg-slate-900/60'
+                              }`}>
+                                {checked && <Check size={11} strokeWidth={3} />}
+                              </div>
+                              <span className={checked ? 'text-white font-semibold' : 'text-slate-300'}>
+                                {tag}
+                              </span>
+                            </div>
+                            <span className="text-[11px] font-mono text-slate-400 bg-slate-900 px-2 py-0.5 rounded">
+                              {count}
+                            </span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+
+              {/* 8. ADDRESS SCORE */}
+              {activeCategory === 'address_score' && (
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-2 mt-1">
+                    {[
+                      { id: 'Complete (100%)', label: 'Complete (100%)', count: counts.address['Complete (100%)'] },
+                      { id: 'Good (75-99%)', label: 'Good (75-99%)', count: counts.address['Good (75-99%)'] },
+                      { id: 'Partial (50-74%)', label: 'Partial (50-74%)', count: counts.address['Partial (50-74%)'] },
+                      { id: 'Poor (<50%)', label: 'Poor (<50%)', count: counts.address['Poor (<50%)'] }
+                    ].map(item => {
+                      const checked = draft.addressScores.includes(item.id);
+                      return (
+                        <label
+                          key={item.id}
+                          onClick={() => toggleArrayItem('addressScores', item.id)}
+                          className="flex items-center justify-between px-3.5 py-3 rounded-xl hover:bg-slate-800/50 cursor-pointer text-xs select-none transition-colors border border-slate-800/60"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                              checked
+                                ? 'bg-purple-600 border-purple-500 text-white'
+                                : 'border-slate-700 bg-slate-900/60'
+                            }`}>
+                              {checked && <Check size={11} strokeWidth={3} />}
+                            </div>
+                            <span className={checked ? 'text-white font-semibold' : 'text-slate-300'}>
+                              {item.label}
+                            </span>
+                          </div>
+                          <span className="text-[11px] font-mono text-slate-400 bg-slate-900 px-2 py-0.5 rounded">
+                            {item.count}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* 9. TRANSPORT MODE */}
+              {activeCategory === 'transport_mode' && (
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-2 mt-1">
+                    {[
+                      { id: 'Surface', label: 'Surface', count: counts.transport['Surface'] },
+                      { id: 'Express', label: 'Express', count: counts.transport['Express'] }
+                    ].map(item => {
+                      const checked = draft.transportModes.includes(item.id);
+                      return (
+                        <label
+                          key={item.id}
+                          onClick={() => toggleArrayItem('transportModes', item.id)}
+                          className="flex items-center justify-between px-3.5 py-3 rounded-xl hover:bg-slate-800/50 cursor-pointer text-xs select-none transition-colors border border-slate-800/60"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                              checked
+                                ? 'bg-purple-600 border-purple-500 text-white'
+                                : 'border-slate-700 bg-slate-900/60'
+                            }`}>
+                              {checked && <Check size={11} strokeWidth={3} />}
+                            </div>
+                            <span className={checked ? 'text-white font-semibold' : 'text-slate-300'}>
+                              {item.label}
+                            </span>
+                          </div>
+                          <span className="text-[11px] font-mono text-slate-400 bg-slate-900 px-2 py-0.5 rounded">
+                            {item.count}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* 10. ZONE */}
+              {activeCategory === 'zone' && (
+                <div className="flex flex-col gap-3">
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3 top-3 text-slate-400" />
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={e => setSearchTerm(e.target.value)}
+                      placeholder="Search for Zone"
+                      className="w-full h-9 pl-9 pr-8 bg-[#070c14] border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5 mt-1">
+                    {ZONE_OPTIONS
+                      .filter(z => !searchTerm || z.toLowerCase().includes(searchTerm.toLowerCase()))
+                      .map(zone => {
+                        const checked = draft.zones.includes(zone);
+                        const count = counts.zone[zone] || 0;
+                        return (
+                          <label
+                            key={zone}
+                            onClick={() => toggleArrayItem('zones', zone)}
+                            className="flex items-center justify-between px-3.5 py-2.5 rounded-xl hover:bg-slate-800/50 cursor-pointer text-xs select-none transition-colors border border-transparent hover:border-slate-800"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                                checked
+                                  ? 'bg-purple-600 border-purple-500 text-white'
+                                  : 'border-slate-700 bg-slate-900/60'
+                              }`}>
+                                {checked && <Check size={11} strokeWidth={3} />}
+                              </div>
+                              <span className={checked ? 'text-white font-semibold' : 'text-slate-300'}>
+                                {zone}
+                              </span>
+                            </div>
+                            <span className="text-[11px] font-mono text-slate-400 bg-slate-900 px-2 py-0.5 rounded">
+                              {count}
+                            </span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+
+            </div>
+
+            {/* Modal Bottom Footer Actions */}
+            <div className="px-6 py-4 border-t border-slate-800/80 bg-[#0e1626] flex items-center justify-between shrink-0">
+              <button
+                type="button"
+                onClick={handleClearAll}
+                className="text-xs font-semibold text-rose-400 hover:text-rose-300 underline cursor-pointer"
+              >
+                Clear all
+              </button>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-4 py-2 rounded-xl text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApply}
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white shadow-md shadow-purple-600/30 transition-all cursor-pointer"
+                >
+                  Apply Filters {totalDraftCount > 0 ? `(${totalDraftCount})` : ''}
+                </button>
               </div>
-            )}
+            </div>
 
           </div>
 
-        </div>
-
-        {/* Modal Footer */}
-        <div className="px-6 py-3.5 border-t border-slate-800 bg-[#0b1220]/80 flex items-center justify-between shrink-0">
-          <button
-            type="button"
-            onClick={handleClearAll}
-            className="text-xs text-rose-400 hover:text-rose-300 font-medium cursor-pointer transition-colors"
-          >
-            Clear All Filters
-          </button>
-          <div className="flex items-center gap-2.5">
-            <button
-              type="button"
-              onClick={onClose}
-              className="h-9 px-4 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleApply}
-              className="h-9 px-5 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white shadow-md shadow-purple-600/30 transition-all cursor-pointer"
-            >
-              Apply Filters {totalActiveDraftCount > 0 ? `(${totalActiveDraftCount})` : ''}
-            </button>
-          </div>
         </div>
 
       </div>
+
     </div>
   );
 };

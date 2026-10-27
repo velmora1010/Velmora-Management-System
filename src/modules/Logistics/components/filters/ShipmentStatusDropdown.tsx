@@ -7,17 +7,23 @@ interface ShipmentStatusDropdownProps {
   selectedStatuses: string[];
   onChange: (statuses: string[]) => void;
   orders?: UnifiedLogisticsOrder[];
+  customOptions?: string[];
 }
 
 export const ShipmentStatusDropdown: React.FC<ShipmentStatusDropdownProps> = ({
   selectedStatuses,
   onChange,
-  orders = []
+  orders = [],
+  customOptions
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [draft, setDraft] = useState<string[]>(selectedStatuses);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const availableOptions = useMemo(() => {
+    return customOptions && customOptions.length > 0 ? customOptions : [...CANONICAL_SHIPMENT_STATUSES];
+  }, [customOptions]);
 
   // Sync draft when opened
   useEffect(() => {
@@ -43,21 +49,25 @@ export const ShipmentStatusDropdown: React.FC<ShipmentStatusDropdownProps> = ({
   // Calculate live count per status
   const statusCounts = useMemo(() => {
     const map: Record<string, number> = {};
-    CANONICAL_SHIPMENT_STATUSES.forEach(st => { map[st] = 0; });
+    availableOptions.forEach(st => { map[st] = 0; });
+    
     orders.forEach(order => {
       const canonical = getOrderShipmentStatus(order);
       if (map[canonical] !== undefined) {
         map[canonical]++;
       }
+      if (map['All'] !== undefined) {
+        map['All']++;
+      }
     });
     return map;
-  }, [orders]);
+  }, [orders, availableOptions]);
 
   const filteredStatuses = useMemo(() => {
-    if (!searchTerm.trim()) return CANONICAL_SHIPMENT_STATUSES;
+    if (!searchTerm.trim()) return availableOptions;
     const q = searchTerm.toLowerCase();
-    return CANONICAL_SHIPMENT_STATUSES.filter(s => s.toLowerCase().includes(q));
-  }, [searchTerm]);
+    return availableOptions.filter(s => s.toLowerCase().includes(q));
+  }, [searchTerm, availableOptions]);
 
   const toggleStatus = (st: string) => {
     setDraft(prev => 
@@ -147,24 +157,20 @@ export const ShipmentStatusDropdown: React.FC<ShipmentStatusDropdownProps> = ({
                     className="flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-slate-800/60 cursor-pointer text-xs select-none transition-colors"
                   >
                     <div className="flex items-center gap-2.5">
-                      <div
-                        className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
-                          checked
-                            ? 'bg-purple-600 border-purple-500 text-white'
-                            : 'border-slate-600 bg-[#0b1220]'
-                        }`}
-                      >
+                      <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                        checked 
+                          ? 'bg-purple-600 border-purple-500 text-white' 
+                          : 'border-slate-700 bg-slate-900/60'
+                      }`}>
                         {checked && <Check size={11} strokeWidth={3} />}
                       </div>
-                      <span className={checked ? 'text-purple-200 font-semibold' : 'text-slate-300'}>
+                      <span className={checked ? 'text-white font-medium' : 'text-slate-300'}>
                         {st}
                       </span>
                     </div>
-                    {count > 0 && (
-                      <span className="text-[10px] font-mono font-medium px-1.5 py-0.2 rounded bg-slate-800/80 text-slate-400">
-                        {count}
-                      </span>
-                    )}
+                    <span className="text-[11px] font-mono text-slate-400 bg-slate-900 px-1.5 py-0.5 rounded">
+                      {count}
+                    </span>
                   </label>
                 );
               })
@@ -176,7 +182,7 @@ export const ShipmentStatusDropdown: React.FC<ShipmentStatusDropdownProps> = ({
             <button
               type="button"
               onClick={handleClear}
-              className="text-[11px] text-slate-400 hover:text-white px-2 py-1 rounded transition-colors"
+              className="text-xs text-rose-400 hover:text-rose-300 font-medium px-2 py-1 rounded cursor-pointer"
             >
               Clear
             </button>
@@ -184,16 +190,16 @@ export const ShipmentStatusDropdown: React.FC<ShipmentStatusDropdownProps> = ({
               <button
                 type="button"
                 onClick={handleCancel}
-                className="h-7 px-2.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition-colors cursor-pointer"
+                className="px-2.5 py-1 text-xs text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleApply}
-                className="h-7 px-3 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white shadow-sm transition-colors cursor-pointer"
+                className="px-3.5 py-1 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors cursor-pointer"
               >
-                Done
+                Apply
               </button>
             </div>
           </div>

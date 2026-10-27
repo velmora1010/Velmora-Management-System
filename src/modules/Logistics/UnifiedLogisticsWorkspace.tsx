@@ -59,11 +59,14 @@ import { LogisticsFilterToolbar } from './components/filters/LogisticsFilterTool
 import { AllFiltersModal } from './components/filters/AllFiltersModal';
 import { LogisticsAnalyticsDashboard } from './components/LogisticsAnalyticsDashboard';
 import { DateRangeCalendarModal } from './components/DateRangeCalendarModal';
+import { LogisticsSectionSidebar } from './components/LogisticsSectionSidebar';
 import { 
   LogisticsFilterState, 
+  LogisticsSection,
   INITIAL_LOGISTICS_FILTER_STATE, 
   applyLogisticsFilters, 
   countActiveLogisticsFilters,
+  calculateSectionCounts,
   formatRangeDisplay 
 } from './types/logisticsFilters';
 
@@ -428,6 +431,11 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
     return countsMap;
   }, [stageShipments]);
 
+  // Dynamic live section counts for the 8 sidebar shipment sections
+  const sectionCounts = useMemo(() => {
+    return calculateSectionCounts(unifiedOrders);
+  }, [unifiedOrders]);
+
   // Active filter badge count for the Filters button
   const activeFilterCount = useMemo(() => {
     return countActiveLogisticsFilters(logisticsFilters) + (selectedCourier !== 'All' ? 1 : 0);
@@ -435,8 +443,8 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
   // Filtered orders displayed in the view
   const filteredOrders = useMemo(() => {
-    // 1. Advanced Drawer Filters
-    let result = applyLogisticsFilters(stageShipments, logisticsFilters);
+    // Apply comprehensive section and attribute filters
+    let result = applyLogisticsFilters(unifiedOrders, logisticsFilters);
 
     // 2. Search Query (Top toolbar search bar with searchMode support)
     if (searchTerm.trim()) {
@@ -465,30 +473,15 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
       });
     }
 
-    // 4. Stage-Specific Contextual Filter Tabs (Row 3)
-    if (currentStage === 'active' || currentStage === 'fulfilled') {
-      if (selectedStatusTab === 'Prepaid') {
-        result = result.filter(order => !(order.orderType || '').toLowerCase().includes('cod'));
-      } else if (selectedStatusTab === 'COD') {
-        result = result.filter(order => (order.orderType || '').toLowerCase().includes('cod'));
-      }
-    } else if (currentStage === 'tracking') {
-      if (selectedStatusTab !== 'All') {
-        result = result.filter(order => {
-          const st = order.status;
-          if (selectedStatusTab === 'Exception') {
-            return st === 'Exception' || (st && (st.toLowerCase().includes('rto') || st.toLowerCase().includes('return')));
-          } else if (selectedStatusTab === 'Info Received') {
-            return st === 'Info Received' || st === 'Awaiting Tracking Update';
-          } else {
-            return st === selectedStatusTab;
-          }
-        });
-      }
+    // 4. Legacy Contextual Filter Tabs (Prepaid / COD if selected)
+    if (selectedStatusTab === 'Prepaid') {
+      result = result.filter(order => !(order.orderType || '').toLowerCase().includes('cod'));
+    } else if (selectedStatusTab === 'COD') {
+      result = result.filter(order => (order.orderType || '').toLowerCase().includes('cod'));
     }
 
     return result;
-  }, [stageShipments, logisticsFilters, searchTerm, selectedCourier, selectedStatusTab, currentStage]);
+  }, [unifiedOrders, logisticsFilters, searchTerm, selectedCourier, selectedStatusTab]);
 
   // Selected orders array for side panel review
   const selectedOrdersList = useMemo(() => {
@@ -1350,21 +1343,93 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         </div>
       )}
 
-      {/* 3. MAIN WORKSPACE CONTENT: Full-Width Table + Side Review Panel (Side-by-Side on Desktop) */}
-      <div className="flex-1 flex gap-4 min-h-0 overflow-hidden pb-1">
+      {/* 3. MAIN WORKSPACE CONTENT: Left Section Sidebar + Table View (Side-by-Side on Desktop) */}
+      <div className="flex-1 flex gap-3.5 min-h-0 overflow-hidden pb-1">
         
-        {/* Left Column: Table View (or Analytics Dashboard or Prepare Dispatch Grouped View) */}
+        {/* Left Navigation Sidebar (desktop) */}
+        {currentStage !== 'analytics' && currentStage !== 'prepare_dispatch' && (
+          <div className="hidden md:flex w-56 lg:w-64 shrink-0 flex-col h-full">
+            <LogisticsSectionSidebar
+              activeSection={logisticsFilters.activeSection}
+              onSelectSection={(sec) => {
+                setLogisticsFilters(prev => ({
+                  ...prev,
+                  activeSection: sec,
+                  shipmentStatuses: [],
+                  manifestStartDate: '',
+                  manifestEndDate: '',
+                  manifestDatePreset: 'all',
+                  deliveredStartDate: '',
+                  deliveredEndDate: '',
+                  deliveredDatePreset: 'all',
+                  returnedStartDate: '',
+                  returnedEndDate: '',
+                  returnedDatePreset: 'all'
+                }));
+              }}
+              counts={sectionCounts}
+            />
+          </div>
+        )}
+
+        {/* Main Table / View Area */}
         <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden gap-2">
+          
+          {/* Mobile horizontal section selector */}
+          {currentStage !== 'analytics' && currentStage !== 'prepare_dispatch' && (
+            <div className="md:hidden flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-1 shrink-0">
+              {[
+                { id: 'pending_awb', label: 'Pending AWB' },
+                { id: 'ready_to_ship', label: 'Ready to ship' },
+                { id: 'ready_for_pickup', label: 'Ready for pickup' },
+                { id: 'in_transit', label: 'In transit' },
+                { id: 'rto_in_transit', label: 'RTO - In transit' },
+                { id: 'delivered', label: 'Delivered' },
+                { id: 'all_shipments', label: 'All shipments' },
+                { id: 'third_party', label: 'Shipped via third party' }
+              ].map(item => {
+                const isSelected = logisticsFilters.activeSection === item.id;
+                const count = sectionCounts[item.id as LogisticsSection] || 0;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setLogisticsFilters(prev => ({
+                      ...prev,
+                      activeSection: item.id as LogisticsSection,
+                      shipmentStatuses: []
+                    }))}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 shrink-0 border ${
+                      isSelected
+                        ? 'bg-purple-600 text-white border-purple-500 shadow-sm'
+                        : 'bg-[#0b1220] border-slate-800 text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    <span>{item.label}</span>
+                    <span className={`px-1.5 py-0.2 rounded text-[10px] font-mono ${
+                      isSelected ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'
+                    }`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {currentStage !== 'analytics' && currentStage !== 'prepare_dispatch' && (
             <LogisticsFilterToolbar
               filters={logisticsFilters}
               onUpdateFilters={(updater) => setLogisticsFilters(updater)}
               onResetFilters={() => {
-                setLogisticsFilters(INITIAL_LOGISTICS_FILTER_STATE);
+                setLogisticsFilters(prev => ({
+                  ...INITIAL_LOGISTICS_FILTER_STATE,
+                  activeSection: prev.activeSection
+                }));
                 setSelectedCourier('All');
                 toast.success('Filters cleared');
               }}
-              orders={stageShipments}
+              orders={unifiedOrders}
               onOpenAllFilters={() => setIsAllFiltersModalOpen(true)}
               searchTerm={searchTerm}
               onSearchTermChange={setSearchTerm}
@@ -1544,7 +1609,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
           setLogisticsFilters(nextFilters);
           toast.success('Filters applied');
         }}
-        orders={stageShipments}
+        orders={unifiedOrders}
       />
 
       {/* Customer Detail Drawer Modal */}
