@@ -35,6 +35,14 @@ import {
 } from './websiteSalesUtils';
 import { OrderDetailsModal } from './components/OrderDetailsModal';
 import toast from 'react-hot-toast';
+import { LogisticsFilterToolbar } from '../../Logistics/components/filters/LogisticsFilterToolbar';
+import { AllFiltersModal } from '../../Logistics/components/filters/AllFiltersModal';
+import { 
+  LogisticsFilterState, 
+  LogisticsSection, 
+  INITIAL_LOGISTICS_FILTER_STATE,
+  resolveDateRangeForPreset
+} from '../../Logistics/types/logisticsFilters';
 
 export const WebsiteOrders: React.FC = () => {
   // Data State
@@ -50,7 +58,7 @@ export const WebsiteOrders: React.FC = () => {
   const [pageSize, setPageSize] = useState<number>(25);
 
   // Selected Status for Horizontal Tab Bar
-  const [selectedStatus, setSelectedStatus] = useState<string>('All Shipments');
+  const [selectedStatus, setSelectedStatus] = useState<string>('Pending AWB');
   const [statusCounts, setStatusCounts] = useState<ShipmentStatusCounts>({
     all: 0,
     pendingAwb: 0,
@@ -63,6 +71,48 @@ export const WebsiteOrders: React.FC = () => {
 
   // Selected Order for Details View Modal
   const [selectedOrder, setSelectedOrder] = useState<WebsiteConsolidatedOrder | null>(null);
+
+  // Status-Specific Filter State
+  const [logisticsFilters, setLogisticsFilters] = useState<LogisticsFilterState>({
+    ...INITIAL_LOGISTICS_FILTER_STATE,
+    activeSection: 'pending_awb'
+  });
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [isAllFiltersModalOpen, setIsAllFiltersModalOpen] = useState<boolean>(false);
+
+  // Status to Section Mapping
+  const statusToSectionMap: Record<string, LogisticsSection> = {
+    'Pending AWB': 'pending_awb',
+    'Ready to Ship': 'ready_to_ship',
+    'Ready for Pickup': 'ready_for_pickup',
+    'In Transit': 'in_transit',
+    'RTO - In Transit': 'rto_in_transit',
+    'Delivered': 'delivered',
+    'All Shipments': 'all_shipments'
+  };
+
+  // Mapped orders for filter calculations
+  const mappedForFilters = React.useMemo(() => {
+    return orders.map(o => ({
+      id: o.order_id,
+      orderId: o.order_id,
+      displayOrderId: o.order_id,
+      customerName: o.customer_name,
+      phoneNumber: o.phone,
+      shippingAddress: o.address,
+      city: o.city,
+      state: o.state,
+      pincode: o.pincode,
+      amount: o.price || 0,
+      orderType: o.payment_mode,
+      paymentMode: o.payment_mode,
+      courier: o.courier || '',
+      awbNumber: o.awb_number || '',
+      status: o.shipment_status || 'Pending',
+      workflowStage: (o.fulfillment_status || 'unfulfilled').toLowerCase(),
+      orderDate: o.order_date
+    } as any));
+  }, [orders]);
 
   // Status Navigation Configuration (7 options as compact horizontal cards)
   const statusItems = [
@@ -134,13 +184,54 @@ export const WebsiteOrders: React.FC = () => {
     }
   }, []);
 
-  // Fetch paginated orders from server filtered by selected status
+  // Fetch paginated orders from server filtered by selected status and filters
   const loadOrders = useCallback(async () => {
     setLoading(true);
     try {
+      let dateFrom = logisticsFilters.startDate;
+      let dateTo = logisticsFilters.endDate;
+      if (logisticsFilters.datePreset !== 'all' && logisticsFilters.datePreset !== 'custom') {
+        const r = resolveDateRangeForPreset(logisticsFilters.datePreset);
+        dateFrom = r.start;
+        dateTo = r.end;
+      }
+
+      let manifestFrom = logisticsFilters.manifestStartDate;
+      let manifestTo = logisticsFilters.manifestEndDate;
+      if (logisticsFilters.manifestDatePreset !== 'all' && logisticsFilters.manifestDatePreset !== 'custom') {
+        const rm = resolveDateRangeForPreset(logisticsFilters.manifestDatePreset);
+        manifestFrom = rm.start;
+        manifestTo = rm.end;
+      }
+
+      let deliveredFrom = logisticsFilters.deliveredStartDate;
+      let deliveredTo = logisticsFilters.deliveredEndDate;
+      if (logisticsFilters.deliveredDatePreset !== 'all' && logisticsFilters.deliveredDatePreset !== 'custom') {
+        const rd = resolveDateRangeForPreset(logisticsFilters.deliveredDatePreset);
+        deliveredFrom = rd.start;
+        deliveredTo = rd.end;
+      }
+
       const res = await websiteSalesService.getOrdersPaginated({
         page,
         pageSize,
+        search: searchTerm,
+        dateFrom,
+        dateTo,
+        manifestDateFrom: manifestFrom,
+        manifestDateTo: manifestTo,
+        deliveredDateFrom: deliveredFrom,
+        deliveredDateTo: deliveredTo,
+        paymentModes: logisticsFilters.paymentModes,
+        transportModes: logisticsFilters.transportModes,
+        shipmentModes: logisticsFilters.shipmentStatuses,
+        pickupLocations: logisticsFilters.pickupLocations,
+        riskOfReturn: logisticsFilters.riskOfReturn,
+        channels: logisticsFilters.channels,
+        verifiedStatuses: logisticsFilters.verifiedStatuses,
+        orderTags: logisticsFilters.orderTags,
+        addressScores: logisticsFilters.addressScores,
+        zones: logisticsFilters.zones,
         shipmentStatus: selectedStatus,
         sortBy: 'order_date',
         sortOrder: 'desc'
@@ -155,7 +246,7 @@ export const WebsiteOrders: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, selectedStatus]);
+  }, [page, pageSize, selectedStatus, logisticsFilters, searchTerm]);
 
   // Initial load
   useEffect(() => {
@@ -318,6 +409,21 @@ export const WebsiteOrders: React.FC = () => {
                 onClick={() => {
                   setSelectedStatus(item.id);
                   setPage(1);
+                  const sec = statusToSectionMap[item.id] || 'all_shipments';
+                  setLogisticsFilters(prev => ({
+                    ...prev,
+                    activeSection: sec,
+                    shipmentStatuses: [],
+                    manifestStartDate: '',
+                    manifestEndDate: '',
+                    manifestDatePreset: 'all',
+                    deliveredStartDate: '',
+                    deliveredEndDate: '',
+                    deliveredDatePreset: 'all',
+                    returnedStartDate: '',
+                    returnedEndDate: '',
+                    returnedDatePreset: 'all'
+                  }));
                 }}
                 className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-xs transition-all cursor-pointer border ${
                   isActive
@@ -343,18 +449,31 @@ export const WebsiteOrders: React.FC = () => {
         </div>
       </div>
 
-      {/* 3. CLEAN EMPTY PLACEHOLDER FILTER AREA */}
-      <div className="min-h-[48px] px-4 py-3 rounded-2xl bg-slate-900/60 border border-slate-800/80 shadow-sm flex items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-2.5 text-slate-500">
-          <SlidersHorizontal size={14} className="text-slate-500" />
-          <span className="italic">Filter controls placeholder — filters will be configured later</span>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="text-[11px] text-slate-400">Viewing:</span>
-          <span className="px-2 py-0.5 rounded-lg bg-indigo-500/20 text-indigo-300 font-semibold border border-indigo-500/30 text-xs">
-            {selectedStatus} ({totalCount.toLocaleString('en-IN')})
-          </span>
-        </div>
+      {/* 3. FUNCTIONAL STATUS-AWARE FILTER TOOLBAR */}
+      <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-md">
+        <LogisticsFilterToolbar
+          filters={logisticsFilters}
+          onUpdateFilters={(updater) => {
+            setLogisticsFilters(updater);
+            setPage(1);
+          }}
+          onResetFilters={() => {
+            setLogisticsFilters(prev => ({
+              ...INITIAL_LOGISTICS_FILTER_STATE,
+              activeSection: prev.activeSection
+            }));
+            setSearchTerm('');
+            setPage(1);
+            toast.success('Filters cleared');
+          }}
+          orders={mappedForFilters}
+          onOpenAllFilters={() => setIsAllFiltersModalOpen(true)}
+          searchTerm={searchTerm}
+          onSearchTermChange={(val) => {
+            setSearchTerm(val);
+            setPage(1);
+          }}
+        />
       </div>
 
       {/* 4. FULL-WIDTH ORDERS DATA TABLE */}
@@ -608,6 +727,19 @@ export const WebsiteOrders: React.FC = () => {
       </div>
 
       {/* 5. ORDER DETAILS DEDICATED MODAL */}
+            {/* 5. ALL FILTERS CATEGORY PANEL MODAL */}
+      <AllFiltersModal
+        isOpen={isAllFiltersModalOpen}
+        onClose={() => setIsAllFiltersModalOpen(false)}
+        filters={logisticsFilters}
+        onApply={(nextFilters) => {
+          setLogisticsFilters(nextFilters);
+          setIsAllFiltersModalOpen(false);
+          setPage(1);
+        }}
+        orders={mappedForFilters}
+      />
+
       <OrderDetailsModal
         order={selectedOrder}
         onClose={() => setSelectedOrder(null)}

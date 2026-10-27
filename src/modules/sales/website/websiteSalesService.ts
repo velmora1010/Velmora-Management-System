@@ -1062,6 +1062,7 @@ export class WebsiteSalesService {
       query = query.or(`order_id.ilike.%${q}%,customer_name.ilike.%${q}%,phone.ilike.%${q}%`);
     }
 
+    // 1. General Date Range (Order Date)
     if (params.dateFrom && params.dateTo) {
       query = query.gte('order_date', params.dateFrom).lte('order_date', params.dateTo);
     } else if (params.dateFrom) {
@@ -1070,11 +1071,52 @@ export class WebsiteSalesService {
       query = query.lte('order_date', params.dateTo);
     }
 
-    if (params.paymentMode && params.paymentMode !== 'ALL') {
+    // 1b. Manifested Date (dispatch_date)
+    if (params.manifestDateFrom && params.manifestDateTo) {
+      query = query.gte('dispatch_date', params.manifestDateFrom).lte('dispatch_date', params.manifestDateTo);
+    } else if (params.manifestDateFrom) {
+      query = query.gte('dispatch_date', params.manifestDateFrom);
+    } else if (params.manifestDateTo) {
+      query = query.lte('dispatch_date', params.manifestDateTo);
+    }
+
+    // 1c. Delivered Date
+    if (params.deliveredDateFrom && params.deliveredDateTo) {
+      query = query.gte('dispatch_date', params.deliveredDateFrom).lte('dispatch_date', params.deliveredDateTo);
+    } else if (params.deliveredDateFrom) {
+      query = query.gte('dispatch_date', params.deliveredDateFrom);
+    } else if (params.deliveredDateTo) {
+      query = query.lte('dispatch_date', params.deliveredDateTo);
+    }
+
+    // 2. Payment Modes Filter
+    if (params.paymentModes && params.paymentModes.length > 0) {
+      const modes = params.paymentModes.map(m => m.toUpperCase());
+      const hasCod = modes.includes('COD');
+      const hasPrepaid = modes.includes('PREPAID');
+      if (hasCod && !hasPrepaid) {
+        query = query.ilike('payment_mode', '%COD%');
+      } else if (hasPrepaid && !hasCod) {
+        query = query.not('payment_mode', 'ilike', '%COD%');
+      }
+    } else if (params.paymentMode && params.paymentMode !== 'ALL') {
       query = query.eq('payment_mode', params.paymentMode);
     }
 
-    if (params.state && params.state !== 'ALL') {
+    // 3. Zones / States Filter
+    if (params.zones && params.zones.length > 0) {
+      const zoneStates: string[] = [];
+      params.zones.forEach(z => {
+        if (z === 'Zone A') zoneStates.push('Tamil Nadu');
+        if (z === 'Zone B') zoneStates.push('Kerala', 'Karnataka', 'Andhra Pradesh', 'Telangana', 'Puducherry');
+        if (z === 'Zone C') zoneStates.push('Maharashtra', 'Delhi', 'Gujarat', 'West Bengal');
+        if (z === 'Zone D') zoneStates.push('Uttar Pradesh', 'Madhya Pradesh', 'Rajasthan', 'Punjab', 'Haryana', 'Bihar', 'Odisha');
+        if (z === 'Zone E') zoneStates.push('Assam', 'Jammu', 'Kashmir', 'Manipur', 'Meghalaya', 'Tripura', 'Nagaland');
+      });
+      if (zoneStates.length > 0) {
+        query = query.or(zoneStates.map(s => `state.ilike.%${s}%`).join(','));
+      }
+    } else if (params.state && params.state !== 'ALL') {
       query = query.ilike('state', `%${params.state}%`);
     }
 
