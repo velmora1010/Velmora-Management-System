@@ -110,39 +110,41 @@ export const LogisticsWorkflowToolbar: React.FC<LogisticsWorkflowToolbarProps> =
     <div className="flex flex-col gap-2.5 w-full shrink-0 select-none">
       
       {/* ROW 1: MAIN WORKFLOW NAVIGATION (Active, Fulfilled, Prepare Dispatch, Dispatched, Tracking, Analytics) */}
-      <div className="bg-[#0b1220] border border-slate-800/90 p-1.5 sm:p-2 rounded-2xl shadow-xl w-full">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-2.5 w-full">
-          {workflowStages.map((stage) => {
-            const isSelected = currentStage === stage.id;
+      <div className="bg-[#0b1220] border border-slate-800/90 p-1.5 sm:p-2 rounded-2xl shadow-xl w-full overflow-hidden">
+        <div className="overflow-x-auto no-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+          <div className="grid grid-cols-6 gap-2 sm:gap-2.5 w-full min-w-[760px]">
+            {workflowStages.map((stage) => {
+              const isSelected = currentStage === stage.id;
 
-            return (
-              <button
-                key={stage.id}
-                type="button"
-                onClick={() => onSelectStage(stage.id)}
-                className={`h-11 sm:h-12 px-3 sm:px-4 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 sm:gap-2.5 transition-all cursor-pointer border select-none w-full ${
-                  isSelected
-                    ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30 font-bold'
-                    : 'bg-[#0e1626] text-slate-300 border-slate-800/90 hover:border-slate-700 hover:text-white hover:bg-slate-800/60'
-                }`}
-                title={stage.title}
-              >
-                <span className={`shrink-0 transition-colors ${isSelected ? 'text-white' : 'text-purple-400'}`}>
-                  {stage.icon}
-                </span>
-                <span className="truncate">{stage.label}</span>
-                <span
-                  className={`px-2 py-0.5 rounded-md text-[11px] sm:text-xs font-mono font-bold shrink-0 transition-colors ${
+              return (
+                <button
+                  key={stage.id}
+                  type="button"
+                  onClick={() => onSelectStage(stage.id)}
+                  className={`h-11 sm:h-12 px-2.5 sm:px-3 lg:px-4 rounded-xl text-xs sm:text-[13px] lg:text-sm font-semibold flex items-center justify-center gap-1.5 sm:gap-2 lg:gap-2.5 transition-all cursor-pointer border select-none w-full whitespace-nowrap ${
                     isSelected
-                      ? 'bg-white/20 text-white shadow-inner'
-                      : 'bg-slate-800 text-slate-300 border border-slate-700/60'
+                      ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30 font-bold'
+                      : 'bg-[#0e1626] text-slate-300 border-slate-800/90 hover:border-slate-700 hover:text-white hover:bg-slate-800/60'
                   }`}
+                  title={stage.title}
                 >
-                  {stage.count}
-                </span>
-              </button>
-            );
-          })}
+                  <span className={`shrink-0 transition-colors ${isSelected ? 'text-white' : 'text-purple-400'}`}>
+                    {stage.icon}
+                  </span>
+                  <span className="whitespace-nowrap">{stage.label}</span>
+                  <span
+                    className={`px-2 py-0.5 rounded-md text-[11px] sm:text-xs font-mono font-bold shrink-0 transition-colors ${
+                      isSelected
+                        ? 'bg-white/20 text-white shadow-inner'
+                        : 'bg-slate-800 text-slate-300 border border-slate-700/60'
+                    }`}
+                  >
+                    {stage.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
