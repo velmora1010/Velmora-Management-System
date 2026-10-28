@@ -1,0 +1,91 @@
+{
+  "backupDate": "2026-10-23T11:30:00.000Z",
+  "reason": "Backup of demo/test draft payroll vouchers before clearing per user request",
+  "recordCount": 3,
+  "records": [
+    {
+      "id": "pay-2026-10-1001",
+      "payslipNumber": "PAY-202610-1001",
+      "employeeId": "emp-1001",
+      "employeeName": "Dhesan M",
+      "employeeCode": "EMP-1001",
+      "departmentId": "dept-dev",
+      "departmentName": "Software Development",
+      "month": "2026-10",
+      "baseSalary": 6500,
+      "allowances": {
+        "housing": 650,
+        "transport": 350,
+        "medical": 400,
+        "performanceBonus": 500
+      },
+      "deductions": {
+        "tax": 1512,
+        "healthInsurance": 350,
+        "providentFund": 325,
+        "unpaidLeaveDeduction": 0
+      },
+      "grossSalary": 8400,
+      "totalDeductions": 2187,
+      "netSalary": 6213,
+      "paymentMethod": "Direct Deposit",
+      "status": "draft"
+    },
+    {
+      "id": "pay-2026-10-1002",
+      "payslipNumber": "PAY-202610-1002",
+      "employeeId": "emp-1002",
+      "employeeName": "Dinesh K",
+      "employeeCode": "EMP-1002",
+      "departmentId": "dept-dev",
+      "departmentName": "Software Development",
+      "month": "2026-10",
+      "baseSalary": 6500,
+      "allowances": {
+        "housing": 650,
+        "transport": 350,
+        "medical": 400,
+        "performanceBonus": 500
+      },
+      "deductions": {
+        "tax": 1512,
+        "healthInsurance": 350,
+        "providentFund": 325,
+        "unpaidLeaveDeduction": 0
+      },
+      "grossSalary": 8400,
+      "totalDeductions": 2187,
+      "netSalary": 6213,
+      "paymentMethod": "Direct Deposit",
+      "status": "draft"
+    },
+    {
+      "id": "pay-2026-10-1003",
+      "payslipNumber": "PAY-202610-1003",
+      "employeeId": "emp-1003",
+      "employeeName": "Priya K",
+      "employeeCode": "EMP-1003",
+      "departmentId": "dept-qa",
+      "departmentName": "Quality Assurance",
+      "month": "2026-10",
+      "baseSalary": 6500,
+      "allowances": {
+        "housing": 650,
+        "transport": 350,
+        "medical": 400,
+        "performanceBonus": 500
+      },
+      "deductions": {
+        "tax": 1512,
+        "healthInsurance": 350,
+        "providentFund": 325,
+        "unpaidLeaveDeduction": 0
+      },
+      "grossSalary": 8400,
+      "totalDeductions": 2187,
+      "netSalary": 6213,
+      "paymentMethod": "Direct Deposit",
+      "status": "draft"
+    }
+  ]
+}

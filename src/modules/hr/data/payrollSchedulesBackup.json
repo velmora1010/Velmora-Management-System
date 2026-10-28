@@ -1,0 +1,73 @@
+{
+  "backupTimestamp": "2026-10-23T14:55:00+05:30",
+  "reason": "Backup of demo/test salary payment schedules prior to clearing calendar for manual Salary Amount (INR) workflow.",
+  "storageKey": "hrms_payroll_schedules_v3",
+  "records": [
+    {
+      "id": "demo-sched-1003-20261004",
+      "employeeId": "3",
+      "employeeName": "priya k",
+      "employeeCode": "EMP-1003",
+      "scheduledPaymentDate": "2026-10-04",
+      "amount": 6213,
+      "currency": "INR",
+      "status": "scheduled",
+      "classification": "demo_test_entry"
+    },
+    {
+      "id": "demo-sched-1002-20261005",
+      "employeeId": "2",
+      "employeeName": "dinesh s",
+      "employeeCode": "EMP-1002",
+      "scheduledPaymentDate": "2026-10-05",
+      "amount": 6213,
+      "currency": "INR",
+      "status": "scheduled",
+      "classification": "demo_test_entry"
+    },
+    {
+      "id": "demo-sched-1003-20261007",
+      "employeeId": "3",
+      "employeeName": "priya k",
+      "employeeCode": "EMP-1003",
+      "scheduledPaymentDate": "2026-10-07",
+      "amount": 6213,
+      "currency": "INR",
+      "status": "paid",
+      "classification": "demo_test_entry_auto_calculated_6213"
+    },
+    {
+      "id": "demo-sched-1001-20261010",
+      "employeeId": "1",
+      "employeeName": "dhesan m",
+      "employeeCode": "EMP-1001",
+      "scheduledPaymentDate": "2026-10-10",
+      "amount": 10899,
+      "currency": "INR",
+      "status": "scheduled",
+      "classification": "demo_test_entry"
+    },
+    {
+      "id": "demo-sched-1002-20261023",
+      "employeeId": "2",
+      "employeeName": "dinesh s",
+      "employeeCode": "EMP-1002",
+      "scheduledPaymentDate": "2026-10-23",
+      "amount": 6213,
+      "currency": "INR",
+      "status": "scheduled",
+      "classification": "demo_test_entry"
+    },
+    {
+      "id": "demo-sched-1003-20261023",
+      "employeeId": "3",
+      "employeeName": "priya k",
+      "employeeCode": "EMP-1003",
+      "scheduledPaymentDate": "2026-10-23",
+      "amount": 6213,
+      "currency": "INR",
+      "status": "scheduled",
+      "classification": "demo_test_entry"
+    }
+  ]
+}
