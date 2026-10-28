@@ -25,7 +25,9 @@ import {
   ArrowDown,
   MoreHorizontal,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  History,
+  XCircle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { UnifiedLogisticsOrder, UnifiedWorkflowStage } from '../../../types/unifiedLogistics';
@@ -45,6 +47,7 @@ interface OrderTableViewProps {
   onOpenDispatchModal?: (order: UnifiedLogisticsOrder) => void;
   onDeleteOrder?: (order: UnifiedLogisticsOrder) => void;
   onReviewCancellation?: (order: UnifiedLogisticsOrder) => void;
+  onViewCancellationHistory?: (order: UnifiedLogisticsOrder) => void;
   syncingOrderIds?: Set<number>;
 
   // Selection
@@ -66,6 +69,8 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
   onViewCustomer,
   onOpenDispatchModal,
   onDeleteOrder,
+  onReviewCancellation,
+  onViewCancellationHistory,
   syncingOrderIds = new Set(),
   isSelectable = false,
   selectedOrderIds = new Set(),
@@ -548,6 +553,9 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
             {currentOrders.map((order) => {
               const isSyncing = order.rawId ? syncingOrderIds.has(order.rawId) : false;
               const isSelected = selectedOrderIds.has(order.id);
+              const isCancelled = order.status === 'Cancelled' || 
+                                  order.cancellationStatus === 'Completed' || 
+                                  (order.fulfillmentStatus || '').toLowerCase() === 'cancelled';
               const effectiveStatus = order.workflowStage === 'active' ? 'Unfulfilled' : order.status;
               const badgeStyle = getStatusBadgeStyle(effectiveStatus);
               const dateInfo = parseAndFormatLogisticsDate(order.orderDateDisplay || order.orderDate);
@@ -619,13 +627,20 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                         )}
                       </div>
                     ) : (
-                      <div className="flex items-center gap-1.5">
-                        <span 
-                          onClick={() => onViewCustomer && onViewCustomer(order.customerKey)}
-                          className="whitespace-nowrap text-slate-100 font-bold hover:text-purple-300 cursor-pointer transition-colors"
-                        >
-                          {order.displayOrderId}
-                        </span>
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <span 
+                            onClick={() => onViewCustomer && onViewCustomer(order.customerKey)}
+                            className="whitespace-nowrap text-slate-100 font-bold hover:text-purple-300 cursor-pointer transition-colors"
+                          >
+                            {order.displayOrderId}
+                          </span>
+                        </div>
+                        {isCancelled && order.previousShipmentStatus && (
+                          <span className="text-[10px] text-cyan-400 font-mono">
+                            Prior: {order.previousShipmentStatus}
+                          </span>
+                        )}
                       </div>
                     )}
                   </td>
@@ -981,10 +996,29 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
 
                       {/* 8. STATUS */}
                       <td className="px-3.5 py-3.5 whitespace-nowrap">
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold border bg-purple-950/60 text-purple-300 border-purple-800/60">
-                          <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
-                          <span>Unfulfilled</span>
-                        </span>
+                        {isCancelled ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold border bg-rose-950/60 text-rose-300 border-rose-800/60 w-fit">
+                              <span className="w-1.5 h-1.5 rounded-full bg-rose-400 shrink-0" />
+                              <span>Cancelled</span>
+                            </span>
+                            {order.cancellationReason && (
+                              <span className="text-[10px] text-slate-400 truncate max-w-[150px]" title={order.cancellationReason}>
+                                {order.cancellationReason}
+                              </span>
+                            )}
+                            {order.cancellationDate && (
+                              <span className="text-[9px] font-mono text-slate-500">
+                                {new Date(order.cancellationDate).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold border bg-purple-950/60 text-purple-300 border-purple-800/60">
+                            <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
+                            <span>Unfulfilled</span>
+                          </span>
+                        )}
                       </td>
                     </>
                   )}
@@ -1033,6 +1067,18 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                         >
                           <Eye size={13} className="group-hover:scale-110 transition-transform text-slate-400 group-hover:text-purple-300" />
                         </button>
+
+                        {isCancelled && onViewCancellationHistory && (
+                          <button
+                            type="button"
+                            onClick={() => onViewCancellationHistory(order)}
+                            className="w-7 h-7 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 hover:text-white border border-rose-500/30 transition-all flex items-center justify-center cursor-pointer shadow-sm group shrink-0"
+                            title="View Cancellation Audit History"
+                            aria-label="View Cancellation History"
+                          >
+                            <History size={13} className="group-hover:scale-110 transition-transform text-rose-400" />
+                          </button>
+                        )}
 
                         {(isFulfilledView) && order.awbNumber && getCourierTrackingUrl(order.courier, order.awbNumber) && (
                           <a

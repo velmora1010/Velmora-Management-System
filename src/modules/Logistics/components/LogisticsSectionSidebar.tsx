@@ -6,7 +6,7 @@ import {
   RotateCcw, 
   CheckCircle2, 
   Layers, 
-  ExternalLink,
+  XCircle,
   Clock
 } from 'lucide-react';
 import type { LogisticsSection } from '../types/logisticsFilters';
@@ -24,14 +24,14 @@ export interface SectionItem {
 }
 
 export const SECTIONS: SectionItem[] = [
+  { id: 'all_shipments', label: 'All Shipments', icon: Layers },
   { id: 'pending_awb', label: 'Pending AWB', icon: Clock },
   { id: 'ready_to_ship', label: 'Ready to Ship', icon: Package },
   { id: 'ready_for_pickup', label: 'Ready for Pickup', icon: FileText },
   { id: 'in_transit', label: 'In Transit', icon: Truck },
   { id: 'rto_in_transit', label: 'RTO - In Transit', icon: RotateCcw },
   { id: 'delivered', label: 'Delivered', icon: CheckCircle2 },
-  { id: 'all_shipments', label: 'All Shipments', icon: Layers },
-  { id: 'third_party', label: 'Shipped via Third Party', icon: ExternalLink }
+  { id: 'cancelled_orders', label: 'Cancelled Orders', icon: XCircle }
 ];
 
 export const LogisticsSectionSidebar: React.FC<LogisticsSectionSidebarProps> = ({

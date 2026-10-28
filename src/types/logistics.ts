@@ -66,6 +66,11 @@ export interface LogisticsOrder {
   cancellationNotes?: string;
   cancellationRequestedAt?: string;
   cancellationRequestedBy?: string;
+  cancellationConfirmedAt?: string;
+  cancellationConfirmedBy?: string;
+  cancellationDate?: string;
+  previousShipmentStatus?: string;
+  cancellation?: any;
 }
 
 export interface TrackingLog {

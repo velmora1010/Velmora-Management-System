@@ -312,6 +312,15 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
     archiveReason: order.archiveReason,
     isArchived: order.stage === 'archived_legacy',
     cancellationStatus: order.cancellationStatus,
+    cancellationReason: order.cancellationReason,
+    cancellationNotes: order.cancellationNotes,
+    cancellationRequestedAt: order.cancellationRequestedAt,
+    cancellationRequestedBy: order.cancellationRequestedBy,
+    cancellationConfirmedAt: order.cancellationConfirmedAt,
+    cancellationConfirmedBy: order.cancellationConfirmedBy,
+    cancellationDate: order.cancellationDate || order.cancellationRequestedAt,
+    previousShipmentStatus: order.previousShipmentStatus,
+    cancellation: order.cancellation,
     remarks: order.remarks || order.lastEvent || order.sourceStatus || order.sourceSubStatus
   };
 };
@@ -810,10 +819,18 @@ export const syncSalesUploadToLogistics = async (
 
     if (!existing) {
       // CASE 1: Brand new order from Sales
-      let stage: 'active' | 'fulfilled' | 'pending' | 'tracking' | 'dispatched' = 'active';
+      let stage: 'active' | 'fulfilled' | 'pending' | 'tracking' | 'dispatched' | 'order_data' = 'active';
       let status = 'Unfulfilled';
 
-      if (order.stage === 'tracking' || (order.awb_number && order.stage !== 'active')) {
+      const isConfirmedCancelled = order.status === 'Cancelled' || 
+                                   order.fulfillment_status === 'cancelled' || 
+                                   order.cancellationStatus === 'Completed' ||
+                                   (order as any).isCancelled;
+
+      if (isConfirmedCancelled) {
+        stage = 'order_data';
+        status = 'Cancelled';
+      } else if (order.stage === 'tracking' || (order.awb_number && order.stage !== 'active')) {
         stage = 'tracking';
         status = order.status || 'Awaiting Tracking Update';
       } else if (isFulfilled) {
@@ -854,7 +871,17 @@ export const syncSalesUploadToLogistics = async (
         sourceFulfillmentStatus: isFulfilled ? 'fulfilled' : 'unfulfilled',
         financialStatus: order.financial_status,
         batchId: order.batchId,
-        batchName: order.batchName
+        batchName: order.batchName,
+        cancellationStatus: order.cancellationStatus,
+        cancellationReason: order.cancellationReason,
+        cancellationNotes: order.cancellationNotes,
+        cancellationRequestedAt: order.cancellationRequestedAt,
+        cancellationRequestedBy: order.cancellationRequestedBy,
+        cancellationConfirmedAt: order.cancellationConfirmedAt,
+        cancellationConfirmedBy: order.cancellationConfirmedBy,
+        cancellationDate: order.cancellationDate,
+        previousShipmentStatus: order.previousShipmentStatus,
+        cancellation: order.cancellation
       };
 
       toAdd.push(newRec as LogisticsOrder);
@@ -869,6 +896,31 @@ export const syncSalesUploadToLogistics = async (
       }
 
       const patch: Partial<LogisticsOrder> = {};
+      const isConfirmedCancelled = order.status === 'Cancelled' || 
+                                   order.fulfillment_status === 'cancelled' || 
+                                   order.cancellationStatus === 'Completed' ||
+                                   (order as any).isCancelled;
+
+      if (isConfirmedCancelled) {
+        patch.status = 'Cancelled';
+        patch.cancellationStatus = 'Completed';
+        patch.fulfillmentStatus = 'cancelled';
+        patch.sourceFulfillmentStatus = 'cancelled';
+        if (order.cancellationReason) patch.cancellationReason = order.cancellationReason;
+        if (order.cancellationNotes) patch.cancellationNotes = order.cancellationNotes;
+        if (order.cancellationRequestedAt) patch.cancellationRequestedAt = order.cancellationRequestedAt;
+        if (order.cancellationRequestedBy) patch.cancellationRequestedBy = order.cancellationRequestedBy;
+        if (order.cancellationConfirmedAt) patch.cancellationConfirmedAt = order.cancellationConfirmedAt;
+        if (order.cancellationConfirmedBy) patch.cancellationConfirmedBy = order.cancellationConfirmedBy;
+        if (order.cancellationDate) patch.cancellationDate = order.cancellationDate;
+        if (order.previousShipmentStatus) patch.previousShipmentStatus = order.previousShipmentStatus;
+        if (order.cancellation) patch.cancellation = order.cancellation;
+      } else if (existing.status === 'Cancelled' || existing.cancellationStatus === 'Completed') {
+        // STRICT RULE: Never revert confirmed cancelled orders back to active!
+        patch.status = 'Cancelled';
+        patch.cancellationStatus = 'Completed';
+      }
+
       const inWorkflow = existing.stage === 'prepare_dispatch' || 
                          existing.stage === 'dispatched' || 
                          existing.stage === 'tracking';
@@ -997,7 +1049,25 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
       else page++;
     }
 
-    if (allSalesOrders.length === 0) {
+    // Fetch all customer tracking shipments from Supabase (paginated) to merge tracking states & AWBs
+    let shipmentsData: any[] = [];
+    let sPage = 0;
+    const sPageSize = 1000;
+    let sHasMore = true;
+
+    while (sHasMore) {
+      const { data: sData, error: sErr } = await supabase
+        .from('customer_tracking_shipments')
+        .select('*')
+        .range(sPage * sPageSize, (sPage + 1) * sPageSize - 1);
+
+      if (sErr || !sData || sData.length === 0) break;
+      shipmentsData = shipmentsData.concat(sData);
+      if (sData.length < sPageSize) sHasMore = false;
+      else sPage++;
+    }
+
+    if (allSalesOrders.length === 0 && shipmentsData.length === 0) {
       return {
         insertedCount: 0,
         updatedCount: 0,
@@ -1032,11 +1102,6 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
         }
       }
     }
-
-    // Fetch any existing customer tracking shipments from Supabase to preserve AWBs & dispatch states
-    const { data: shipmentsData } = await supabase
-      .from('customer_tracking_shipments')
-      .select('*');
     
     const shipmentMap = new Map<string, any>();
     (shipmentsData || []).forEach(s => {
@@ -1044,21 +1109,41 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
       if (cId) shipmentMap.set(cId, s);
     });
 
-    const transformed = activeSalesOrders.map(so => {
+    const transformedSales = activeSalesOrders.map(so => {
       const cleanId = cleanOrderId(so.order_id).toLowerCase();
       const existingShipment = shipmentMap.get(cleanId);
       const extra = so.extra_data || {};
 
+      const cData = extra.cancellation || {};
+      const isConfirmedCancelled = so.order_status === 'CANCELLED' || 
+                                   cData.status === 'CANCELLED' || 
+                                   extra.fulfillment_status === 'cancelled';
+      const isPendingCancellation = cData.status === 'PENDING_LOGISTICS_APPROVAL';
+
       const hasShipment = !!existingShipment;
-      const isDispatched = hasShipment || (so.dispatch_status === 'DISPATCHED' && !!extra.awb_number);
-      const isFulfilled = !isDispatched && (
+      const isDispatched = !isConfirmedCancelled && (hasShipment || (so.dispatch_status === 'DISPATCHED' && !!extra.awb_number));
+      const isFulfilled = !isConfirmedCancelled && !isDispatched && (
         extra.fulfillment_status === 'fulfilled' ||
         extra.fulfillment_status === 'shipped' ||
         so.order_status === 'FULFILLED' ||
         so.dispatch_status === 'DELIVERED'
       );
 
-      const fStatus = isFulfilled ? 'fulfilled' : (isDispatched ? 'dispatched' : 'unfulfilled');
+      const fStatus = isConfirmedCancelled 
+        ? 'cancelled' 
+        : (isFulfilled ? 'fulfilled' : (isDispatched ? 'dispatched' : 'unfulfilled'));
+
+      const status = isConfirmedCancelled 
+        ? 'Cancelled' 
+        : (existingShipment?.status || (isDispatched ? 'Awaiting Tracking Update' : (isFulfilled ? 'Fulfilled' : 'Unfulfilled')));
+
+      const stage = isConfirmedCancelled
+        ? 'order_data'
+        : (isDispatched ? 'tracking' : (isFulfilled ? 'fulfilled' : undefined));
+
+      const cancellationStatus = isConfirmedCancelled 
+        ? 'Completed' 
+        : (isPendingCancellation ? 'Requested' : undefined);
 
       return {
         order_id: so.order_id,
@@ -1077,13 +1162,86 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
         financial_status: extra.financial_status,
         awb_number: existingShipment?.awb_number || extra.awb_number,
         courier: existingShipment?.courier || extra.courier,
-        stage: isDispatched ? 'tracking' : (isFulfilled ? 'fulfilled' : undefined),
-        status: existingShipment?.status || (isDispatched ? 'Awaiting Tracking Update' : (isFulfilled ? 'Fulfilled' : 'Unfulfilled')),
+        stage,
+        status,
         dispatch_date: existingShipment?.dispatch_date || (isDispatched ? so.dispatch_date : undefined),
         fulfilled_date: extra.fulfilled_date || (isFulfilled ? so.order_date : undefined),
-        batchId: so.upload_id
+        batchId: so.upload_id,
+        cancellationStatus,
+        cancellationReason: cData.reason || (isConfirmedCancelled ? 'Cancelled in source export' : undefined),
+        cancellationNotes: cData.notes || extra.cancellation_notes,
+        cancellationRequestedAt: cData.requested_at || cData.cancelled_at || so.updated_at,
+        cancellationRequestedBy: cData.requested_by || 'Sales',
+        cancellationConfirmedAt: cData.confirmed_at || cData.cancelled_at,
+        cancellationConfirmedBy: cData.confirmed_by || 'Source System',
+        cancellationDate: cData.cancelled_at || cData.confirmed_at || so.updated_at,
+        previousShipmentStatus: cData.previous_shipment_status || (hasShipment ? 'Dispatched' : 'Not manifested'),
+        cancellation: cData
       };
     });
+
+    // Also include shipments from customer_tracking_shipments whose order_id is not already present
+    const salesOrderIdSet = new Set(activeSalesOrders.map(so => cleanOrderId(so.order_id).toLowerCase()));
+    const shipmentOrders = (shipmentsData || [])
+      .filter(s => {
+        const cId = cleanOrderId(s.order_id || s.display_order_id).toLowerCase();
+        return cId && !salesOrderIdSet.has(cId);
+      })
+      .map(s => {
+        const cId = cleanOrderId(s.order_id || s.display_order_id);
+        const st = (s.status || '').toLowerCase();
+        const rawSt = (s.raw_status || '').toLowerCase();
+        const isConfirmedCancelled = st === 'cancelled' || rawSt === 'cancelled';
+        const isDelivered = st.includes('delivered');
+        const isRto = st.includes('rto');
+        const isDispatched = !isConfirmedCancelled && (!!s.awb_number || s.status === 'In Transit' || s.status === 'Out for Delivery' || s.status === 'Awaiting Tracking Update' || isDelivered || isRto);
+
+        const fStatus = isConfirmedCancelled ? 'cancelled' : (isDelivered ? 'fulfilled' : (isDispatched ? 'dispatched' : 'unfulfilled'));
+        const stage = isConfirmedCancelled ? 'order_data' : (isDispatched ? 'tracking' : 'order_data');
+        const cancellationStatus = isConfirmedCancelled ? 'Completed' : undefined;
+
+        return {
+          order_id: cId,
+          customer_name: s.customer_name || 'Customer',
+          phone: s.phone_number || '',
+          address: s.address || '',
+          city: s.city || '',
+          state: s.state || '',
+          pincode: s.pincode || '',
+          order_formatted: s.display_order_id || `#${cId}`,
+          product_name: s.products || 'Standard Products',
+          price: Number(s.amount) || 0,
+          payment_mode: s.order_type || 'Prepaid',
+          order_date: s.dispatch_date || s.created_at || '',
+          fulfillment_status: fStatus,
+          financial_status: 'Paid',
+          awb_number: s.awb_number || '',
+          courier: s.courier || '',
+          stage,
+          status: s.status || (isConfirmedCancelled ? 'Cancelled' : 'In Transit'),
+          dispatch_date: s.dispatch_date,
+          fulfilled_date: s.delivered_date || (isDelivered ? s.dispatch_date : undefined),
+          batchId: s.batch_id,
+          batchName: s.batch_name,
+          cancellationStatus,
+          cancellationReason: isConfirmedCancelled ? (s.remarks || 'Cancelled order') : undefined,
+          cancellationNotes: isConfirmedCancelled ? s.remarks : undefined,
+          cancellationRequestedAt: isConfirmedCancelled ? (s.updated_at || s.created_at) : undefined,
+          cancellationRequestedBy: 'Logistics',
+          cancellationConfirmedAt: isConfirmedCancelled ? (s.updated_at || s.created_at) : undefined,
+          cancellationConfirmedBy: 'Logistics',
+          cancellationDate: isConfirmedCancelled ? (s.updated_at || s.created_at) : undefined,
+          previousShipmentStatus: isConfirmedCancelled ? (s.awb_number ? 'Dispatched' : 'Pending AWB') : undefined,
+          cancellation: isConfirmedCancelled ? {
+            status: 'CANCELLED',
+            reason: s.remarks || 'Cancelled order',
+            cancelled_at: s.updated_at || s.created_at,
+            confirmed_at: s.updated_at || s.created_at
+          } : undefined
+        };
+      });
+
+    const transformed = [...transformedSales, ...shipmentOrders];
 
     return await syncSalesUploadToLogistics(transformed);
   } catch (err) {

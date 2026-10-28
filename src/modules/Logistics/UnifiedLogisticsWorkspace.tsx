@@ -50,6 +50,7 @@ import { PrepareDispatchGroupedView } from './components/PrepareDispatchGroupedV
 import { DispatchOrderModal } from './components/DispatchOrderModal';
 import { MoveToPrepareSidePanel } from './components/MoveToPrepareSidePanel';
 import { LogisticsReconciliationModal } from './components/LogisticsReconciliationModal';
+import { CancellationHistoryModal } from '../sales/website/components/CancellationHistoryModal';
 import { TrackingModal } from './TrackingModal';
 import { trackingEngine } from '../../services/tracking/trackingEngine';
 import { CONFIGURED_COURIERS, normalizeCourier } from '../../config/courierConfig';
@@ -120,6 +121,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
   const [orderToDispatch, setOrderToDispatch] = useState<UnifiedLogisticsOrder | null>(null);
   const [selectedCustomerKey, setSelectedCustomerKey] = useState<string | null>(null);
   const [cancellationReviewOrder, setCancellationReviewOrder] = useState<UnifiedLogisticsOrder | null>(null);
+  const [cancellationHistoryOrder, setCancellationHistoryOrder] = useState<UnifiedLogisticsOrder | null>(null);
   const [activeTrackingOrder, setActiveTrackingOrder] = useState<LogisticsOrder | null>(null);
 
   // Live Syncing State for Tracking
@@ -1508,6 +1510,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                 onOpenDispatchModal={setOrderToDispatch}
                 onDeleteOrder={handleDeleteOrder}
                 onReviewCancellation={(order) => setCancellationReviewOrder(order)}
+                onViewCancellationHistory={setCancellationHistoryOrder}
                 syncingOrderIds={syncingOrderIds}
                 isSelectable={isBulkSelectMode && currentStage === 'active'}
                 selectedOrderIds={selectedOrderIds}
@@ -1640,6 +1643,38 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         onReconciliationCompleted={() => {
           handleRefresh();
         }}
+      />
+
+      {/* Cancellation Audit History Modal */}
+      <CancellationHistoryModal
+        isOpen={!!cancellationHistoryOrder}
+        order={cancellationHistoryOrder ? {
+          id: cancellationHistoryOrder.id,
+          order_id: cancellationHistoryOrder.orderId,
+          customer_name: cancellationHistoryOrder.customerName,
+          cancellation: cancellationHistoryOrder.cancellation || {
+            status: 'CANCELLED',
+            reason: cancellationHistoryOrder.cancellationReason || 'Cancelled in source export',
+            notes: cancellationHistoryOrder.cancellationNotes,
+            requested_by: cancellationHistoryOrder.cancellationRequestedBy || 'Sales',
+            requested_at: cancellationHistoryOrder.cancellationRequestedAt || cancellationHistoryOrder.cancellationDate,
+            confirmed_by: cancellationHistoryOrder.cancellationConfirmedBy || 'Source System',
+            confirmed_at: cancellationHistoryOrder.cancellationConfirmedAt || cancellationHistoryOrder.cancellationDate,
+            cancelled_at: cancellationHistoryOrder.cancellationDate || cancellationHistoryOrder.cancellationRequestedAt,
+            previous_shipment_status: cancellationHistoryOrder.previousShipmentStatus || 'Not manifested',
+            audit_trail: [{
+              action: 'CANCELLED',
+              performed_by: cancellationHistoryOrder.cancellationConfirmedBy || cancellationHistoryOrder.cancellationRequestedBy || 'Source System',
+              timestamp: cancellationHistoryOrder.cancellationDate || cancellationHistoryOrder.cancellationRequestedAt || new Date().toISOString(),
+              reason: cancellationHistoryOrder.cancellationReason || 'Order cancellation confirmed',
+              details: {
+                source: 'Logistics Workspace',
+                previous_shipment_status: cancellationHistoryOrder.previousShipmentStatus || 'Not manifested'
+              }
+            }]
+          }
+        } as any : null}
+        onClose={() => setCancellationHistoryOrder(null)}
       />
 
     </div>

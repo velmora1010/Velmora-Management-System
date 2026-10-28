@@ -88,6 +88,15 @@ export interface UnifiedLogisticsOrder {
   transportMode?: 'Surface' | 'Air' | string;
   zone?: string;
   cancellationStatus?: 'Requested' | 'Approved' | 'Rejected' | 'Completed' | string;
+  cancellationReason?: string;
+  cancellationNotes?: string;
+  cancellationRequestedAt?: string;
+  cancellationRequestedBy?: string;
+  cancellationConfirmedAt?: string;
+  cancellationConfirmedBy?: string;
+  cancellationDate?: string;
+  previousShipmentStatus?: string;
+  cancellation?: any;
   remarks?: string;
   // Batch & fulfillment metadata
   batchId?: string;
