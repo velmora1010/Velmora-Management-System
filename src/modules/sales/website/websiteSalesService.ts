@@ -14,6 +14,7 @@ import type {
   WebsiteFullOrderDetails,
   OrderCancellationData
 } from './types';
+import { getCustomerOrderIdentifierVariants, areCustomerOrdersMatching, extractCustomerOrderBaseId } from '../../../utils/orderIdUtils';
 import { 
   syncSalesUploadToLogistics,
   deleteLogisticsOrderByOrderId,
@@ -837,7 +838,7 @@ export class WebsiteSalesService {
     return consolidatedOrders;
   }
 
-  // Delete an upload batch and all associated records from Supabase and Logistics
+  // Delete an upload batch and all associated records from Supabase and Logistics atomically
   async deleteUploadBatch(batchId: string): Promise<boolean> {
     try {
       const orders = await this.fetchAllPages<{ id: string; order_id: string }>((start, end) =>
@@ -853,18 +854,71 @@ export class WebsiteSalesService {
       const salesOrderIds = (orders || []).map(o => o.id);
       const rawOrderIds = (orders || []).map(o => cleanOrderId(o.order_id));
 
+      // Collect all identifier variants for every order in this batch
+      const allBatchVariants = new Set<string>();
+      for (const oid of rawOrderIds) {
+        getCustomerOrderIdentifierVariants(oid).forEach(v => allBatchVariants.add(v));
+      }
+      const batchVariantsList = Array.from(allBatchVariants);
+
       if (salesOrderIds.length > 0) {
         for (let i = 0; i < salesOrderIds.length; i += 300) {
           await supabase.from('sales_order_items').delete().in('sales_order_id', salesOrderIds.slice(i, i + 300));
         }
       }
 
+      // 1. Delete Sales records
       await supabase.from('sales_orders').delete().eq('upload_id', batchId).eq('channel', 'WEBSITE');
       await supabase.from('sales_raw_data').delete().eq('upload_id', batchId);
       await supabase.from('sales_uploads').delete().eq('id', batchId);
 
-      // Propagate batch deletion to Logistics Dexie
-      await deleteLogisticsOrdersByBatchId(batchId, rawOrderIds);
+      // 2. Synchronize Supabase customer_tracking_shipments:
+      // Archive / soft-delete linked shipments so they never remain as orphaned active orders
+      if (batchVariantsList.length > 0) {
+        for (let i = 0; i < batchVariantsList.length; i += 200) {
+          const chunk = batchVariantsList.slice(i, i + 200);
+          await supabase
+            .from('customer_tracking_shipments')
+            .update({
+              status: 'Order Deleted',
+              raw_status: 'DELETED',
+              remarks: 'Batch deleted from Sales',
+              updated_at: new Date().toISOString()
+            })
+            .in('order_id', chunk);
+
+          await supabase
+            .from('customer_tracking_shipments')
+            .update({
+              status: 'Order Deleted',
+              raw_status: 'DELETED',
+              remarks: 'Batch deleted from Sales',
+              updated_at: new Date().toISOString()
+            })
+            .in('display_order_id', chunk);
+        }
+      }
+
+      // Also update any shipments directly tagged with this batch_id
+      await supabase
+        .from('customer_tracking_shipments')
+        .update({
+          status: 'Order Deleted',
+          raw_status: 'DELETED',
+          remarks: 'Batch deleted from Sales',
+          updated_at: new Date().toISOString()
+        })
+        .eq('batch_id', batchId);
+
+      // 3. Propagate batch deletion to Logistics Dexie
+      await deleteLogisticsOrdersByBatchId(batchId, batchVariantsList);
+
+      // 4. Dispatch live event
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('velmora:batch_deleted', {
+          detail: { batchId, orderIds: batchVariantsList, timestamp: Date.now() }
+        }));
+      }
     } catch (e: any) {
       console.error('[Supabase Error] Table: sales_uploads/orders, Op: DELETE, Message:', e.message);
       throw new Error(`Failed to delete upload batch: ${e.message}`);
@@ -890,7 +944,7 @@ export class WebsiteSalesService {
     }
   }
 
-  // Permanently delete a single order from Sales and propagate deletion to Logistics
+  // Permanently delete a single order from Sales and propagate deletion to Logistics across all aliases
   async deleteSalesOrder(orderId: string): Promise<{
     success: boolean;
     orderId: string;
@@ -900,70 +954,88 @@ export class WebsiteSalesService {
     const cleanId = cleanOrderId(orderId);
     if (!cleanId) throw new Error('Invalid order ID provided for deletion');
 
+    const variants = getCustomerOrderIdentifierVariants(orderId);
+
     try {
-      // 1. Fetch matching sales_orders row from Supabase
+      // 1. Fetch matching sales_orders rows from Supabase using all canonical variants
       const { data: orderRows, error: fetchErr } = await supabase
         .from('sales_orders')
         .select('id, order_id, dispatch_status, extra_data')
         .eq('channel', 'WEBSITE')
-        .eq('order_id', cleanId);
+        .in('order_id', variants);
 
       if (fetchErr) {
         console.error('[Supabase Error] Table: sales_orders, Op: SELECT, Message:', fetchErr.message);
         throw new Error(`Failed to locate order in database: ${fetchErr.message}`);
       }
 
-      const existingOrder = orderRows && orderRows[0];
       let wasDispatched = false;
 
-      if (existingOrder) {
-        if (existingOrder.dispatch_status === 'DISPATCHED' || existingOrder.dispatch_status === 'DELIVERED') {
-          wasDispatched = true;
+      if (orderRows && orderRows.length > 0) {
+        for (const existingOrder of orderRows) {
+          if (existingOrder.dispatch_status === 'DISPATCHED' || existingOrder.dispatch_status === 'DELIVERED') {
+            wasDispatched = true;
+          }
+
+          // A. Delete child line items
+          await supabase
+            .from('sales_order_items')
+            .delete()
+            .eq('sales_order_id', existingOrder.id);
+
+          // B. Mark sales_orders as DELETED (tombstone)
+          const currentExtra = existingOrder.extra_data || {};
+          await supabase
+            .from('sales_orders')
+            .update({
+              order_status: 'DELETED',
+              dispatch_status: 'CANCELLED',
+              extra_data: {
+                ...currentExtra,
+                is_deleted: true,
+                deleted_at: new Date().toISOString(),
+                tombstone: true
+              }
+            })
+            .eq('id', existingOrder.id);
         }
 
-        // A. Delete child line items
-        const { error: itemErr } = await supabase
-          .from('sales_order_items')
-          .delete()
-          .eq('sales_order_id', existingOrder.id);
-
-        if (itemErr) {
-          console.error('[Supabase Error] Table: sales_order_items, Op: DELETE, Message:', itemErr.message);
-          throw new Error(`Failed to delete order items: ${itemErr.message}`);
-        }
-
-        // B. Mark sales_orders as DELETED (tombstone)
-        const currentExtra = existingOrder.extra_data || {};
-        const { error: updateErr } = await supabase
-          .from('sales_orders')
-          .update({
-            order_status: 'DELETED',
-            dispatch_status: 'CANCELLED',
-            extra_data: {
-              ...currentExtra,
-              is_deleted: true,
-              deleted_at: new Date().toISOString(),
-              tombstone: true
-            }
-          })
-          .eq('id', existingOrder.id);
-
-        if (updateErr) {
-          console.error('[Supabase Error] Table: sales_orders, Op: UPDATE, Message:', updateErr.message);
-          throw new Error(`Failed to update order status: ${updateErr.message}`);
-        }
-
-        // C. Clean up raw spreadsheet data
+        // C. Clean up raw spreadsheet data for all variants
         await supabase
           .from('sales_raw_data')
           .delete()
-          .eq('order_id', cleanId);
+          .in('order_id', variants);
       }
 
-      // 2. Propagate deletion to Logistics
+      // 2. Synchronize to Supabase customer_tracking_shipments:
+      // Archive / soft-delete any matching shipment record for this order and all its aliases
+      try {
+        for (const v of variants) {
+          await supabase
+            .from('customer_tracking_shipments')
+            .update({
+              status: 'Order Deleted',
+              raw_status: 'DELETED',
+              remarks: `Deleted from Sales (${new Date().toLocaleDateString('en-IN')})`,
+              updated_at: new Date().toISOString()
+            })
+            .or(`order_id.eq.${v},display_order_id.eq.${v}`);
+        }
+      } catch (sbLogErr) {
+        console.warn('Supabase customer_tracking_shipments soft-delete note:', sbLogErr);
+      }
+
+      // 3. Propagate deletion to Logistics Dexie
       const logRes = await deleteLogisticsOrderByOrderId(cleanId, 'Deleted from Sales');
       if (logRes.wasDispatched) {
         wasDispatched = true;
+      }
+
+      // 4. Dispatch live event
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('velmora:order_deleted', {
+          detail: { orderId: cleanId, variants, wasDispatched, timestamp: Date.now() }
+        }));
       }
 
       return {

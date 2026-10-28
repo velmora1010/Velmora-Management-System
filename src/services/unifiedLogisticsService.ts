@@ -10,6 +10,11 @@ import type {
 } from '../types/unifiedLogistics';
 
 import { parseAndFormatLogisticsDate } from '../utils/logisticsDateUtils';
+import {
+  extractCustomerOrderBaseId,
+  getCustomerOrderIdentifierVariants,
+  areCustomerOrdersMatching
+} from '../utils/orderIdUtils';
 
 /**
  * Normalizes phone numbers to standard 10-digit Indian mobile format or clean digit string.
@@ -30,6 +35,12 @@ export const normalizePhoneNumber = (raw?: string | null): string => {
 /**
  * Cleans order IDs by stripping leading '#' and outer quotes.
  */
+export {
+  extractCustomerOrderBaseId,
+  getCustomerOrderIdentifierVariants,
+  areCustomerOrdersMatching
+};
+
 export const cleanOrderId = (val?: string | null): string => {
   if (!val) return '';
   let str = String(val).trim();
@@ -779,7 +790,14 @@ export const syncSalesUploadToLogistics = async (
   const existingMap = new Map<string, LogisticsOrder>();
   existingRecords.forEach(rec => {
     const cid = cleanOrderId(rec.orderId);
-    if (cid) existingMap.set(cid.toLowerCase(), rec);
+    if (cid) {
+      const lower = cid.toLowerCase();
+      existingMap.set(lower, rec);
+      const base = extractCustomerOrderBaseId(cid).toLowerCase();
+      if (base && !existingMap.has(base)) {
+        existingMap.set(base, rec);
+      }
+    }
   });
 
   let insertedCount = 0;
@@ -792,12 +810,19 @@ export const syncSalesUploadToLogistics = async (
 
   const toAdd: LogisticsOrder[] = [];
   const toPut: LogisticsOrder[] = [];
+  const seenInBatch = new Map<string, LogisticsOrder>();
 
   for (const order of consolidatedOrders) {
     const cleanId = cleanOrderId(order.order_id);
     if (!cleanId) continue;
     const lowerId = cleanId.toLowerCase();
-    const existing = existingMap.get(lowerId);
+    const baseId = extractCustomerOrderBaseId(cleanId).toLowerCase();
+
+    // Match existing Dexie record or an order already processed earlier in this batch
+    const existing = existingMap.get(lowerId) || 
+                     (baseId ? existingMap.get(baseId) : undefined) ||
+                     seenInBatch.get(lowerId) ||
+                     (baseId ? seenInBatch.get(baseId) : undefined);
 
     const fStatus = (order.fulfillment_status || '').toLowerCase().trim();
     const isFulfilled = fStatus === 'fulfilled' || fStatus === 'shipped' || fStatus === 'delivered';
@@ -884,7 +909,10 @@ export const syncSalesUploadToLogistics = async (
         cancellation: order.cancellation
       };
 
-      toAdd.push(newRec as LogisticsOrder);
+      const addedRec = newRec as LogisticsOrder;
+      toAdd.push(addedRec);
+      seenInBatch.set(lowerId, addedRec);
+      if (baseId) seenInBatch.set(baseId, addedRec);
       insertedCount++;
     } else {
       // CASE 2: Re-import / existing order in Logistics
@@ -1049,7 +1077,7 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
       else page++;
     }
 
-    // Fetch all customer tracking shipments from Supabase (paginated) to merge tracking states & AWBs
+    // Fetch all customer tracking shipments from Supabase (paginated) excluding soft-deleted records
     let shipmentsData: any[] = [];
     let sPage = 0;
     const sPageSize = 1000;
@@ -1059,6 +1087,8 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
       const { data: sData, error: sErr } = await supabase
         .from('customer_tracking_shipments')
         .select('*')
+        .neq('status', 'Order Deleted')
+        .neq('raw_status', 'DELETED')
         .range(sPage * sPageSize, (sPage + 1) * sPageSize - 1);
 
       if (sErr || !sData || sData.length === 0) break;
@@ -1087,12 +1117,22 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
       so.order_status === 'DELETED' || so.extra_data?.is_deleted
     );
 
-    // If any order in Dexie was deleted in Supabase, mark its stage as 'trash'
-    if (deletedSalesOrders.length > 0) {
-      const deletedSet = new Set(deletedSalesOrders.map(so => cleanOrderId(so.order_id).toLowerCase()));
+    // Build exhaustive set of all deleted order IDs, base IDs, and aliases
+    const deletedVariantSet = new Set<string>();
+    deletedSalesOrders.forEach(so => {
+      getCustomerOrderIdentifierVariants(so.order_id).forEach(v => deletedVariantSet.add(v.toLowerCase()));
+      const base = extractCustomerOrderBaseId(so.order_id).toLowerCase();
+      if (base) deletedVariantSet.add(base);
+    });
+
+    // If any order in Dexie matches a deleted sales order variant, mark its stage as 'trash'
+    if (deletedVariantSet.size > 0) {
       const dexieAll = await db.logistics_orders.toArray();
       for (const rec of dexieAll) {
-        if (rec.id && rec.stage !== 'trash' && deletedSet.has(cleanOrderId(rec.orderId).toLowerCase())) {
+        if (!rec.id || rec.stage === 'trash') continue;
+        const cId = cleanOrderId(rec.orderId).toLowerCase();
+        const bId = extractCustomerOrderBaseId(rec.orderId).toLowerCase();
+        if (deletedVariantSet.has(cId) || (bId && deletedVariantSet.has(bId))) {
           await db.logistics_orders.update(rec.id, {
             stage: 'trash',
             status: 'Deleted',
@@ -1180,12 +1220,33 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
       };
     });
 
-    // Also include shipments from customer_tracking_shipments whose order_id is not already present
-    const salesOrderIdSet = new Set(activeSalesOrders.map(so => cleanOrderId(so.order_id).toLowerCase()));
+    // Also include shipments from customer_tracking_shipments whose order_id is not already present in Sales,
+    // and exclude any deleted or orphaned shipments
+    const salesOrderKeySet = new Set<string>();
+    activeSalesOrders.forEach(so => {
+      salesOrderKeySet.add(cleanOrderId(so.order_id).toLowerCase());
+      const base = extractCustomerOrderBaseId(so.order_id).toLowerCase();
+      if (base) salesOrderKeySet.add(base);
+    });
+
     const shipmentOrders = (shipmentsData || [])
       .filter(s => {
-        const cId = cleanOrderId(s.order_id || s.display_order_id).toLowerCase();
-        return cId && !salesOrderIdSet.has(cId);
+        const rawId = s.order_id || s.display_order_id;
+        if (!rawId) return false;
+        const st = (s.status || '').toLowerCase();
+        const rawSt = (s.raw_status || '').toLowerCase();
+        if (st === 'order deleted' || rawSt === 'deleted') return false;
+
+        const cId = cleanOrderId(rawId).toLowerCase();
+        const bId = extractCustomerOrderBaseId(rawId).toLowerCase();
+
+        // Must not match any deleted sales order
+        if (deletedVariantSet.has(cId) || (bId && deletedVariantSet.has(bId))) return false;
+
+        // Must not duplicate an active sales order (already handled in transformedSales)
+        if (salesOrderKeySet.has(cId) || (bId && salesOrderKeySet.has(bId))) return false;
+
+        return true;
       })
       .map(s => {
         const cId = cleanOrderId(s.order_id || s.display_order_id);
@@ -1268,15 +1329,22 @@ export const deleteLogisticsOrderByOrderId = async (
   reason = 'Deleted from Sales'
 ): Promise<{ success: boolean; count: number; wasDispatched: boolean }> => {
   const cleanId = cleanOrderId(orderId);
-  const lowerClean = cleanId.toLowerCase();
+  const variants = getCustomerOrderIdentifierVariants(orderId);
+  const variantLowerSet = new Set(variants.map(v => v.toLowerCase()));
+  const baseId = extractCustomerOrderBaseId(orderId).toLowerCase();
+  if (baseId) variantLowerSet.add(baseId);
+
   let wasDispatched = false;
   let count = 0;
 
   await db.transaction('rw', db.logistics_orders, async () => {
     const all = await db.logistics_orders.toArray();
     const matches = all.filter(o => {
+      if (!o.orderId) return false;
+      if (areCustomerOrdersMatching(o.orderId, orderId)) return true;
       const c = cleanOrderId(o.orderId).toLowerCase();
-      return c === lowerClean || o.orderId === orderId || o.orderId === `#${cleanId}`;
+      const b = extractCustomerOrderBaseId(o.orderId).toLowerCase();
+      return variantLowerSet.has(c) || (b && variantLowerSet.has(b));
     });
 
     for (const m of matches) {
@@ -1297,23 +1365,26 @@ export const deleteLogisticsOrderByOrderId = async (
     }
   });
 
-  // Update Supabase customer_tracking_shipments if present
+  // Synchronize to Supabase customer_tracking_shipments across all variants
   try {
-    await supabase
-      .from('customer_tracking_shipments')
-      .update({
-        status: 'Order Deleted',
-        raw_status: 'DELETED',
-        updated_at: new Date().toISOString()
-      })
-      .eq('order_id', cleanId);
+    for (const v of variants) {
+      await supabase
+        .from('customer_tracking_shipments')
+        .update({
+          status: 'Order Deleted',
+          raw_status: 'DELETED',
+          remarks: `Deleted from Sales (${new Date().toLocaleDateString('en-IN')})`,
+          updated_at: new Date().toISOString()
+        })
+        .or(`order_id.eq.${v},display_order_id.eq.${v}`);
+    }
   } catch (e) {
     console.warn('customer_tracking_shipments update note:', e);
   }
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('velmora:sales_order_deleted', {
-      detail: { orderId: cleanId, wasDispatched, timestamp: Date.now() }
+      detail: { orderId: cleanId, variants, wasDispatched, timestamp: Date.now() }
     }));
   }
 
@@ -1328,14 +1399,24 @@ export const deleteLogisticsOrdersByBatchId = async (
   orderIds: string[] = []
 ): Promise<{ success: boolean; count: number }> => {
   let count = 0;
-  const cleanIds = new Set(orderIds.map(id => cleanOrderId(id).toLowerCase()));
+  const allVariants = new Set<string>();
+  orderIds.forEach(id => {
+    getCustomerOrderIdentifierVariants(id).forEach(v => allVariants.add(v.toLowerCase()));
+    const base = extractCustomerOrderBaseId(id).toLowerCase();
+    if (base) allVariants.add(base);
+  });
 
   await db.transaction('rw', db.logistics_orders, async () => {
     const all = await db.logistics_orders.toArray();
-    const matches = all.filter(o => 
-      o.batchId === batchId || 
-      (cleanIds.size > 0 && cleanIds.has(cleanOrderId(o.orderId).toLowerCase()))
-    );
+    const matches = all.filter(o => {
+      if (batchId && o.batchId === batchId) return true;
+      if (allVariants.size > 0 && o.orderId) {
+        const c = cleanOrderId(o.orderId).toLowerCase();
+        const b = extractCustomerOrderBaseId(o.orderId).toLowerCase();
+        return allVariants.has(c) || (b && allVariants.has(b));
+      }
+      return false;
+    });
 
     for (const m of matches) {
       if (!m.id) continue;
@@ -1348,6 +1429,23 @@ export const deleteLogisticsOrdersByBatchId = async (
       });
     }
   });
+
+  // Synchronize to Supabase customer_tracking_shipments for batch
+  try {
+    if (batchId) {
+      await supabase
+        .from('customer_tracking_shipments')
+        .update({
+          status: 'Order Deleted',
+          raw_status: 'DELETED',
+          remarks: `Batch ${batchId} deleted from Sales`,
+          updated_at: new Date().toISOString()
+        })
+        .eq('batch_id', batchId);
+    }
+  } catch (e) {
+    console.warn('customer_tracking_shipments batch soft-delete note:', e);
+  }
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('velmora:sales_batch_deleted', {

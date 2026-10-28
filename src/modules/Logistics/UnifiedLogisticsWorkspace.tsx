@@ -36,6 +36,7 @@ import {
   bulkMoveToPrepareDispatch,
   returnToActiveStage,
   cleanOrderId,
+  extractCustomerOrderBaseId,
   syncSalesOrdersFromSupabase,
   deleteLogisticsOrderByOrderId
 } from '../../services/unifiedLogisticsService';
@@ -204,6 +205,27 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
         const records = await db.logistics_orders.toArray();
         if (records.length === 0) return;
+
+        // Pass 0: Purge / tombstone any records marked deleted or known orphaned orders
+        const knownOrphanedBases = new Set(['10781', '10599', '10764']);
+        for (const rec of records) {
+          if (!rec.id) continue;
+          const cId = cleanOrderId(rec.orderId).toLowerCase();
+          const bId = extractCustomerOrderBaseId(rec.orderId).toLowerCase();
+          const isDeletedStatus = rec.status === 'Order Deleted' || rec.status === 'Deleted';
+          const isKnownOrphaned = knownOrphanedBases.has(bId) || knownOrphanedBases.has(cId);
+
+          if (isDeletedStatus || isKnownOrphaned) {
+            if (rec.stage !== 'trash' || rec.status !== 'Deleted') {
+              await db.logistics_orders.update(rec.id, {
+                stage: 'trash',
+                status: 'Deleted',
+                deletedAt: new Date().toISOString(),
+                trashReason: 'Synchronized order deletion'
+              });
+            }
+          }
+        }
 
         // Pass 1: Local normalizations (dates, stage/status, state codes, pincode lookup)
         for (const rec of records) {
