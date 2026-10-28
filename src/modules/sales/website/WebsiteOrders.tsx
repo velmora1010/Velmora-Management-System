@@ -23,7 +23,10 @@ import {
   Send,
   Layers,
   SlidersHorizontal,
-  X
+  X,
+  ShieldAlert,
+  XCircle,
+  History
 } from 'lucide-react';
 import type { WebsiteConsolidatedOrder, ShipmentStatusCounts } from './types';
 import { websiteSalesService } from './websiteSalesService';
@@ -35,6 +38,8 @@ import {
   cleanOrderId
 } from './websiteSalesUtils';
 import { OrderDetailsModal } from './components/OrderDetailsModal';
+import { CancelOrderModal } from './components/CancelOrderModal';
+import { CancellationHistoryModal } from './components/CancellationHistoryModal';
 import toast from 'react-hot-toast';
 import { LogisticsFilterToolbar } from '../../Logistics/components/filters/LogisticsFilterToolbar';
 import { AllFiltersModal } from '../../Logistics/components/filters/AllFiltersModal';
@@ -72,8 +77,13 @@ export const WebsiteOrders: React.FC = () => {
     readyForPickup: 0,
     inTransit: 0,
     rtoInTransit: 0,
-    delivered: 0
+    delivered: 0,
+    cancelled: 0
   });
+
+  // Cancellation Modals State
+  const [cancellingOrder, setCancellingOrder] = useState<WebsiteConsolidatedOrder | null>(null);
+  const [historyOrder, setHistoryOrder] = useState<WebsiteConsolidatedOrder | null>(null);
 
   // Selected Order for Details View Modal
   const [selectedOrder, setSelectedOrder] = useState<WebsiteConsolidatedOrder | null>(null);
@@ -133,7 +143,8 @@ export const WebsiteOrders: React.FC = () => {
     'In Transit': 'in_transit',
     'RTO - In Transit': 'rto_in_transit',
     'Delivered': 'delivered',
-    'All Shipments': 'all_shipments'
+    'All Shipments': 'all_shipments',
+    'Cancelled Orders': 'cancelled_orders' as any
   };
 
   // Mapped orders for filter calculations
@@ -216,6 +227,14 @@ export const WebsiteOrders: React.FC = () => {
       icon: Layers,
       color: 'text-slate-300',
       badgeBg: 'bg-slate-800 text-slate-300 border-slate-700'
+    },
+    {
+      id: 'Cancelled Orders',
+      label: 'Cancelled Orders',
+      count: statusCounts.cancelled || 0,
+      icon: ShieldAlert,
+      color: 'text-rose-400',
+      badgeBg: 'bg-rose-500/15 text-rose-300 border-rose-500/30'
     }
   ];
 
@@ -297,7 +316,17 @@ export const WebsiteOrders: React.FC = () => {
   // Initial load
   useEffect(() => {
     loadStatusCounts();
-  }, [loadStatusCounts]);
+    const handleUpdate = () => {
+      loadStatusCounts();
+      loadOrders();
+    };
+    window.addEventListener('velmora:order_cancelled', handleUpdate);
+    window.addEventListener('velmora:website_sales_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('velmora:order_cancelled', handleUpdate);
+      window.removeEventListener('velmora:website_sales_updated', handleUpdate);
+    };
+  }, [loadStatusCounts, loadOrders]);
 
   useEffect(() => {
     loadOrders();
@@ -401,7 +430,7 @@ export const WebsiteOrders: React.FC = () => {
         </div>
 
         {/* 7 Horizontally Arranged Selectable Status Items */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2 sm:gap-2.5">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 sm:gap-2.5">
           {statusItems.map((item) => {
             const Icon = item.icon;
             const isActive = selectedStatus === item.id;
@@ -665,8 +694,19 @@ export const WebsiteOrders: React.FC = () => {
                   <th className="py-3 px-4">Customer</th>
                   <th className="py-3 px-4">Products & Items</th>
                   <th className="py-3 px-4">Financials & Payment</th>
-                  <th className="py-3 px-4">Fulfillment / Shipment</th>
-                  <th className="py-3 px-4 text-center">Actions</th>
+                  {selectedStatus === 'Cancelled Orders' ? (
+                    <>
+                      <th className="py-3 px-4">Cancellation Details</th>
+                      <th className="py-3 px-4">Prior Status</th>
+                      <th className="py-3 px-4 text-center">Actions</th>
+                    </>
+                  ) : (
+                    <>
+                      <th className="py-3 px-4">Fulfillment / Shipment</th>
+                      <th className="py-3 px-4 text-center">Actions</th>
+                      <th className="py-3 px-4 text-center">Cancel Order</th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 text-xs">
@@ -787,20 +827,133 @@ export const WebsiteOrders: React.FC = () => {
                         )}
                       </td>
 
-                      {/* 6. ACTIONS */}
-                      <td className="py-3.5 px-4 text-center">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedOrder(o);
-                          }}
-                          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl border border-slate-700/80 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 mx-auto shadow-sm"
-                        >
-                          <Eye size={13} className="text-purple-400" />
-                          <span>Details</span>
-                        </button>
-                      </td>
+                      {/* 5 & 6. CONDITIONAL COLUMNS BASED ON CANCELLED ORDERS VIEW */}
+                      {selectedStatus === 'Cancelled Orders' ? (
+                        <>
+                          {/* CANCELLATION DETAILS */}
+                          <td className="py-3.5 px-4 space-y-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                                {o.cancellation?.reason || 'Customer / Internal Cancellation'}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-400">
+                              <span>Req: {o.cancellation?.requested_by || 'Sales'}</span>
+                              {o.cancellation?.requested_at && (
+                                <span className="ml-1 text-slate-500 font-mono">
+                                  ({new Date(o.cancellation.requested_at).toLocaleDateString()})
+                                </span>
+                              )}
+                            </div>
+                            {o.cancellation?.confirmed_by && (
+                              <div className="text-[10px] text-slate-500">
+                                Intercepted: <span className="text-emerald-400">{o.cancellation.confirmed_by}</span>
+                              </div>
+                            )}
+                          </td>
+
+                          {/* PRIOR STATUS */}
+                          <td className="py-3.5 px-4 space-y-1">
+                            <div className="text-[11px] text-slate-300">
+                              Fulfill: <span className="font-semibold text-slate-200">{o.cancellation?.previous_fulfillment_status || o.fulfillment_status || 'Unfulfilled'}</span>
+                            </div>
+                            <div className="text-[10px] text-slate-400">
+                              Ship: {o.cancellation?.previous_shipment_status || o.shipment_status || 'None'}
+                              {o.awb && <span className="font-mono ml-1 text-cyan-400">({o.awb})</span>}
+                            </div>
+                          </td>
+
+                          {/* ACTIONS */}
+                          <td className="py-3.5 px-4 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedOrder(o);
+                                }}
+                                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl border border-slate-700/80 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1 shadow-sm"
+                                title="View Order Details"
+                              >
+                                <Eye size={12} className="text-purple-400" />
+                                <span>Details</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setHistoryOrder(o);
+                                }}
+                                className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 hover:text-white rounded-xl border border-rose-500/30 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1 shadow-sm"
+                                title="View Cancellation Audit History"
+                              >
+                                <History size={12} className="text-rose-400" />
+                                <span>History</span>
+                              </button>
+                            </div>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          {/* 6. ACTIONS */}
+                          <td className="py-3.5 px-4 text-center">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedOrder(o);
+                              }}
+                              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl border border-slate-700/80 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 mx-auto shadow-sm"
+                            >
+                              <Eye size={13} className="text-purple-400" />
+                              <span>Details</span>
+                            </button>
+                          </td>
+
+                          {/* 7. CANCEL ORDER COLUMN */}
+                          <td className="py-3.5 px-4 text-center" onClick={(e) => e.stopPropagation()}>
+                            {o.order_status === 'CANCELLED' || o.cancellation?.status === 'CANCELLED' ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                                  Cancelled
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setHistoryOrder(o)}
+                                  className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+                                  title="View Cancellation Audit Trail"
+                                >
+                                  <History size={13} className="text-rose-400" />
+                                </button>
+                              </div>
+                            ) : o.cancellation?.status === 'PENDING_LOGISTICS_APPROVAL' ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center gap-1" title="Cancellation awaiting Logistics verification">
+                                  <Clock size={10} /> Pending
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setHistoryOrder(o)}
+                                  className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+                                  title="View Cancellation Status"
+                                >
+                                  <History size={13} className="text-amber-400" />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setCancellingOrder(o)}
+                                className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 hover:text-rose-200 rounded-xl border border-rose-500/30 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 mx-auto shadow-sm"
+                                title="Cancel this order"
+                              >
+                                <XCircle size={13} className="text-rose-400" />
+                                <span>Cancel</span>
+                              </button>
+                            )}
+                          </td>
+                        </>
+                      )}
                     </tr>
                   );
                 })}
@@ -902,6 +1055,24 @@ export const WebsiteOrders: React.FC = () => {
           loadStatusCounts();
           loadOrders();
         }}
+      />
+
+      {/* CANCEL ORDER WORKFLOW MODAL */}
+      <CancelOrderModal
+        isOpen={Boolean(cancellingOrder)}
+        order={cancellingOrder}
+        onClose={() => setCancellingOrder(null)}
+        onSuccess={() => {
+          loadStatusCounts();
+          loadOrders();
+        }}
+      />
+
+      {/* CANCELLATION AUDIT HISTORY MODAL */}
+      <CancellationHistoryModal
+        isOpen={Boolean(historyOrder)}
+        order={historyOrder}
+        onClose={() => setHistoryOrder(null)}
       />
 
     </div>

@@ -8,6 +8,7 @@ import {
   RotateCcw, 
   ExternalLink,
   AlertTriangle,
+  ShieldAlert,
   CheckCircle2,
   Clock,
   User,
@@ -43,6 +44,7 @@ interface OrderTableViewProps {
   onViewCustomer?: (customerKey: string) => void;
   onOpenDispatchModal?: (order: UnifiedLogisticsOrder) => void;
   onDeleteOrder?: (order: UnifiedLogisticsOrder) => void;
+  onReviewCancellation?: (order: UnifiedLogisticsOrder) => void;
   syncingOrderIds?: Set<number>;
 
   // Selection
@@ -1011,6 +1013,17 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                       </div>
                     ) : (
                       <div className="flex items-center justify-center gap-1.5">
+                        {order.cancellationStatus === 'Requested' && onReviewCancellation && (
+                          <button
+                            type="button"
+                            onClick={() => onReviewCancellation(order)}
+                            className="h-7 px-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 hover:text-amber-200 border border-amber-500/40 text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shrink-0"
+                            title="Review Cancellation Request"
+                          >
+                            <ShieldAlert size={12} />
+                            <span>Review</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => onViewCustomer && onViewCustomer(order.customerKey)}

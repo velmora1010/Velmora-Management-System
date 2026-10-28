@@ -310,7 +310,9 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
     syncState: order.syncState || 'idle',
     archivedAt: order.archivedAt,
     archiveReason: order.archiveReason,
-    isArchived: order.stage === 'archived_legacy'
+    isArchived: order.stage === 'archived_legacy',
+    cancellationStatus: order.cancellationStatus,
+    remarks: order.remarks || order.lastEvent || order.sourceStatus || order.sourceSubStatus
   };
 };
 

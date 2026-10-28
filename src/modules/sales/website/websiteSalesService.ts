@@ -11,7 +11,8 @@ import type {
   GetOrdersPaginatedParams,
   ShipmentStatusCounts,
   PaginatedOrdersResult,
-  WebsiteFullOrderDetails
+  WebsiteFullOrderDetails,
+  OrderCancellationData
 } from './types';
 import { 
   syncSalesUploadToLogistics,
@@ -635,7 +636,18 @@ export class WebsiteSalesService {
         financial_status: extra.financial_status || '',
         awb_number: extra.awb_number || o.awb_number || '',
         courier: extra.courier || o.courier || '',
-        fulfilled_date: extra.fulfilled_date || o.dispatch_date || ''
+        fulfilled_date: extra.fulfilled_date || o.dispatch_date || '',
+        order_status: o.order_status,
+        cancellation: extra.cancellation || (o.order_status === 'CANCELLED' ? {
+          status: 'CANCELLED',
+          reason: extra.cancellation_reason || 'Order cancelled',
+          notes: extra.cancellation_notes,
+          requested_by: extra.cancellation_requested_by || 'Sales Team',
+          requested_at: extra.cancellation_requested_at || o.updated_at || o.created_at,
+          confirmed_by: extra.cancellation_confirmed_by || 'Sales Team',
+          confirmed_at: extra.cancellation_confirmed_at || o.updated_at || o.created_at,
+          logistics_action: extra.logistics_action || 'CONFIRMED'
+        } : undefined)
       };
     });
 
@@ -960,17 +972,19 @@ export class WebsiteSalesService {
   // Get dynamic shipment status counts directly from database & logistics
   async getShipmentStatusCounts(): Promise<ShipmentStatusCounts> {
     try {
-      const [totalRes, deliveredRes, dispatchedRes, unfulfilledRes] = await Promise.all([
-        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').neq('order_status', 'DELETED'),
-        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').neq('order_status', 'DELETED').eq('dispatch_status', 'DELIVERED'),
-        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').neq('order_status', 'DELETED').eq('dispatch_status', 'DISPATCHED'),
-        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').neq('order_status', 'DELETED').eq('dispatch_status', 'UNFULFILLED')
+      const [totalRes, deliveredRes, dispatchedRes, unfulfilledRes, cancelledRes] = await Promise.all([
+        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').neq('order_status', 'DELETED').neq('order_status', 'CANCELLED'),
+        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').neq('order_status', 'DELETED').neq('order_status', 'CANCELLED').eq('dispatch_status', 'DELIVERED'),
+        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').neq('order_status', 'DELETED').neq('order_status', 'CANCELLED').eq('dispatch_status', 'DISPATCHED'),
+        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').neq('order_status', 'DELETED').neq('order_status', 'CANCELLED').eq('dispatch_status', 'UNFULFILLED'),
+        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').eq('order_status', 'CANCELLED')
       ]);
 
       const all = totalRes.count ?? 0;
       let delivered = deliveredRes.count ?? 0;
       let inTransit = dispatchedRes.count ?? 0;
       let unfulfilled = unfulfilledRes.count ?? Math.max(0, all - delivered - inTransit);
+      let cancelled = cancelledRes.count ?? 0;
 
       let pendingAwb = unfulfilled;
       let readyToShip = unfulfilled;
@@ -1026,7 +1040,8 @@ export class WebsiteSalesService {
         readyForPickup,
         inTransit,
         rtoInTransit,
-        delivered
+        delivered,
+        cancelled
       };
     } catch (err) {
       console.error('Failed to get shipment status counts:', err);
@@ -1154,20 +1169,27 @@ export class WebsiteSalesService {
       query = query.ilike('state', `%${params.state}%`);
     }
 
-    if (params.shipmentStatus && params.shipmentStatus.toLowerCase() !== 'all shipments' && params.shipmentStatus.toUpperCase() !== 'ALL') {
-      const ss = params.shipmentStatus.trim().toLowerCase();
-      if (ss === 'delivered') {
-        query = query.eq('dispatch_status', 'DELIVERED');
-      } else if (ss === 'pending awb') {
-        query = query.eq('dispatch_status', 'UNFULFILLED');
-      } else if (ss === 'ready to ship') {
-        query = query.eq('dispatch_status', 'UNFULFILLED');
-      } else if (ss === 'in transit') {
-        query = query.eq('dispatch_status', 'DISPATCHED');
-      } else if (ss === 'rto - in transit') {
-        query = query.ilike('dispatch_status', '%RTO%');
-      } else if (ss === 'ready for pickup') {
-        query = query.ilike('dispatch_status', '%PICKUP%');
+    const ss = (params.shipmentStatus || '').trim().toLowerCase();
+    const isCancelledSection = ss === 'cancelled orders' || ss === 'cancelled';
+
+    if (isCancelledSection) {
+      query = query.eq('order_status', 'CANCELLED');
+    } else {
+      query = query.neq('order_status', 'CANCELLED');
+      if (ss && ss !== 'all shipments' && ss !== 'all') {
+        if (ss === 'delivered') {
+          query = query.eq('dispatch_status', 'DELIVERED');
+        } else if (ss === 'pending awb') {
+          query = query.eq('dispatch_status', 'UNFULFILLED');
+        } else if (ss === 'ready to ship') {
+          query = query.eq('dispatch_status', 'UNFULFILLED');
+        } else if (ss === 'in transit') {
+          query = query.eq('dispatch_status', 'DISPATCHED');
+        } else if (ss === 'rto - in transit') {
+          query = query.ilike('dispatch_status', '%RTO%');
+        } else if (ss === 'ready for pickup') {
+          query = query.ilike('dispatch_status', '%PICKUP%');
+        }
       }
     }
 
@@ -1304,7 +1326,18 @@ export class WebsiteSalesService {
         awb_number: awb,
         courier: courier,
         shipment_status: shipmentStatus,
-        fulfilled_date: extra.fulfilled_date || o.dispatch_date || ''
+        fulfilled_date: extra.fulfilled_date || o.dispatch_date || '',
+        order_status: o.order_status,
+        cancellation: extra.cancellation || (o.order_status === 'CANCELLED' ? {
+          status: 'CANCELLED',
+          reason: extra.cancellation_reason || 'Order cancelled',
+          notes: extra.cancellation_notes,
+          requested_by: extra.cancellation_requested_by || 'Sales Team',
+          requested_at: extra.cancellation_requested_at || o.updated_at || o.created_at,
+          confirmed_by: extra.cancellation_confirmed_by || 'Sales Team',
+          confirmed_at: extra.cancellation_confirmed_at || o.updated_at || o.created_at,
+          logistics_action: extra.logistics_action || 'CONFIRMED'
+        } : undefined)
       };
     });
 
@@ -1548,6 +1581,366 @@ export class WebsiteSalesService {
       timeline
     };
   }
+
+  // ==========================================
+  // ORDER CANCELLATION WORKFLOW METHODS
+  // ==========================================
+
+  // 1. Request or Confirm Cancellation (from Website Sales)
+  async cancelOrder(params: {
+    orderId: string;
+    reason: string;
+    notes?: string;
+    requestedBy?: string;
+  }): Promise<{ success: boolean; mode: 'DIRECT_CANCELLED' | 'REQUESTED_LOGISTICS'; message: string }> {
+    await this.checkAndMigrateLocalStorage();
+    const cleanId = cleanOrderId(params.orderId);
+    const requestedBy = params.requestedBy || 'Sales Team';
+    const now = new Date().toISOString();
+
+    if (!params.reason || !params.reason.trim()) {
+      throw new Error('A cancellation reason is required');
+    }
+
+    // Fetch existing order from Supabase
+    const { data: orderRow, error: fetchErr } = await supabase
+      .from('sales_orders')
+      .select('*')
+      .eq('channel', 'WEBSITE')
+      .or(`order_id.eq.${cleanId},order_id.eq.#${cleanId}`)
+      .neq('order_status', 'DELETED')
+      .single();
+
+    if (fetchErr || !orderRow) {
+      throw new Error(`Order #${cleanId} not found in database`);
+    }
+
+    if (orderRow.order_status === 'CANCELLED') {
+      throw new Error(`Order #${cleanId} is already cancelled`);
+    }
+
+    const extra = orderRow.extra_data || {};
+    if (extra.cancellation && extra.cancellation.status === 'PENDING_LOGISTICS_APPROVAL') {
+      throw new Error(`Order #${cleanId} already has an active pending cancellation request awaiting Logistics review`);
+    }
+
+    // Check courier & logistics status from Dexie and Supabase
+    let dexieOrder: any = null;
+    try {
+      dexieOrder = await db.logistics_orders.where('orderId').equalsIgnoreCase(cleanId).first();
+    } catch (e) {
+      // dexie fallback
+    }
+
+    const hasAwb = Boolean(orderRow.awb_number || extra.awb_number || dexieOrder?.awbNumber);
+    const isDelivered = orderRow.dispatch_status === 'DELIVERED' || dexieOrder?.status?.toLowerCase().includes('deliv');
+    const isDispatched = hasAwb || orderRow.dispatch_status === 'DISPATCHED' || dexieOrder?.stage === 'dispatched' || dexieOrder?.stage === 'tracking';
+
+    if (isDelivered) {
+      throw new Error(`Cannot cancel order #${cleanId} because it is already Delivered. Standard cancellation is prevented. Please direct customer to Returns & Refunds.`);
+    }
+
+    if (isDispatched) {
+      // Dispatched / In Transit / Manifested: Submit request for Logistics to review
+      const cancellationData: OrderCancellationData = {
+        status: 'PENDING_LOGISTICS_APPROVAL',
+        reason: params.reason,
+        notes: params.notes,
+        requested_by: requestedBy,
+        requested_at: now,
+        logistics_action: 'PENDING_REVIEW',
+        previous_fulfillment_status: extra.fulfillment_status || orderRow.order_status || 'unfulfilled',
+        previous_shipment_status: dexieOrder?.status || (hasAwb ? 'Dispatched' : 'Pending Manifest'),
+        audit_trail: [
+          ...(extra.cancellation?.audit_trail || []),
+          {
+            action: 'CANCELLATION_REQUESTED',
+            actor: requestedBy,
+            timestamp: now,
+            reason: params.reason,
+            notes: params.notes
+          }
+        ]
+      };
+
+      const updatedExtra = {
+        ...extra,
+        cancellation: cancellationData
+      };
+
+      const { error: updateErr } = await supabase
+        .from('sales_orders')
+        .update({
+          extra_data: updatedExtra,
+          updated_at: now
+        })
+        .eq('id', orderRow.id);
+
+      if (updateErr) {
+        throw new Error(`Failed to submit cancellation request: ${updateErr.message}`);
+      }
+
+      // Update Dexie logistics_orders
+      if (dexieOrder) {
+        await db.logistics_orders.update(dexieOrder.id!, {
+          cancellationStatus: 'Requested',
+          cancellationReason: params.reason,
+          cancellationNotes: params.notes,
+          cancellationRequestedAt: now,
+          cancellationRequestedBy: requestedBy,
+          remarks: `Cancellation Requested: ${params.reason}`
+        });
+      }
+
+      window.dispatchEvent(new CustomEvent('velmora:website_sales_updated', { detail: { orderId: cleanId } }));
+      window.dispatchEvent(new CustomEvent('velmora:logistics_order_updated', { detail: { orderId: cleanId } }));
+
+      return {
+        success: true,
+        mode: 'REQUESTED_LOGISTICS',
+        message: `Cancellation requested for Order #${cleanId}. Submitted to Logistics for shipment review.`
+      };
+    } else {
+      // Un-dispatched / Not manifested: Direct cancellation
+      const cancellationData: OrderCancellationData = {
+        status: 'CANCELLED',
+        reason: params.reason,
+        notes: params.notes,
+        requested_by: requestedBy,
+        requested_at: now,
+        confirmed_by: requestedBy,
+        confirmed_at: now,
+        logistics_action: 'CONFIRMED',
+        logistics_notes: 'Direct pre-dispatch cancellation',
+        previous_fulfillment_status: extra.fulfillment_status || orderRow.order_status || 'unfulfilled',
+        previous_shipment_status: dexieOrder?.status || 'Pending Manifest',
+        audit_trail: [
+          ...(extra.cancellation?.audit_trail || []),
+          {
+            action: 'DIRECT_CANCELLATION_CONFIRMED',
+            actor: requestedBy,
+            timestamp: now,
+            reason: params.reason,
+            notes: params.notes
+          }
+        ]
+      };
+
+      const updatedExtra = {
+        ...extra,
+        cancellation: cancellationData,
+        fulfillment_status: 'cancelled'
+      };
+
+      const { error: updateErr } = await supabase
+        .from('sales_orders')
+        .update({
+          order_status: 'CANCELLED',
+          dispatch_status: 'CANCELLED',
+          extra_data: updatedExtra,
+          updated_at: now
+        })
+        .eq('id', orderRow.id);
+
+      if (updateErr) {
+        throw new Error(`Failed to cancel order: ${updateErr.message}`);
+      }
+
+      // Update Dexie logistics_orders
+      if (dexieOrder) {
+        await db.logistics_orders.update(dexieOrder.id!, {
+          status: 'Cancelled',
+          stage: 'trash',
+          cancellationStatus: 'Completed',
+          remarks: `Order Cancelled: ${params.reason}`
+        });
+      }
+
+      window.dispatchEvent(new CustomEvent('velmora:website_sales_updated', { detail: { orderId: cleanId } }));
+      window.dispatchEvent(new CustomEvent('velmora:logistics_order_updated', { detail: { orderId: cleanId } }));
+
+      return {
+        success: true,
+        mode: 'DIRECT_CANCELLED',
+        message: `Order #${cleanId} cancelled successfully`
+      };
+    }
+  }
+
+  // 2. Logistics Confirms Cancellation
+  async confirmLogisticsCancellation(params: {
+    orderId: string;
+    confirmedBy?: string;
+    logisticsNotes?: string;
+  }): Promise<{ success: boolean; message: string }> {
+    const cleanId = cleanOrderId(params.orderId);
+    const confirmedBy = params.confirmedBy || 'Logistics Team';
+    const now = new Date().toISOString();
+
+    const { data: orderRow, error: fetchErr } = await supabase
+      .from('sales_orders')
+      .select('*')
+      .eq('channel', 'WEBSITE')
+      .or(`order_id.eq.${cleanId},order_id.eq.#${cleanId}`)
+      .neq('order_status', 'DELETED')
+      .single();
+
+    if (fetchErr || !orderRow) {
+      throw new Error(`Order #${cleanId} not found in database`);
+    }
+
+    const extra = orderRow.extra_data || {};
+    const existingCanc = extra.cancellation || {};
+
+    const updatedCancellation: OrderCancellationData = {
+      ...existingCanc,
+      status: 'CANCELLED',
+      reason: existingCanc.reason || 'Logistics confirmed cancellation',
+      requested_by: existingCanc.requested_by || 'Sales Team',
+      requested_at: existingCanc.requested_at || now,
+      confirmed_by: confirmedBy,
+      confirmed_at: now,
+      logistics_action: 'CONFIRMED',
+      logistics_notes: params.logisticsNotes || 'Shipment intercepted and confirmed cancelled by Logistics',
+      audit_trail: [
+        ...(existingCanc.audit_trail || []),
+        {
+          action: 'LOGISTICS_CONFIRMED_CANCELLATION',
+          actor: confirmedBy,
+          timestamp: now,
+          notes: params.logisticsNotes
+        }
+      ]
+    };
+
+    const updatedExtra = {
+      ...extra,
+      cancellation: updatedCancellation,
+      fulfillment_status: 'cancelled'
+    };
+
+    const { error: updateErr } = await supabase
+      .from('sales_orders')
+      .update({
+        order_status: 'CANCELLED',
+        dispatch_status: 'CANCELLED',
+        extra_data: updatedExtra,
+        updated_at: now
+      })
+      .eq('id', orderRow.id);
+
+    if (updateErr) {
+      throw new Error(`Failed to confirm cancellation: ${updateErr.message}`);
+    }
+
+    // Update Dexie
+    try {
+      const dexieOrder = await db.logistics_orders.where('orderId').equalsIgnoreCase(cleanId).first();
+      if (dexieOrder) {
+        await db.logistics_orders.update(dexieOrder.id!, {
+          status: 'Cancelled',
+          stage: 'trash',
+          cancellationStatus: 'Completed',
+          remarks: `Logistics Confirmed Cancellation: ${params.logisticsNotes || ''}`
+        });
+      }
+    } catch (e) {
+      // Dexie update fallback
+    }
+
+    window.dispatchEvent(new CustomEvent('velmora:website_sales_updated', { detail: { orderId: cleanId } }));
+    window.dispatchEvent(new CustomEvent('velmora:logistics_order_updated', { detail: { orderId: cleanId } }));
+
+    return {
+      success: true,
+      message: `Logistics confirmed cancellation for Order #${cleanId}`
+    };
+  }
+
+  // 3. Logistics Rejects Cancellation
+  async rejectLogisticsCancellation(params: {
+    orderId: string;
+    rejectedBy?: string;
+    rejectionReason: string;
+  }): Promise<{ success: boolean; message: string }> {
+    if (!params.rejectionReason || !params.rejectionReason.trim()) {
+      throw new Error('A rejection reason is required when rejecting cancellation');
+    }
+
+    const cleanId = cleanOrderId(params.orderId);
+    const rejectedBy = params.rejectedBy || 'Logistics Team';
+    const now = new Date().toISOString();
+
+    const { data: orderRow, error: fetchErr } = await supabase
+      .from('sales_orders')
+      .select('*')
+      .eq('channel', 'WEBSITE')
+      .or(`order_id.eq.${cleanId},order_id.eq.#${cleanId}`)
+      .neq('order_status', 'DELETED')
+      .single();
+
+    if (fetchErr || !orderRow) {
+      throw new Error(`Order #${cleanId} not found in database`);
+    }
+
+    const extra = orderRow.extra_data || {};
+    const existingCanc = extra.cancellation || {};
+
+    const updatedCancellation: OrderCancellationData = {
+      ...existingCanc,
+      status: 'REJECTED',
+      logistics_action: 'REJECTED',
+      logistics_notes: params.rejectionReason,
+      audit_trail: [
+        ...(existingCanc.audit_trail || []),
+        {
+          action: 'LOGISTICS_REJECTED_CANCELLATION',
+          actor: rejectedBy,
+          timestamp: now,
+          reason: params.rejectionReason
+        }
+      ]
+    };
+
+    const updatedExtra = {
+      ...extra,
+      cancellation: updatedCancellation
+    };
+
+    const { error: updateErr } = await supabase
+      .from('sales_orders')
+      .update({
+        extra_data: updatedExtra,
+        updated_at: now
+      })
+      .eq('id', orderRow.id);
+
+    if (updateErr) {
+      throw new Error(`Failed to reject cancellation: ${updateErr.message}`);
+    }
+
+    // Update Dexie
+    try {
+      const dexieOrder = await db.logistics_orders.where('orderId').equalsIgnoreCase(cleanId).first();
+      if (dexieOrder) {
+        await db.logistics_orders.update(dexieOrder.id!, {
+          cancellationStatus: 'Rejected',
+          remarks: `Cancellation Rejected by Logistics: ${params.rejectionReason}`
+        });
+      }
+    } catch (e) {
+      // Dexie update fallback
+    }
+
+    window.dispatchEvent(new CustomEvent('velmora:website_sales_updated', { detail: { orderId: cleanId } }));
+    window.dispatchEvent(new CustomEvent('velmora:logistics_order_updated', { detail: { orderId: cleanId } }));
+
+    return {
+      success: true,
+      message: `Cancellation rejected for Order #${cleanId}. Order remains in active workflow.`
+    };
+  }
+
 }
 
 export const websiteSalesService = new WebsiteSalesService();

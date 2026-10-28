@@ -43,6 +43,7 @@ import { websiteSalesService } from '../sales/website/websiteSalesService';
 import { LogisticsWorkflowToolbar } from './components/LogisticsWorkflowToolbar';
 import { OrderTableView } from './components/OrderTableView';
 import { CustomerDetailModal } from './components/CustomerDetailModal';
+import { LogisticsCancellationReviewModal } from './components/LogisticsCancellationReviewModal';
 import { OrderImportModal } from './components/OrderImportModal';
 import { CourierTrackingImportModal } from './components/CourierTrackingImportModal';
 import { PrepareDispatchGroupedView } from './components/PrepareDispatchGroupedView';
@@ -118,6 +119,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
   const [isCourierTrackingModalOpen, setIsCourierTrackingModalOpen] = useState(false);
   const [orderToDispatch, setOrderToDispatch] = useState<UnifiedLogisticsOrder | null>(null);
   const [selectedCustomerKey, setSelectedCustomerKey] = useState<string | null>(null);
+  const [cancellationReviewOrder, setCancellationReviewOrder] = useState<UnifiedLogisticsOrder | null>(null);
   const [activeTrackingOrder, setActiveTrackingOrder] = useState<LogisticsOrder | null>(null);
 
   // Live Syncing State for Tracking
@@ -1505,6 +1507,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                 onViewCustomer={(key) => setSelectedCustomerKey(key)}
                 onOpenDispatchModal={setOrderToDispatch}
                 onDeleteOrder={handleDeleteOrder}
+                onReviewCancellation={(order) => setCancellationReviewOrder(order)}
                 syncingOrderIds={syncingOrderIds}
                 isSelectable={isBulkSelectMode && currentStage === 'active'}
                 selectedOrderIds={selectedOrderIds}

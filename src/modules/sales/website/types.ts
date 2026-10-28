@@ -72,6 +72,29 @@ export interface WebsiteOrderItem {
   source_row_number?: number;
 }
 
+export interface OrderCancellationAuditEntry {
+  action: string;
+  actor: string;
+  timestamp: string;
+  reason?: string;
+  notes?: string;
+}
+
+export interface OrderCancellationData {
+  status: 'CANCELLED' | 'PENDING_LOGISTICS_APPROVAL' | 'REJECTED';
+  reason: string;
+  notes?: string;
+  requested_by: string;
+  requested_at: string;
+  confirmed_by?: string;
+  confirmed_at?: string;
+  logistics_action?: 'CONFIRMED' | 'REJECTED' | 'COURIER_CANCELLED' | 'CANNOT_CANCEL' | 'PENDING_REVIEW';
+  logistics_notes?: string;
+  previous_fulfillment_status?: string;
+  previous_shipment_status?: string;
+  audit_trail?: OrderCancellationAuditEntry[];
+}
+
 export interface WebsiteConsolidatedOrder {
   id: string;
   order_id: string;
@@ -122,6 +145,8 @@ export interface WebsiteConsolidatedOrder {
   manifested_date?: string;
   dispatched_date?: string;
   delivered_date?: string;
+  order_status?: string;
+  cancellation?: OrderCancellationData;
 }
 
 export interface WebsiteFullOrderDetails {
@@ -237,6 +262,7 @@ export interface ShipmentStatusCounts {
   inTransit: number;
   rtoInTransit: number;
   delivered: number;
+  cancelled: number;
 }
 
 export interface PaginatedOrdersResult {
