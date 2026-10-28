@@ -204,9 +204,11 @@ const HRLayoutContent: React.FC = () => {
     return personalPending > 0 ? personalPending : null;
   }, [canManageEmployees, currentUser, employees, taskAssignments]);
 
-  // Horizontal Navigation Bar Items
-  const navItems = useMemo(() => {
-    const items = [
+  // Navigation items partitioned into two clean rows:
+  // Row 1: Exactly 7 tabs ending with Work Assignment
+  // Row 2: Remaining modules preserving existing order and role-based visibility
+  const { row1Items, row2Items } = useMemo(() => {
+    const r1 = [
       {
         id: 'dashboard' as NavigationTab,
         label: 'Dashboard',
@@ -244,25 +246,40 @@ const HRLayoutContent: React.FC = () => {
         icon: Clock,
         badge: null,
       },
-      {
-        id: 'work-assignment' as NavigationTab,
-        label: 'Work Assignment',
-        icon: ClipboardList,
-        badge: null,
-      },
-      {
-        id: 'assigned-works' as NavigationTab,
-        label: 'Assigned Works',
-        icon: ClipboardCheck,
-        badge: assignedWorksBadge,
-        badgeColor: 'bg-[#206DA6] text-white',
-      },
-      {
-        id: 'employee-welfare' as NavigationTab,
-        label: 'Employee Welfare',
-        icon: HeartHandshake,
-        badge: null,
-      },
+      ...(canManageEmployees
+        ? [
+            {
+              id: 'work-assignment' as NavigationTab,
+              label: 'Work Assignment',
+              icon: ClipboardList,
+              badge: null,
+            },
+          ]
+        : []),
+    ];
+
+    const r2 = [
+      ...(!canManageEmployees
+        ? [
+            {
+              id: 'assigned-works' as NavigationTab,
+              label: 'Assigned Works',
+              icon: ClipboardCheck,
+              badge: assignedWorksBadge,
+              badgeColor: 'bg-[#206DA6] text-white',
+            },
+          ]
+        : []),
+      ...(canManageEmployees
+        ? [
+            {
+              id: 'employee-welfare' as NavigationTab,
+              label: 'Employee Welfare',
+              icon: HeartHandshake,
+              badge: null,
+            },
+          ]
+        : []),
       {
         id: 'payroll' as NavigationTab,
         label: 'Salary / Payroll',
@@ -283,13 +300,51 @@ const HRLayoutContent: React.FC = () => {
       },
     ];
 
-    return items.filter(
-      (item) =>
-        (item.id !== 'employee-welfare' || canManageEmployees) &&
-        (item.id !== 'work-assignment' || canManageEmployees) &&
-        (item.id !== 'assigned-works' || !canManageEmployees)
-    );
+    return { row1Items: r1, row2Items: r2 };
   }, [dashboardMetrics, pendingLeaves, assignedWorksBadge, canManageEmployees, canViewPayroll]);
+
+  const renderNavTabButton = useCallback(
+    (item: {
+      id: NavigationTab;
+      label: string;
+      icon: React.ComponentType<{ className?: string }>;
+      badge?: string | number | null;
+      badgeColor?: string;
+    }) => {
+      const isActive = currentTab === item.id;
+      const Icon = item.icon;
+      return (
+        <button
+          key={item.id}
+          onClick={() => handleNavigateTab(item.id)}
+          className={`group flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap border shrink-0 ${
+            isActive
+              ? 'bg-[#206DA6] text-white border-[#206DA6] shadow-sm'
+              : 'bg-white border-slate-200/80 text-slate-600 hover:text-[#172B4D] hover:border-slate-300 hover:bg-slate-50'
+          }`}
+        >
+          <Icon
+            className={`w-4 h-4 transition-colors ${
+              isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-600'
+            }`}
+          />
+          <span>{item.label}</span>
+          {item.badge !== null && item.badge !== undefined && (
+            <span
+              className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                isActive
+                  ? 'bg-white/25 text-white'
+                  : item.badgeColor || 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              {item.badge}
+            </span>
+          )}
+        </button>
+      );
+    },
+    [currentTab, handleNavigateTab]
+  );
 
   return (
     <div className="flex-1 flex flex-col min-h-full bg-[#F6F8FC] text-[#172B4D]">
@@ -304,42 +359,16 @@ const HRLayoutContent: React.FC = () => {
         onOpenMyProfileProductSelect={handleOpenMyProfileProductSelect}
       />
 
-      {/* Horizontal HR Navigation Bar */}
-      <div className="sticky top-16 z-10 bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-4 sm:px-6 py-2.5 shadow-xs">
-        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth">
-          {navItems.map((item) => {
-            const isActive = currentTab === item.id;
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.id}
-                onClick={() => handleNavigateTab(item.id)}
-                className={`group flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap border shrink-0 ${
-                  isActive
-                    ? 'bg-[#206DA6] text-white border-[#206DA6] shadow-sm'
-                    : 'bg-white border-slate-200/80 text-slate-600 hover:text-[#172B4D] hover:border-slate-300 hover:bg-slate-50'
-                }`}
-              >
-                <Icon
-                  className={`w-4 h-4 transition-colors ${
-                    isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-600'
-                  }`}
-                />
-                <span>{item.label}</span>
-                {item.badge !== null && item.badge !== undefined && (
-                  <span
-                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                      isActive
-                        ? 'bg-white/25 text-white'
-                        : item.badgeColor || 'bg-slate-100 text-slate-600'
-                    }`}
-                  >
-                    {item.badge}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+      {/* Two-Row HR Navigation Bar (No horizontal slider or scrollbar) */}
+      <div className="sticky top-16 z-10 bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-4 sm:px-6 py-2.5 shadow-xs flex flex-col gap-2">
+        {/* Row 1: Fixed 7 tabs ending with Work Assignment */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {row1Items.map(renderNavTabButton)}
+        </div>
+
+        {/* Row 2: Remaining modules below */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {row2Items.map(renderNavTabButton)}
         </div>
       </div>
 
