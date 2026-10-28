@@ -69,7 +69,7 @@ export const WebsiteOrders: React.FC = () => {
   const [pageSize, setPageSize] = useState<number>(25);
 
   // Selected Status for Horizontal Tab Bar
-  const [selectedStatus, setSelectedStatus] = useState<string>('Pending AWB');
+  const [selectedStatus, setSelectedStatus] = useState<string>('All Shipments');
   const [statusCounts, setStatusCounts] = useState<ShipmentStatusCounts>({
     all: 0,
     pendingAwb: 0,
@@ -95,7 +95,7 @@ export const WebsiteOrders: React.FC = () => {
   // Status-Specific Filter State
   const [logisticsFilters, setLogisticsFilters] = useState<LogisticsFilterState>({
     ...INITIAL_LOGISTICS_FILTER_STATE,
-    activeSection: 'pending_awb'
+    activeSection: 'all_shipments'
   });
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [isAllFiltersModalOpen, setIsAllFiltersModalOpen] = useState<boolean>(false);
@@ -173,6 +173,14 @@ export const WebsiteOrders: React.FC = () => {
   // Status Navigation Configuration (7 options as compact horizontal cards)
   const statusItems = [
     {
+      id: 'All Shipments',
+      label: 'All Shipments',
+      count: statusCounts.all,
+      icon: Layers,
+      color: 'text-slate-300',
+      badgeBg: 'bg-slate-800 text-slate-300 border-slate-700'
+    },
+    {
       id: 'Pending AWB',
       label: 'Pending AWB',
       count: statusCounts.pendingAwb,
@@ -219,14 +227,6 @@ export const WebsiteOrders: React.FC = () => {
       icon: CheckCircle2,
       color: 'text-emerald-400',
       badgeBg: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-    },
-    {
-      id: 'All Shipments',
-      label: 'All Shipments',
-      count: statusCounts.all,
-      icon: Layers,
-      color: 'text-slate-300',
-      badgeBg: 'bg-slate-800 text-slate-300 border-slate-700'
     },
     {
       id: 'Cancelled Orders',
@@ -713,8 +713,13 @@ export const WebsiteOrders: React.FC = () => {
                 {orders.map((o) => {
                   const displayPhone = formatPhoneNumber(o.phone);
                   const isMulti = o.items && o.items.length > 1;
-                  const fStatus = (o.fulfillment_status || '').toLowerCase();
-                  const isFulfilled = fStatus.includes('deliv') || fStatus.includes('fulfill') || fStatus.includes('ship');
+                  const rawFulfillment = (o.fulfillment_status || '').toLowerCase().trim();
+                  const rawDispatch = (o.dispatch_status || '').toUpperCase().trim();
+                  const isUnfulfilled = 
+                    rawFulfillment === 'unfulfilled' || 
+                    rawFulfillment.includes('unfulfill') || 
+                    (!rawFulfillment.includes('fulfill') && !rawFulfillment.includes('deliv') && !rawFulfillment.includes('ship') && rawDispatch !== 'DELIVERED');
+                  const isFulfilled = !isUnfulfilled;
 
                   return (
                     <tr 
@@ -940,7 +945,7 @@ export const WebsiteOrders: React.FC = () => {
                                   <History size={13} className="text-amber-400" />
                                 </button>
                               </div>
-                            ) : (
+                            ) : isUnfulfilled ? (
                               <button
                                 type="button"
                                 onClick={() => setCancellingOrder(o)}
@@ -950,7 +955,7 @@ export const WebsiteOrders: React.FC = () => {
                                 <XCircle size={13} className="text-rose-400" />
                                 <span>Cancel</span>
                               </button>
-                            )}
+                            ) : null}
                           </td>
                         </>
                       )}
