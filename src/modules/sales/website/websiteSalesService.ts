@@ -283,7 +283,34 @@ export class WebsiteSalesService {
           orderIdToUuid.set(o.order_id, orderUuid);
 
           const fStatus = (o.fulfillment_status || '').toLowerCase().trim();
-          const isFulfilled = fStatus === 'fulfilled' || fStatus === 'shipped' || fStatus === 'delivered';
+          const isIncomingCancelled = o.order_status === 'CANCELLED' || Boolean(o.cancellation) || fStatus === 'cancelled';
+          const isExistingCancelled = existingRecord?.order_status === 'CANCELLED' || Boolean(existingRecord?.extra_data?.cancellation);
+          const isCancelled = isIncomingCancelled || isExistingCancelled;
+
+          const isFulfilled = !isCancelled && (fStatus === 'fulfilled' || fStatus === 'shipped' || fStatus === 'delivered');
+
+          let cancellationData = existingRecord?.extra_data?.cancellation || o.cancellation;
+          if (isCancelled && !cancellationData) {
+            cancellationData = {
+              status: 'CANCELLED',
+              reason: 'Source upload cancellation',
+              cancelled_at: new Date().toISOString(),
+              requested_at: new Date().toISOString(),
+              requested_by: 'Source Upload',
+              confirmed_at: new Date().toISOString(),
+              confirmed_by: 'Source System',
+              logistics_action: 'CONFIRMED',
+              previous_fulfillment_status: fStatus && fStatus !== 'cancelled' ? fStatus : 'unfulfilled'
+            };
+          }
+
+          const finalOrderStatus = isCancelled 
+            ? 'CANCELLED' 
+            : (isFulfilled ? 'FULFILLED' : 'CONFIRMED');
+
+          const finalDispatchStatus = isCancelled
+            ? 'CANCELLED'
+            : (isFulfilled ? 'DELIVERED' : 'UNFULFILLED');
 
           orderPayloads.push({
             id: orderUuid,
@@ -304,22 +331,24 @@ export class WebsiteSalesService {
             source_payment_method: o.source_payment_method || o.source_payment_mode || 'Unknown',
             advance_paid: Number(o.advance_paid) || 0,
             remaining_cod: o.payment_mode === 'PREPAID' ? 0 : Number(o.remaining_payable ?? o.price),
-            order_status: isFulfilled ? 'FULFILLED' : 'CONFIRMED',
-            dispatch_status: isFulfilled ? 'DELIVERED' : 'UNFULFILLED',
+            order_status: finalOrderStatus,
+            dispatch_status: finalDispatchStatus,
             dispatch_date: isFulfilled ? (o.order_date || getTodayInBusinessTimezone()) : null,
             extra_data: {
-              address: o.address || '',
-              order_formatted: o.order_formatted || '',
-              product_name: o.product_name || '',
-              original_order_date: o.original_order_date || '',
-              payment_classification_reason: o.payment_classification_reason || '',
+              ...(existingRecord?.extra_data || {}),
+              address: o.address || existingRecord?.extra_data?.address || '',
+              order_formatted: o.order_formatted || existingRecord?.extra_data?.order_formatted || '',
+              product_name: o.product_name || existingRecord?.extra_data?.product_name || '',
+              original_order_date: o.original_order_date || existingRecord?.extra_data?.original_order_date || '',
+              payment_classification_reason: o.payment_classification_reason || existingRecord?.extra_data?.payment_classification_reason || '',
               data_conflict: o.data_conflict || false,
               conflict_details: o.conflict_details || '',
-              fulfillment_status: o.fulfillment_status || (isFulfilled ? 'fulfilled' : 'unfulfilled'),
-              financial_status: o.financial_status || '',
-              awb_number: o.awb_number || '',
-              courier: o.courier || '',
-              fulfilled_date: o.fulfilled_date || (isFulfilled ? o.order_date : '')
+              fulfillment_status: isCancelled ? 'cancelled' : (isFulfilled ? 'fulfilled' : (fStatus || 'unfulfilled')),
+              financial_status: o.financial_status || existingRecord?.extra_data?.financial_status || '',
+              awb_number: o.awb_number || existingRecord?.extra_data?.awb_number || '',
+              courier: o.courier || existingRecord?.extra_data?.courier || '',
+              fulfilled_date: o.fulfilled_date || (isFulfilled ? o.order_date : ''),
+              ...(cancellationData ? { cancellation: cancellationData } : {})
             }
           });
         });
@@ -1321,7 +1350,9 @@ export class WebsiteSalesService {
         conflict_details: extra.conflict_details || '',
         created_at: o.created_at,
         items,
-        fulfillment_status: extra.fulfillment_status || (o.dispatch_status === 'DELIVERED' ? 'fulfilled' : 'unfulfilled'),
+        fulfillment_status: o.order_status === 'CANCELLED' || extra.cancellation?.status === 'CANCELLED'
+          ? 'cancelled'
+          : (extra.fulfillment_status || (o.dispatch_status === 'DELIVERED' ? 'fulfilled' : 'unfulfilled')),
         financial_status: extra.financial_status || (o.payment_mode === 'PREPAID' ? 'paid' : 'pending'),
         awb_number: awb,
         courier: courier,
@@ -1407,7 +1438,10 @@ export class WebsiteSalesService {
     const discountCode = raw0['Discount Code'] || raw0.discount_code || orderRow.offer || 'No Offer';
     const refundedAmount = Number(raw0['Refunded Amount'] || raw0.refunded_amount) || 0;
     const financialStatus = (raw0['Financial Status'] || orderRow.extra_data?.financial_status || (orderRow.payment_mode === 'PREPAID' ? 'paid' : 'pending')).toLowerCase();
-    const fulfillmentStatus = (raw0['Fulfillment Status'] || orderRow.extra_data?.fulfillment_status || (orderRow.dispatch_status === 'DELIVERED' ? 'fulfilled' : 'unfulfilled')).toLowerCase();
+    const isCancelledOrder = orderRow.order_status === 'CANCELLED' || Boolean(orderRow.extra_data?.cancellation);
+    const fulfillmentStatus = isCancelledOrder
+      ? 'cancelled'
+      : (raw0['Fulfillment Status'] || orderRow.extra_data?.fulfillment_status || (orderRow.dispatch_status === 'DELIVERED' ? 'fulfilled' : 'unfulfilled')).toLowerCase();
 
     // Map items with SKU and unit prices
     const items = (itemRows && itemRows.length > 0) ? itemRows.map((it: any, i: number) => {

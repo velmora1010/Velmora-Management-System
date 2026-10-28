@@ -132,7 +132,7 @@ export function mapDelhiveryStatus(currentStatus?: string, statusType?: string) 
       canonicalStatus: 'Cancelled',
       logisticsStage: 'trash' as const,
       salesDispatchStatus: 'CANCELLED' as const,
-      fulfillmentStatus: 'unfulfilled' as const,
+      fulfillmentStatus: 'cancelled' as const,
       priorityRank: 50
     };
   }
@@ -501,11 +501,16 @@ class DelhiverySalesService {
 
               if (!existingOrder) return;
 
-              // Do not downgrade a DELIVERED sales order to DISPATCHED
+              // Do not downgrade a DELIVERED sales order to DISPATCHED, and do not resurrect CANCELLED orders
               let nextDispatchStatus = rec.salesDispatchStatus;
-              if (existingOrder.dispatch_status === 'DELIVERED' && rec.salesDispatchStatus !== 'DELIVERED') {
+              const isOrderAlreadyCancelled = existingOrder.order_status === 'CANCELLED' || Boolean(existingOrder.extra_data?.cancellation);
+              if (isOrderAlreadyCancelled) {
+                nextDispatchStatus = 'CANCELLED';
+              } else if (existingOrder.dispatch_status === 'DELIVERED' && rec.salesDispatchStatus !== 'DELIVERED') {
                 nextDispatchStatus = 'DELIVERED';
               }
+
+              const isCancelledNow = isOrderAlreadyCancelled || rec.salesDispatchStatus === 'CANCELLED';
 
               const existingExtra = existingOrder.extra_data || {};
               const nextExtra = {
@@ -520,7 +525,8 @@ class DelhiverySalesService {
                 delhivery_remarks: rec.remarks,
                 delhivery_risk_of_return: rec.riskOfReturn,
                 delhivery_origin_center: rec.originCenter,
-                last_tracking_sync: nowIso
+                last_tracking_sync: nowIso,
+                fulfillment_status: isCancelledNow ? 'cancelled' : (existingExtra.fulfillment_status || 'unfulfilled')
               };
 
               const updatePayload: Record<string, any> = {
@@ -528,6 +534,9 @@ class DelhiverySalesService {
                 extra_data: nextExtra,
                 updated_at: nowIso
               };
+              if (isCancelledNow) {
+                updatePayload.order_status = 'CANCELLED';
+              }
 
               // Update dispatch date if available
               if (rec.deliveredDate && nextDispatchStatus === 'DELIVERED') {

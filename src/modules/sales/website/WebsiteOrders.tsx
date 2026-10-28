@@ -713,13 +713,15 @@ export const WebsiteOrders: React.FC = () => {
                 {orders.map((o) => {
                   const displayPhone = formatPhoneNumber(o.phone);
                   const isMulti = o.items && o.items.length > 1;
+                  const isCancelledOrder = o.order_status === 'CANCELLED' || o.cancellation?.status === 'CANCELLED' || (o.fulfillment_status || '').toLowerCase().trim() === 'cancelled';
                   const rawFulfillment = (o.fulfillment_status || '').toLowerCase().trim();
                   const rawDispatch = (o.dispatch_status || '').toUpperCase().trim();
-                  const isUnfulfilled = 
+                  const isUnfulfilled = !isCancelledOrder && (
                     rawFulfillment === 'unfulfilled' || 
                     rawFulfillment.includes('unfulfill') || 
-                    (!rawFulfillment.includes('fulfill') && !rawFulfillment.includes('deliv') && !rawFulfillment.includes('ship') && rawDispatch !== 'DELIVERED');
-                  const isFulfilled = !isUnfulfilled;
+                    (!rawFulfillment.includes('fulfill') && !rawFulfillment.includes('deliv') && !rawFulfillment.includes('ship') && rawDispatch !== 'DELIVERED')
+                  );
+                  const isFulfilled = !isCancelledOrder && !isUnfulfilled;
 
                   return (
                     <tr 
@@ -813,11 +815,13 @@ export const WebsiteOrders: React.FC = () => {
                       <td className="py-3.5 px-4 space-y-1">
                         <div className="flex items-center gap-1.5">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                            isFulfilled
+                            isCancelledOrder
+                              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                              : isFulfilled
                               ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                               : 'bg-slate-800 text-slate-400 border border-slate-700'
                           }`}>
-                            {o.fulfillment_status || 'Unfulfilled'}
+                            {isCancelledOrder ? 'Cancelled' : (o.fulfillment_status || 'Unfulfilled')}
                           </span>
                         </div>
                         {o.awb_number ? (
@@ -917,7 +921,7 @@ export const WebsiteOrders: React.FC = () => {
 
                           {/* 7. CANCEL ORDER COLUMN */}
                           <td className="py-3.5 px-4 text-center" onClick={(e) => e.stopPropagation()}>
-                            {o.order_status === 'CANCELLED' || o.cancellation?.status === 'CANCELLED' ? (
+                            {isCancelledOrder ? (
                               <div className="flex items-center justify-center gap-1">
                                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">
                                   Cancelled

@@ -23,6 +23,9 @@ export interface ColumnMapping {
   financialStatus?: string;
   awbNumber?: string;
   courier?: string;
+  cancelledAt?: string;
+  cancelReason?: string;
+  orderStatus?: string;
 }
 
 export interface WebsiteUploadBatch {
