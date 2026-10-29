@@ -128,29 +128,29 @@ export const TopNav: React.FC<TopNavProps> = ({
   };
 
   const roleLabels: Record<UserRole, { label: string; color: string }> = {
-    admin: { label: 'Administrator', color: 'bg-rose-100 text-rose-800 border-rose-200' },
-    hr_manager: { label: 'HR Manager', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
-    dept_head: { label: 'Dept Head', color: 'bg-blue-100 text-blue-800 border-blue-200' },
-    employee: { label: 'Employee', color: 'bg-slate-100 text-slate-800 border-slate-200' },
+    admin: { label: 'Administrator', color: 'bg-rose-500/15 text-rose-400 border-rose-500/30' },
+    hr_manager: { label: 'HR Manager', color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' },
+    dept_head: { label: 'Dept Head', color: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30' },
+    employee: { label: 'Employee', color: 'bg-slate-500/15 text-slate-300 border-slate-500/30' },
   };
 
   return (
-    <header className="sticky top-0 z-20 h-16 bg-white/90 backdrop-blur-md border-b border-slate-200/80 px-4 sm:px-6 flex items-center justify-between transition-all">
+    <header className="sticky top-0 z-20 h-16 bg-card/90 backdrop-blur-md border-b border-border px-4 sm:px-6 flex items-center justify-between transition-all">
       {/* Left: Mobile Menu & Page Title */}
       <div className="flex items-center gap-3">
         <button
           onClick={onToggleSidebar}
-          className="p-2 rounded-xl text-slate-500 hover:text-[#172B4D] hover:bg-slate-100 transition-colors"
+          className="p-2 rounded-xl text-muted hover:text-white hover:bg-white/5 transition-colors"
           aria-label="Toggle Navigation"
         >
           <Menu className="w-5 h-5" />
         </button>
 
         <div className="hidden sm:block">
-          <h1 className="text-lg font-bold text-[#172B4D] tracking-tight leading-tight">
+          <h1 className="text-lg font-bold text-white tracking-tight leading-tight">
             {tabTitles[currentTab]?.title || 'Dashboard'}
           </h1>
-          <p className="text-xs text-[#64748B] hidden md:block">
+          <p className="text-xs text-muted hidden md:block">
             {tabTitles[currentTab]?.subtitle}
           </p>
         </div>
@@ -160,13 +160,13 @@ export const TopNav: React.FC<TopNavProps> = ({
       <div className="flex-1 max-w-md mx-4">
         <button
           onClick={onOpenSearch}
-          className="w-full flex items-center justify-between px-3.5 py-2 bg-slate-50 hover:bg-slate-100/90 text-slate-400 rounded-xl border border-slate-200/80 transition-all text-xs text-left group shadow-xs"
+          className="w-full flex items-center justify-between px-3.5 py-2 bg-slate-900/60 hover:bg-slate-900/90 text-slate-400 rounded-xl border border-border transition-all text-xs text-left group shadow-xs"
         >
           <span className="flex items-center gap-2 truncate">
-            <Search className="w-4 h-4 text-slate-400 group-hover:text-[#206DA6] transition-colors" />
-            <span className="truncate group-hover:text-slate-600">Search employees, departments, records...</span>
+            <Search className="w-4 h-4 text-slate-400 group-hover:text-primary transition-colors" />
+            <span className="truncate group-hover:text-slate-300">Search employees, departments, records...</span>
           </span>
-          <kbd className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded font-mono text-slate-500">
+          <kbd className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] bg-slate-800 border border-slate-700 rounded font-mono text-slate-300">
             Ctrl K
           </kbd>
         </button>
@@ -179,16 +179,16 @@ export const TopNav: React.FC<TopNavProps> = ({
           onClick={onOpenCheckIn}
           className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
             isClockedOut
-              ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+              ? 'bg-primary/15 text-primary border-primary/30 hover:bg-primary/25'
               : isClockedIn
-              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-              : 'bg-white text-slate-700 border-slate-200 hover:border-[#206DA6] hover:text-[#206DA6]'
+              ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/25'
+              : 'bg-slate-900/60 text-slate-300 border-border hover:border-primary hover:text-primary'
           }`}
           title="Attendance Punch"
         >
           <Clock
             className={`w-4 h-4 ${
-              isClockedOut ? 'text-blue-600' : isClockedIn ? 'text-emerald-600' : 'text-slate-500'
+              isClockedOut ? 'text-primary' : isClockedIn ? 'text-emerald-400' : 'text-slate-400'
             }`}
           />
           <span className="hidden md:inline">
@@ -204,22 +204,22 @@ export const TopNav: React.FC<TopNavProps> = ({
         <div className="relative" ref={notifRef}>
           <button
             onClick={() => setIsNotifOpen(!isNotifOpen)}
-            className="relative p-2 rounded-xl text-slate-500 hover:text-[#172B4D] hover:bg-slate-100 transition-colors"
+            className="relative p-2 rounded-xl text-muted hover:text-white hover:bg-white/5 transition-colors"
             aria-label="View notifications"
           >
             <Bell className="w-5 h-5" />
             {unreadNotifs.length > 0 && (
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white" />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-card" />
             )}
           </button>
 
           {isNotifOpen && (
-            <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-2xl shadow-2xl border border-slate-100 py-2 z-50 animate-fade-in">
-              <div className="px-4 py-2.5 border-b border-slate-100 flex items-center justify-between">
+            <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-sidebar rounded-2xl shadow-2xl border border-border py-2 z-50 animate-fade-in text-white">
+              <div className="px-4 py-2.5 border-b border-border flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="font-bold text-sm text-[#172B4D]">Notifications</span>
+                  <span className="font-bold text-sm text-white">Notifications</span>
                   {unreadNotifs.length > 0 && (
-                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">
+                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30">
                       {unreadNotifs.length} new
                     </span>
                   )}
@@ -227,16 +227,16 @@ export const TopNav: React.FC<TopNavProps> = ({
                 {unreadNotifs.length > 0 && (
                   <button
                     onClick={markAllNotificationsRead}
-                    className="text-xs text-[#206DA6] hover:underline font-medium"
+                    className="text-xs text-primary hover:underline font-medium"
                   >
                     Mark all read
                   </button>
                 )}
               </div>
 
-              <div className="max-h-80 overflow-y-auto divide-y divide-slate-50">
+              <div className="max-h-80 overflow-y-auto divide-y divide-border/40">
                 {scopedNotifications.length === 0 ? (
-                  <p className="text-xs text-slate-400 p-6 text-center">No notifications</p>
+                  <p className="text-xs text-muted p-6 text-center">No notifications</p>
                 ) : (
                   scopedNotifications.map((notif) => (
                     <div
@@ -260,19 +260,19 @@ export const TopNav: React.FC<TopNavProps> = ({
                           setIsNotifOpen(false);
                         }
                       }}
-                      className={`p-3.5 hover:bg-slate-50 cursor-pointer transition-colors flex items-start gap-3 ${
-                        !notif.read ? 'bg-blue-50/40' : ''
+                      className={`p-3.5 hover:bg-white/5 cursor-pointer transition-colors flex items-start gap-3 ${
+                        !notif.read ? 'bg-primary/5' : ''
                       }`}
                     >
                       <div
                         className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${
-                          !notif.read ? 'bg-[#206DA6]' : 'bg-transparent'
+                          !notif.read ? 'bg-primary' : 'bg-transparent'
                         }`}
                       />
                       <div className="flex-1">
-                        <p className="text-xs font-semibold text-[#172B4D]">{notif.title}</p>
-                        <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">{notif.message}</p>
-                        <span className="text-[10px] text-slate-400 mt-1 block">{notif.timestamp}</span>
+                        <p className="text-xs font-semibold text-white">{notif.title}</p>
+                        <p className="text-[11px] text-muted mt-0.5 leading-relaxed">{notif.message}</p>
+                        <span className="text-[10px] text-slate-500 mt-1 block">{notif.timestamp}</span>
                       </div>
                     </div>
                   ))
@@ -286,29 +286,29 @@ export const TopNav: React.FC<TopNavProps> = ({
         <div className="relative" ref={profileRef}>
           <button
             onClick={() => setIsProfileOpen(!isProfileOpen)}
-            className="flex items-center gap-2.5 p-1 rounded-xl hover:bg-slate-100 transition-colors"
+            className="flex items-center gap-2.5 p-1 rounded-xl hover:bg-white/5 transition-colors"
           >
             <Avatar
               src={currentUser.avatar}
               name={currentUser.name}
               size="sm"
-              className="ring-2 ring-[#206DA6]/20 shadow-xs"
+              className="ring-2 ring-primary/30 shadow-xs"
             />
             <div className="hidden lg:block text-left">
-              <span className="block text-xs font-bold text-[#172B4D] leading-tight">
+              <span className="block text-xs font-bold text-white leading-tight">
                 {currentUser.name}
               </span>
-              <span className="text-[11px] text-[#64748B] block truncate max-w-[130px]">
+              <span className="text-[11px] text-muted block truncate max-w-[130px]">
                 {currentUser.title}
               </span>
             </div>
-            <ChevronDown className="w-4 h-4 text-slate-400 hidden lg:block" />
+            <ChevronDown className="w-4 h-4 text-muted hidden lg:block" />
           </button>
 
           {isProfileOpen && (
-            <div className="absolute right-0 mt-2 w-72 bg-white rounded-2xl shadow-2xl border border-slate-100 p-2 z-50 animate-fade-in">
+            <div className="absolute right-0 mt-2 w-72 bg-sidebar rounded-2xl shadow-2xl border border-border p-2 z-50 animate-fade-in text-white">
               {/* Profile Card */}
-              <div className="p-3 bg-slate-50 rounded-xl mb-2 border border-slate-100">
+              <div className="p-3 bg-slate-900/60 rounded-xl mb-2 border border-border">
                 <div className="flex items-center gap-3">
                   <Avatar
                     src={currentUser.avatar}
@@ -317,8 +317,8 @@ export const TopNav: React.FC<TopNavProps> = ({
                     className="shadow-xs"
                   />
                   <div className="overflow-hidden">
-                    <p className="text-xs font-bold text-[#172B4D] truncate">{currentUser.name}</p>
-                    <p className="text-[11px] text-slate-500 truncate">{currentUser.email}</p>
+                    <p className="text-xs font-bold text-white truncate">{currentUser.name}</p>
+                    <p className="text-[11px] text-muted truncate">{currentUser.email}</p>
                     <span
                       className={`inline-block mt-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${roleLabels[currentUser.role].color}`}
                     >
@@ -335,9 +335,9 @@ export const TopNav: React.FC<TopNavProps> = ({
                     setIsProfileOpen(false);
                     onOpenMyProfile();
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-[#172B4D] hover:bg-blue-50/70 hover:text-[#206DA6] rounded-xl transition-colors mb-1"
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 hover:text-white rounded-xl transition-colors mb-1"
                 >
-                  <UserCircle className="w-4 h-4 text-[#206DA6]" />
+                  <UserCircle className="w-4 h-4 text-primary" />
                   <span>My Profile</span>
                 </button>
               )}

@@ -319,13 +319,13 @@ const HRLayoutContent: React.FC = () => {
           onClick={() => handleNavigateTab(item.id)}
           className={`group flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap border shrink-0 ${
             isActive
-              ? 'bg-[#206DA6] text-white border-[#206DA6] shadow-sm'
-              : 'bg-white border-slate-200/80 text-slate-600 hover:text-[#172B4D] hover:border-slate-300 hover:bg-slate-50'
+              ? 'bg-gradient-to-r from-indigo-600 to-violet-600 border-indigo-500 text-white shadow-lg shadow-indigo-900/25 font-semibold'
+              : 'bg-black/20 border-border text-muted hover:text-white hover:border-slate-600 hover:bg-white/5'
           }`}
         >
           <Icon
             className={`w-4 h-4 transition-colors ${
-              isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-600'
+              isActive ? 'text-white' : 'text-muted group-hover:text-white'
             }`}
           />
           <span>{item.label}</span>
@@ -333,8 +333,8 @@ const HRLayoutContent: React.FC = () => {
             <span
               className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
                 isActive
-                  ? 'bg-white/25 text-white'
-                  : item.badgeColor || 'bg-slate-100 text-slate-600'
+                  ? 'bg-white/20 text-white'
+                  : item.badgeColor || 'bg-white/10 text-slate-300 border border-white/5'
               }`}
             >
               {item.badge}
@@ -347,7 +347,7 @@ const HRLayoutContent: React.FC = () => {
   );
 
   return (
-    <div className="flex-1 flex flex-col min-h-full bg-[#F6F8FC] text-[#172B4D]">
+    <div className="hr-module-root flex-1 flex flex-col min-h-full bg-background text-main">
       {/* Top HR Header & Action Bar */}
       <TopNav
         currentTab={currentTab}
@@ -360,7 +360,7 @@ const HRLayoutContent: React.FC = () => {
       />
 
       {/* Two-Row HR Navigation Bar (No horizontal slider or scrollbar) */}
-      <div className="sticky top-16 z-10 bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-4 sm:px-6 py-2.5 shadow-xs flex flex-col gap-2">
+      <div className="sticky top-16 z-10 bg-card/95 backdrop-blur-md border-b border-border px-4 sm:px-6 py-2.5 shadow-velmora flex flex-col gap-2">
         {/* Row 1: Fixed 7 tabs ending with Work Assignment */}
         <div className="flex items-center gap-2 flex-wrap">
           {row1Items.map(renderNavTabButton)}

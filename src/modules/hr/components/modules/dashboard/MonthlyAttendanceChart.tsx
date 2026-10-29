@@ -20,11 +20,11 @@ export const MonthlyAttendanceChart: React.FC = () => {
   const data: Array<{ month: string; rate: number }> = [];
 
   return (
-    <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-card flex flex-col justify-between">
+    <div className="bg-card p-5 rounded-2xl border border-border shadow-velmora flex flex-col justify-between">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <div>
-          <h3 className="text-sm font-bold text-[#172B4D]">Monthly Attendance Trends</h3>
-          <p className="text-xs text-[#64748B]">Historical adherence & punctuality rate (%)</p>
+          <h3 className="text-sm font-bold text-white">Monthly Attendance Trends</h3>
+          <p className="text-xs text-muted">Historical adherence & punctuality rate (%)</p>
         </div>
 
         {/* Filter Dropdown */}
@@ -32,11 +32,11 @@ export const MonthlyAttendanceChart: React.FC = () => {
           <select
             value={chartDept}
             onChange={(e) => setChartDept(e.target.value)}
-            className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-medium text-slate-700 focus:outline-hidden focus:ring-1 focus:ring-[#206DA6]"
+            className="text-xs bg-slate-900/60 border border-border rounded-xl px-2.5 py-1.5 font-medium text-slate-200 focus:outline-hidden focus:ring-1 focus:ring-primary cursor-pointer"
           >
-            <option value="all">All Departments</option>
+            <option value="all" className="bg-[#161b22] text-white">All Departments</option>
             {departments.map((d) => (
-              <option key={d.id} value={d.id}>
+              <option key={d.id} value={d.id} className="bg-[#161b22] text-white">
                 {d.name}
               </option>
             ))}
@@ -45,12 +45,12 @@ export const MonthlyAttendanceChart: React.FC = () => {
       </div>
 
       {!hasRecords ? (
-        <div className="h-64 w-full flex flex-col items-center justify-center text-center p-6 border border-dashed border-slate-200 rounded-xl bg-slate-50/50">
-          <div className="p-3 bg-white rounded-xl shadow-xs border border-slate-200/60 mb-2.5 text-slate-400">
+        <div className="h-64 w-full flex flex-col items-center justify-center text-center p-6 border border-dashed border-border rounded-xl bg-slate-900/30">
+          <div className="p-3 bg-slate-800 rounded-xl shadow-xs border border-border mb-2.5 text-slate-400">
             <TrendingUp className="w-6 h-6" />
           </div>
-          <p className="text-xs font-semibold text-[#172B4D]">No data available yet.</p>
-          <p className="text-xs text-slate-500 mt-1 max-w-xs leading-relaxed">
+          <p className="text-xs font-semibold text-white">No data available yet.</p>
+          <p className="text-xs text-muted mt-1 max-w-xs leading-relaxed">
             Add employees and attendance records to view analytics.
           </p>
         </div>
@@ -60,17 +60,17 @@ export const MonthlyAttendanceChart: React.FC = () => {
             <AreaChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
               <defs>
                 <linearGradient id="attendanceGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#206DA6" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#206DA6" stopOpacity={0.0} />
+                  <stop offset="5%" stopColor="#7B8CFF" stopOpacity={0.4} />
+                  <stop offset="95%" stopColor="#7B8CFF" stopOpacity={0.0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.08)" vertical={false} />
               <XAxis
                 dataKey="month"
                 stroke="#94A3B8"
                 fontSize={11}
                 tickLine={false}
-                axisLine={{ stroke: '#E2E8F0' }}
+                axisLine={{ stroke: 'rgba(255, 255, 255, 0.1)' }}
               />
               <YAxis
                 domain={[85, 100]}
@@ -82,18 +82,19 @@ export const MonthlyAttendanceChart: React.FC = () => {
               />
               <Tooltip
                 contentStyle={{
-                  backgroundColor: '#FFFFFF',
+                  backgroundColor: '#161B22',
                   borderRadius: '12px',
-                  border: '1px solid #E2E8F0',
-                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                  border: '1px solid #30363D',
+                  boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)',
                   fontSize: '12px',
+                  color: '#F8FAFC',
                 }}
                 formatter={(value: any) => [`${value}%`, 'Adherence Rate']}
               />
               <Area
                 type="monotone"
                 dataKey="rate"
-                stroke="#206DA6"
+                stroke="#7B8CFF"
                 strokeWidth={3}
                 fillOpacity={1}
                 fill="url(#attendanceGradient)"

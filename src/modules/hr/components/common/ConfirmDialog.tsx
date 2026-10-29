@@ -28,19 +28,19 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       <div className="flex items-start gap-4 py-2">
         <div
           className={`p-3 rounded-full flex-shrink-0 ${
-            isDestructive ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-[#206DA6]'
+            isDestructive ? 'bg-rose-500/15 text-rose-400 border border-rose-500/20' : 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/20'
           }`}
         >
           <AlertTriangle className="w-6 h-6" />
         </div>
-        <p className="text-sm text-slate-600 leading-relaxed pt-1">{message}</p>
+        <p className="text-sm text-slate-300 leading-relaxed pt-1">{message}</p>
       </div>
 
-      <div className="mt-6 flex justify-end gap-3 pt-3 border-t border-slate-100">
+      <div className="mt-6 flex justify-end gap-3 pt-3 border-t border-border">
         <button
           type="button"
           onClick={onClose}
-          className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
+          className="px-4 py-2 text-sm font-medium text-slate-300 bg-white/5 border border-border rounded-xl hover:bg-white/10 transition-colors"
         >
           {cancelLabel}
         </button>
@@ -52,8 +52,8 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           }}
           className={`px-4 py-2 text-sm font-semibold rounded-xl text-white shadow-sm transition-colors ${
             isDestructive
-              ? 'bg-red-600 hover:bg-red-700'
-              : 'bg-[#206DA6] hover:bg-[#1A5987]'
+              ? 'bg-rose-600 hover:bg-rose-700'
+              : 'bg-primary hover:bg-primary/90'
           }`}
         >
           {confirmLabel}

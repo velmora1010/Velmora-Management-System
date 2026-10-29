@@ -1,4 +1,7 @@
-/* HR Module Animation & Utilities */
+/* ==========================================================================
+   VELMORA HR MODULE — DARK DESIGN SYSTEM INTEGRATION
+   ========================================================================== */
+
 @keyframes fadeIn {
   from { opacity: 0; transform: scale(0.97); }
   to { opacity: 1; transform: scale(1); }
@@ -15,4 +18,134 @@
 
 .animate-slide-in-right {
   animation: slideInRight 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Base HR Module Root Scoping to Velmora Dark Theme */
+.hr-module-root {
+  background-color: var(--bg-color, #0d1117);
+  color: var(--text-main, #f8fafc);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  min-height: 100%;
+}
+
+/* Reconcile legacy white containers with Velmora dark card surfaces */
+.hr-module-root .bg-white {
+  background-color: var(--card-bg, #161b22) !important;
+  color: var(--text-main, #f8fafc);
+  border-color: var(--border-color, #30363d);
+}
+
+.hr-module-root .bg-\[\#F6F8FC\] {
+  background-color: var(--bg-color, #0d1117) !important;
+}
+
+.hr-module-root .bg-slate-50,
+.hr-module-root .bg-slate-50\/50,
+.hr-module-root .bg-slate-50\/70,
+.hr-module-root .bg-slate-50\/80 {
+  background-color: rgba(15, 23, 42, 0.65) !important;
+  border-color: var(--border-color, #30363d) !important;
+}
+
+.hr-module-root .bg-slate-100 {
+  background-color: rgba(30, 41, 59, 0.7) !important;
+  border-color: var(--border-color, #30363d) !important;
+}
+
+/* Card, Panel & Divider Borders */
+.hr-module-root .border-slate-100,
+.hr-module-root .border-slate-200,
+.hr-module-root .border-slate-200\/60,
+.hr-module-root .border-slate-200\/80,
+.hr-module-root .border-slate-300 {
+  border-color: var(--border-color, #30363d) !important;
+}
+
+.hr-module-root .divide-slate-100 > * + *,
+.hr-module-root .divide-slate-200 > * + * {
+  border-color: var(--border-color, #30363d) !important;
+}
+
+/* Typography Harmony */
+.hr-module-root .text-\[\#172B4D\],
+.hr-module-root .text-slate-800,
+.hr-module-root .text-slate-900 {
+  color: var(--text-main, #f8fafc) !important;
+}
+
+.hr-module-root .text-\[\#64748B\],
+.hr-module-root .text-slate-500,
+.hr-module-root .text-slate-600 {
+  color: var(--text-muted, #8b949e) !important;
+}
+
+.hr-module-root .text-\[\#206DA6\] {
+  color: var(--primary-color, #7B8CFF) !important;
+}
+
+/* Form Controls (Inputs, Selects, Textareas) */
+.hr-module-root input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]),
+.hr-module-root select,
+.hr-module-root textarea {
+  background-color: rgba(15, 23, 42, 0.75) !important;
+  border-color: var(--border-color, #30363d) !important;
+  color: #f8fafc !important;
+}
+
+.hr-module-root input:focus,
+.hr-module-root select:focus,
+.hr-module-root textarea:focus {
+  border-color: var(--primary-color, #7B8CFF) !important;
+  outline: none;
+  box-shadow: 0 0 0 1px var(--primary-color, #7B8CFF) !important;
+}
+
+.hr-module-root input::placeholder,
+.hr-module-root textarea::placeholder {
+  color: #64748b !important;
+}
+
+/* Dropdown Option Elements */
+.hr-module-root option {
+  background-color: #161b22 !important;
+  color: #f8fafc !important;
+}
+
+/* Tables across HR Modules */
+.hr-module-root table {
+  color: #f8fafc;
+}
+
+.hr-module-root thead th {
+  background-color: rgba(15, 23, 42, 0.9) !important;
+  color: #94a3b8 !important;
+  border-color: var(--border-color, #30363d) !important;
+}
+
+.hr-module-root tbody tr {
+  border-color: var(--border-color, #30363d) !important;
+}
+
+.hr-module-root tbody tr:hover {
+  background-color: rgba(255, 255, 255, 0.02) !important;
+}
+
+.hr-module-root td {
+  border-color: rgba(48, 54, 61, 0.6) !important;
+}
+
+/* Custom Dark Scrollbar */
+.hr-module-root ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.hr-module-root ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.hr-module-root ::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 9999px;
+}
+.hr-module-root ::-webkit-scrollbar-thumb:hover {
+  background: #475569;
 }

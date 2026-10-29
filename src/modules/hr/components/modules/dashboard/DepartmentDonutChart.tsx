@@ -20,19 +20,19 @@ export const DepartmentDonutChart: React.FC = () => {
   const hasData = totalEmployees > 0 && departments.length > 0;
 
   return (
-    <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-card flex flex-col justify-between">
+    <div className="bg-card p-5 rounded-2xl border border-border shadow-velmora flex flex-col justify-between">
       <div className="mb-2">
-        <h3 className="text-sm font-bold text-[#172B4D]">Department Distribution</h3>
-        <p className="text-xs text-[#64748B]">Workforce allocation across business units</p>
+        <h3 className="text-sm font-bold text-white">Department Distribution</h3>
+        <p className="text-xs text-muted">Workforce allocation across business units</p>
       </div>
 
       {!hasData ? (
-        <div className="h-56 w-full flex flex-col items-center justify-center text-center p-6 border border-dashed border-slate-200 rounded-xl bg-slate-50/50 my-auto">
-          <div className="p-3 bg-white rounded-xl shadow-xs border border-slate-200/60 mb-2.5 text-slate-400">
+        <div className="h-56 w-full flex flex-col items-center justify-center text-center p-6 border border-dashed border-border rounded-xl bg-slate-900/30 my-auto">
+          <div className="p-3 bg-slate-800 rounded-xl shadow-xs border border-border mb-2.5 text-slate-400">
             <Building2 className="w-6 h-6" />
           </div>
-          <p className="text-xs font-semibold text-[#172B4D]">No data available yet.</p>
-          <p className="text-xs text-slate-500 mt-1 max-w-xs leading-relaxed">
+          <p className="text-xs font-semibold text-white">No data available yet.</p>
+          <p className="text-xs text-muted mt-1 max-w-xs leading-relaxed">
             Add employees and attendance records to view analytics.
           </p>
         </div>
@@ -43,11 +43,12 @@ export const DepartmentDonutChart: React.FC = () => {
               <PieChart>
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: '#FFFFFF',
+                    backgroundColor: '#161B22',
                     borderRadius: '12px',
-                    border: '1px solid #E2E8F0',
-                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                    border: '1px solid #30363D',
+                    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)',
                     fontSize: '12px',
+                    color: '#F8FAFC',
                   }}
                   formatter={(val: any, name: any) => [`${val} Employees`, name]}
                 />
@@ -69,8 +70,8 @@ export const DepartmentDonutChart: React.FC = () => {
 
             {/* Center Total Count Label */}
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-2xl font-black text-[#172B4D]">{totalEmployees}</span>
-              <span className="text-[10px] font-semibold text-[#64748B] uppercase tracking-wider">
+              <span className="text-2xl font-black text-white">{totalEmployees}</span>
+              <span className="text-[10px] font-semibold text-muted uppercase tracking-wider">
                 Total Staff
               </span>
             </div>
@@ -84,8 +85,8 @@ export const DepartmentDonutChart: React.FC = () => {
                   className="w-2.5 h-2.5 rounded-full flex-shrink-0"
                   style={{ backgroundColor: item.color }}
                 />
-                <span className="text-slate-600 truncate text-[11px] font-medium">
-                  {item.code}: <span className="font-bold text-[#172B4D]">{item.value}</span>
+                <span className="text-slate-300 truncate text-[11px] font-medium">
+                  {item.code}: <span className="font-bold text-white">{item.value}</span>
                 </span>
               </div>
             ))}
