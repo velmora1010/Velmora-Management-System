@@ -1097,18 +1097,6 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
       else sPage++;
     }
 
-    if (allSalesOrders.length === 0 && shipmentsData.length === 0) {
-      return {
-        insertedCount: 0,
-        updatedCount: 0,
-        activeCount: 0,
-        fulfilledCount: 0,
-        pendingCount: 0,
-        preservedWorkflowCount: 0,
-        skippedDeletedCount: 0
-      };
-    }
-
     // Separate active canonical orders from deleted/tombstoned orders
     const activeSalesOrders = allSalesOrders.filter(so => 
       so.order_status !== 'DELETED' && !so.extra_data?.is_deleted
@@ -1125,33 +1113,75 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
       if (base) deletedVariantSet.add(base);
     });
 
-    // If any order in Dexie matches a deleted sales order variant, mark its stage as 'trash'
-    if (deletedVariantSet.size > 0) {
-      const dexieAll = await db.logistics_orders.toArray();
-      for (const rec of dexieAll) {
-        if (!rec.id || rec.stage === 'trash') continue;
-        const cId = cleanOrderId(rec.orderId).toLowerCase();
-        const bId = extractCustomerOrderBaseId(rec.orderId).toLowerCase();
-        if (deletedVariantSet.has(cId) || (bId && deletedVariantSet.has(bId))) {
+    // Known obsolete/unrelated IDs explicitly identified by business
+    const knownStaleIds = new Set([
+      '10781', '10599', '10764', 'tgb8', 'kab10',
+      'jr10781', 'jr10599', 'jr10764', '#tgb8', '#kab10',
+      '#jr10781', '#jr10599', '#jr10764'
+    ]);
+
+    // Build valid set of all active sales orders from Supabase (the single source of truth)
+    const validSalesOrderKeys = new Set<string>();
+    activeSalesOrders.forEach(so => {
+      const c = cleanOrderId(so.order_id).toLowerCase();
+      if (c) validSalesOrderKeys.add(c);
+      const b = extractCustomerOrderBaseId(so.order_id).toLowerCase();
+      if (b) validSalesOrderKeys.add(b);
+      getCustomerOrderIdentifierVariants(so.order_id).forEach(v => validSalesOrderKeys.add(v.toLowerCase()));
+    });
+
+    // Reconcile Dexie: Any order in Dexie that does not exist in valid active sales orders from Supabase
+    // or that matches a deleted/stale ID must be trashed/removed!
+    const dexieAll = await db.logistics_orders.toArray();
+    for (const rec of dexieAll) {
+      if (!rec.id) continue;
+      const cId = cleanOrderId(rec.orderId).toLowerCase();
+      const bId = extractCustomerOrderBaseId(rec.orderId).toLowerCase();
+
+      const isKnownStale = knownStaleIds.has(cId) || (bId && knownStaleIds.has(bId));
+      const isDeletedVariant = deletedVariantSet.has(cId) || (bId && deletedVariantSet.has(bId));
+      const isValidSalesOrder = validSalesOrderKeys.has(cId) || (bId && validSalesOrderKeys.has(bId));
+
+      // If active/unfulfilled in Dexie but not in Supabase sales_orders, or is known stale/deleted:
+      if (isKnownStale || isDeletedVariant || !isValidSalesOrder) {
+        if (rec.stage !== 'trash' || rec.status !== 'Deleted') {
           await db.logistics_orders.update(rec.id, {
             stage: 'trash',
             status: 'Deleted',
             deletedAt: new Date().toISOString(),
-            trashReason: 'Deleted from Sales'
+            trashReason: isKnownStale ? 'Obsolete order purged from Logistics' : 'Synchronized with Supabase Sales orders'
           });
         }
       }
     }
+
+    if (activeSalesOrders.length === 0) {
+      return {
+        insertedCount: 0,
+        updatedCount: 0,
+        activeCount: 0,
+        fulfilledCount: 0,
+        pendingCount: 0,
+        preservedWorkflowCount: 0,
+        skippedDeletedCount: dexieAll.length
+      };
+    }
     
+    // Build tracking enrichment lookup map from customer_tracking_shipments
     const shipmentMap = new Map<string, any>();
     (shipmentsData || []).forEach(s => {
-      const cId = cleanOrderId(s.order_id || s.display_order_id).toLowerCase();
+      const rawId = s.order_id || s.display_order_id;
+      if (!rawId) return;
+      const cId = cleanOrderId(rawId).toLowerCase();
       if (cId) shipmentMap.set(cId, s);
+      const bId = extractCustomerOrderBaseId(rawId).toLowerCase();
+      if (bId) shipmentMap.set(bId, s);
     });
 
     const transformedSales = activeSalesOrders.map(so => {
       const cleanId = cleanOrderId(so.order_id).toLowerCase();
-      const existingShipment = shipmentMap.get(cleanId);
+      const baseId = extractCustomerOrderBaseId(so.order_id).toLowerCase();
+      const existingShipment = shipmentMap.get(cleanId) || (baseId ? shipmentMap.get(baseId) : undefined);
       const extra = so.extra_data || {};
 
       const cData = extra.cancellation || {};
@@ -1220,89 +1250,7 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
       };
     });
 
-    // Also include shipments from customer_tracking_shipments whose order_id is not already present in Sales,
-    // and exclude any deleted or orphaned shipments
-    const salesOrderKeySet = new Set<string>();
-    activeSalesOrders.forEach(so => {
-      salesOrderKeySet.add(cleanOrderId(so.order_id).toLowerCase());
-      const base = extractCustomerOrderBaseId(so.order_id).toLowerCase();
-      if (base) salesOrderKeySet.add(base);
-    });
-
-    const shipmentOrders = (shipmentsData || [])
-      .filter(s => {
-        const rawId = s.order_id || s.display_order_id;
-        if (!rawId) return false;
-        const st = (s.status || '').toLowerCase();
-        const rawSt = (s.raw_status || '').toLowerCase();
-        if (st === 'order deleted' || rawSt === 'deleted') return false;
-
-        const cId = cleanOrderId(rawId).toLowerCase();
-        const bId = extractCustomerOrderBaseId(rawId).toLowerCase();
-
-        // Must not match any deleted sales order
-        if (deletedVariantSet.has(cId) || (bId && deletedVariantSet.has(bId))) return false;
-
-        // Must not duplicate an active sales order (already handled in transformedSales)
-        if (salesOrderKeySet.has(cId) || (bId && salesOrderKeySet.has(bId))) return false;
-
-        return true;
-      })
-      .map(s => {
-        const cId = cleanOrderId(s.order_id || s.display_order_id);
-        const st = (s.status || '').toLowerCase();
-        const rawSt = (s.raw_status || '').toLowerCase();
-        const isConfirmedCancelled = st === 'cancelled' || rawSt === 'cancelled';
-        const isDelivered = st.includes('delivered');
-        const isRto = st.includes('rto');
-        const isDispatched = !isConfirmedCancelled && (!!s.awb_number || s.status === 'In Transit' || s.status === 'Out for Delivery' || s.status === 'Awaiting Tracking Update' || isDelivered || isRto);
-
-        const fStatus = isConfirmedCancelled ? 'cancelled' : (isDelivered ? 'fulfilled' : (isDispatched ? 'dispatched' : 'unfulfilled'));
-        const stage = isConfirmedCancelled ? 'order_data' : (isDispatched ? 'tracking' : 'order_data');
-        const cancellationStatus = isConfirmedCancelled ? 'Completed' : undefined;
-
-        return {
-          order_id: cId,
-          customer_name: s.customer_name || 'Customer',
-          phone: s.phone_number || '',
-          address: s.address || '',
-          city: s.city || '',
-          state: s.state || '',
-          pincode: s.pincode || '',
-          order_formatted: s.display_order_id || `#${cId}`,
-          product_name: s.products || 'Standard Products',
-          price: Number(s.amount) || 0,
-          payment_mode: s.order_type || 'Prepaid',
-          order_date: s.dispatch_date || s.created_at || '',
-          fulfillment_status: fStatus,
-          financial_status: 'Paid',
-          awb_number: s.awb_number || '',
-          courier: s.courier || '',
-          stage,
-          status: s.status || (isConfirmedCancelled ? 'Cancelled' : 'In Transit'),
-          dispatch_date: s.dispatch_date,
-          fulfilled_date: s.delivered_date || (isDelivered ? s.dispatch_date : undefined),
-          batchId: s.batch_id,
-          batchName: s.batch_name,
-          cancellationStatus,
-          cancellationReason: isConfirmedCancelled ? (s.remarks || 'Cancelled order') : undefined,
-          cancellationNotes: isConfirmedCancelled ? s.remarks : undefined,
-          cancellationRequestedAt: isConfirmedCancelled ? (s.updated_at || s.created_at) : undefined,
-          cancellationRequestedBy: 'Logistics',
-          cancellationConfirmedAt: isConfirmedCancelled ? (s.updated_at || s.created_at) : undefined,
-          cancellationConfirmedBy: 'Logistics',
-          cancellationDate: isConfirmedCancelled ? (s.updated_at || s.created_at) : undefined,
-          previousShipmentStatus: isConfirmedCancelled ? (s.awb_number ? 'Dispatched' : 'Pending AWB') : undefined,
-          cancellation: isConfirmedCancelled ? {
-            status: 'CANCELLED',
-            reason: s.remarks || 'Cancelled order',
-            cancelled_at: s.updated_at || s.created_at,
-            confirmed_at: s.updated_at || s.created_at
-          } : undefined
-        };
-      });
-
-    const transformed = [...transformedSales, ...shipmentOrders];
+    const transformed = transformedSales;
 
     return await syncSalesUploadToLogistics(transformed);
   } catch (err) {

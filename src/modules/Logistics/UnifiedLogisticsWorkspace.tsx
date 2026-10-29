@@ -207,7 +207,11 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         if (records.length === 0) return;
 
         // Pass 0: Purge / tombstone any records marked deleted or known orphaned orders
-        const knownOrphanedBases = new Set(['10781', '10599', '10764']);
+        const knownOrphanedBases = new Set([
+          '10781', '10599', '10764', 'tgb8', 'kab10',
+          'jr10781', 'jr10599', 'jr10764', '#tgb8', '#kab10',
+          '#jr10781', '#jr10599', '#jr10764'
+        ]);
         for (const rec of records) {
           if (!rec.id) continue;
           const cId = cleanOrderId(rec.orderId).toLowerCase();
