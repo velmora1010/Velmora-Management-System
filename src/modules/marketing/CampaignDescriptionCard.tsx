@@ -7,18 +7,21 @@ import {
   Check, 
   AlertTriangle,
   Calendar,
-  MoreVertical
+  MoreVertical,
+  Layers
 } from 'lucide-react';
 import type { CampaignDescription } from '../../types';
 
 interface CampaignDescriptionCardProps {
   description: CampaignDescription;
+  campaignName?: string;
   onEdit: (description: CampaignDescription) => void;
   onDelete: (description: CampaignDescription) => void;
 }
 
 export const CampaignDescriptionCard: React.FC<CampaignDescriptionCardProps> = ({
   description,
+  campaignName,
   onEdit,
   onDelete
 }) => {
@@ -74,9 +77,17 @@ export const CampaignDescriptionCard: React.FC<CampaignDescriptionCardProps> = (
               <FileText size={16} />
             </div>
             <div>
-              <h4 className="text-sm font-bold text-white uppercase tracking-wider leading-tight">
-                {description.product}
-              </h4>
+              <div className="flex flex-wrap items-center gap-2">
+                <h4 className="text-sm font-bold text-white uppercase tracking-wider leading-tight">
+                  {description.product}
+                </h4>
+                {campaignName && (
+                  <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 flex items-center gap-1" title={`Created in: ${campaignName}`}>
+                    <Layers size={10} className="text-indigo-400 shrink-0" />
+                    <span className="truncate max-w-[130px]">{campaignName}</span>
+                  </span>
+                )}
+              </div>
               {formattedDate && (
                 <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-0.5">
                   <Calendar size={12} className="text-slate-500" />

@@ -451,7 +451,7 @@ export async function fetchTrackingLinkClicks(linkIds: string[]): Promise<FetchC
             configured: data.configured !== false,
             clicks: data.clicks || {},
             error: data.error,
-            isError: false
+            isError: Boolean(data.error)
           };
         } catch (fetchErr: any) {
           return {
@@ -482,7 +482,7 @@ export async function fetchTrackingLinkClicks(linkIds: string[]): Promise<FetchC
       configured: isConfigured,
       clicks: mergedClicks,
       error: !isConfigured ? errorMsg : (hasBatchError ? errorMsg : undefined),
-      isError: hasBatchError
+      isError: !isConfigured ? false : hasBatchError
     };
   } catch (err: any) {
     console.warn('Failed to fetch tracking clicks from API:', err);
@@ -794,14 +794,21 @@ export async function batchGenerateInfluencerTrackingLinks(
     const cleanCode = String(rawCode).replace(/^#+/, '').trim().toLowerCase();
     const displayCode = `#${cleanCode.toUpperCase()}`;
 
-    // Deduplication check: Match (campaign_id, influencer_id, product, platform, video_number)
+    // Deduplication check: Match (campaign_id, influencer_id, product, destination_type/platform, video_number)
     const existing = existingLinks.find(
       (l) =>
         String(l.campaign_id) === cleanCampaignId &&
         String(l.influencer_id) === String(inf.id) &&
-        l.product.trim().toLowerCase() === params.product.trim().toLowerCase() &&
-        (l.platform || '').trim().toLowerCase() === params.platform.trim().toLowerCase() &&
-        (l.video_number || '').trim().toLowerCase() === params.video_number.trim().toLowerCase()
+        isSameProduct(l.product, params.product) &&
+        (
+          (l.destination_type && l.destination_type.toLowerCase() === destination_type.toLowerCase()) ||
+          (l.platform || '').trim().toLowerCase() === params.platform.trim().toLowerCase() ||
+          (l.utm_source || '').trim().toLowerCase() === params.utm_source.trim().toLowerCase()
+        ) &&
+        (
+          (l.video_number || '').trim().toLowerCase() === params.video_number.trim().toLowerCase() ||
+          (l.utm_content || '').trim().toLowerCase() === params.utm_content.trim().toLowerCase()
+        )
     );
 
     const recordId = existing?.id || (
@@ -1310,4 +1317,188 @@ export async function bulkDeleteInfluencerTrackingLinks(
     saveLocalTrackingLinks(cleanCampaignId, updated);
   }
 }
+
+/**
+ * Determines whether a tracking link represents the Website (Shopify with UTMs) channel.
+ * Strictly excludes marketplace redirect channels (Amazon, Flipkart, Meesho).
+ */
+export function isWebsiteTrackingLink(link: InfluencerTrackingLink): boolean {
+  if (!link) return false;
+  const dest = (link.destination_type || '').toLowerCase();
+  const plat = (link.platform || '').toLowerCase();
+  const utm = (link.utm_source || '').toLowerCase();
+
+  // Exclude marketplace redirects
+  if (dest === 'amazon' || dest === 'flipkart' || dest === 'meesho') return false;
+  if (plat === 'amazon' || plat === 'flipkart' || plat === 'meesho') return false;
+  if (utm === 'amazon' || utm === 'flipkart' || utm === 'meesho') return false;
+  if (link.tracking_url && (link.tracking_url.includes('/r/') || link.tracking_url.includes('/api/r'))) return false;
+
+  // Accept website / shopify destination or platform
+  return (
+    dest === 'shopify' ||
+    dest === 'website' ||
+    plat === 'website' ||
+    utm === 'website' ||
+    (!dest && !plat && !utm)
+  );
+}
+
+/**
+ * Normalizes a product name for reliable matching
+ */
+export function normalizeProductName(name?: string | null): string {
+  return (name || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Maps product aliases to their canonical standard identity
+ */
+export function canonicalizeProductName(name?: string | null): string {
+  if (!name) return '';
+  const clean = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (clean.includes('detergent')) return 'diydetergentliquid';
+  if (clean.includes('dishwash')) return 'diydishwashliquid';
+  if (clean.includes('fabricconditioner') || clean.includes('comfort')) return 'diyfabricconditioner';
+  if (clean.includes('kitchentowel') || clean.includes('bambootowel') || clean.includes('bambookitchentowel')) return 'bambookitchentowel';
+  if (clean.includes('bbccleaner') || clean === 'bbc') return 'bbccleaner';
+  if (clean.includes('kitchencleaner')) return 'kitchencleaner';
+  if (clean.includes('glasscleaner')) return 'glasscleaner';
+  if (clean.includes('floorcleaner')) return 'floorcleaner';
+  if (clean.includes('carshampoo') || clean.includes('carwash')) return 'carshampoo';
+  if (clean.includes('bikeshampoo') || clean.includes('bikewash')) return 'bikeshampoo';
+  if (clean.includes('handwash')) return 'handwash';
+  if (clean.includes('snowfoam') || clean.includes('foamsprayer')) return 'snowfoamsprayer';
+  if (clean.includes('sponge')) return 'magicsponge';
+  return clean;
+}
+
+/**
+ * Checks if two product names represent the same product (accounting for aliases & updated names)
+ */
+export function isSameProduct(p1?: string | null, p2?: string | null): boolean {
+  if (!p1 || !p2) return false;
+  const s1 = p1.trim().toLowerCase();
+  const s2 = p2.trim().toLowerCase();
+  if (s1 === s2) return true;
+  const c1 = canonicalizeProductName(p1);
+  const c2 = canonicalizeProductName(p2);
+  if (c1 && c2 && c1 === c2) return true;
+  const n1 = normalizeProductName(p1);
+  const n2 = normalizeProductName(p2);
+  return n1.includes(n2) || n2.includes(n1);
+}
+
+/**
+ * Resolves the matching Website tracking link for a status tracking deliverable.
+ * In Marketing -> Campaign -> Status Tracking -> Post Date, the publishing platforms
+ * (Instagram, Facebook, YouTube) strictly map to the single Website tracking link.
+ */
+export function resolveWebsiteTrackingLink(
+  allTrackingLinks: InfluencerTrackingLink[],
+  influencerId: string | number,
+  influencerCode: string | null | undefined,
+  videoNumber: number | string,
+  productName: string
+): {
+  matchedLink?: InfluencerTrackingLink;
+  allCandidateLinks: InfluencerTrackingLink[];
+} {
+  const currentInfId = String(influencerId || '').trim();
+  const rawCodeClean = (influencerCode || '').trim().toLowerCase().replace(/^#+/, '');
+  const targetVidNum = parseInt(String(videoNumber).replace(/[^0-9]/g, ''), 10) || 1;
+  const targetNormProd = normalizeProductName(productName);
+
+  // 1. Filter links belonging to this influencer and channel = Website
+  const websiteLinksForInfluencer = allTrackingLinks.filter(link => {
+    // Must be Website link
+    if (!isWebsiteTrackingLink(link)) return false;
+
+    // Influencer match: ID or Creator Code
+    const linkInfId = String(link.influencer_id || '').trim();
+    const linkInfCode = (link.influencer_code || '').trim().toLowerCase().replace(/^#+/, '');
+    const linkCreatorCode = (link.creator_code || '').trim().toLowerCase().replace(/^#+/, '');
+
+    const matchInf = (linkInfId && currentInfId && linkInfId === currentInfId) ||
+      (rawCodeClean && (linkInfCode === rawCodeClean || linkCreatorCode === rawCodeClean)) ||
+      (rawCodeClean && extractCodeNumber(linkInfCode) > 0 && extractCodeNumber(linkInfCode) === extractCodeNumber(rawCodeClean));
+
+    return matchInf;
+  });
+
+  // 2. From these Website links, match Video Number and Product
+  const matched = websiteLinksForInfluencer.find(link => {
+    // Video match: exact numeric video matching (v1=1, v2=2, etc.)
+    const linkVidInt = parseInt(
+      (link.video_number || '').replace(/[^0-9]/g, '') ||
+      (link.utm_content || '').replace(/[^0-9]/g, ''),
+      10
+    ) || 1;
+    if (linkVidInt !== targetVidNum) return false;
+
+    // Product match: robust product comparison
+    if (targetNormProd && link.product) {
+      const linkNormProd = normalizeProductName(link.product);
+      if (!linkNormProd.startsWith('video')) {
+        const matchProd = isSameProduct(link.product, productName);
+        if (!matchProd) return false;
+      }
+    }
+
+    return true;
+  });
+
+  return {
+    matchedLink: matched,
+    allCandidateLinks: websiteLinksForInfluencer
+  };
+}
+
+/**
+ * Resolves the appropriate tracking link for a status tracking deliverable.
+ * Publishing platforms (Instagram, YouTube, Facebook) map strictly to Website tracking links.
+ */
+export function resolveDeliverableTrackingLink(
+  allTrackingLinks: InfluencerTrackingLink[],
+  influencerId: string | number,
+  influencerCode: string | null | undefined,
+  videoNumber: number | string,
+  productName: string,
+  platform: string,
+  preferredDestination?: string
+): {
+  matchedLink?: InfluencerTrackingLink;
+  candidateLinks: InfluencerTrackingLink[];
+} {
+  const normPlat = (platform || '').trim().toLowerCase();
+
+  // Social publishing platforms (Instagram, Facebook, YouTube) map to Website tracking link
+  if (normPlat === 'instagram' || normPlat === 'facebook' || normPlat === 'youtube') {
+    const res = resolveWebsiteTrackingLink(
+      allTrackingLinks,
+      influencerId,
+      influencerCode,
+      videoNumber,
+      productName
+    );
+    return {
+      matchedLink: res.matchedLink,
+      candidateLinks: res.allCandidateLinks
+    };
+  }
+
+  // Fallback for non-standard platforms
+  const res = resolveWebsiteTrackingLink(
+    allTrackingLinks,
+    influencerId,
+    influencerCode,
+    videoNumber,
+    productName
+  );
+  return {
+    matchedLink: res.matchedLink,
+    candidateLinks: res.allCandidateLinks
+  };
+}
+
 

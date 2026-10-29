@@ -21,6 +21,8 @@ import toast from 'react-hot-toast';
 import db from '../../../lib/db';
 import type { UnifiedLogisticsOrder } from '../../../types/unifiedLogistics';
 import { CONFIGURED_COURIERS, normalizeCourier } from '../../../config/courierConfig';
+import { executeDispatchOrder, executeBulkDispatchOrders } from '../../../services/unifiedLogisticsService';
+import { validateCourierAwb } from '../../../utils/logisticsOrderUtils';
 
 interface PrepareDispatchGroupedViewProps {
   orders: UnifiedLogisticsOrder[];
@@ -144,8 +146,9 @@ export const PrepareDispatchGroupedView: React.FC<PrepareDispatchGroupedViewProp
     const courier = getEffectiveCourier(order);
     const awb = getEffectiveAwb(order).trim();
 
-    if (!awb) {
-      toast.error(`Please enter an AWB number for order #${order.orderId}`);
+    const val = validateCourierAwb(courier, awb);
+    if (!val.valid) {
+      toast.error(val.error || `Please enter a valid AWB number for order #${order.orderId}`);
       return;
     }
 
@@ -155,18 +158,20 @@ export const PrepareDispatchGroupedView: React.FC<PrepareDispatchGroupedViewProp
     }
 
     try {
-      const dispatchDate = new Date().toISOString().slice(0, 10);
-      await db.logistics_orders.update(order.rawId, {
+      const res = await executeDispatchOrder({
+        rawId: order.rawId,
         courier,
         awbNumber: awb,
-        stage: 'tracking',
-        status: 'In Transit',
-        dispatchDate,
-        syncedAt: new Date().toLocaleString()
+        batchId: order.batchId,
+        batchName: order.batchName
       });
 
-      toast.success(`Order #${order.orderId} dispatched with ${courier}! Moved to Tracking.`);
-      onDispatchSuccess();
+      if (res.success) {
+        toast.success(`Order #${order.orderId} dispatched with ${courier}! Available in Dispatched and Tracking.`);
+        onDispatchSuccess();
+      } else {
+        toast.error('Dispatch failed: ' + res.error);
+      }
     } catch (err: any) {
       toast.error('Dispatch failed: ' + err.message);
     }
@@ -181,40 +186,38 @@ export const PrepareDispatchGroupedView: React.FC<PrepareDispatchGroupedViewProp
 
     const selectedOrders = orders.filter(o => selectedOrderIds.has(o.id));
     
-    // Validate all have AWBs
-    const missingAwb = selectedOrders.filter(o => !getEffectiveAwb(o).trim());
-    if (missingAwb.length > 0) {
-      toast.error(`${missingAwb.length} selected orders are missing AWB numbers. Please enter AWBs before dispatching.`);
-      return;
+    // Validate all have valid couriers and AWBs
+    for (const ord of selectedOrders) {
+      const courier = getEffectiveCourier(ord);
+      const awb = getEffectiveAwb(ord).trim();
+      const val = validateCourierAwb(courier, awb);
+      if (!val.valid) {
+        toast.error(`Order #${ord.orderId}: ${val.error}`);
+        return;
+      }
     }
 
     setIsDispatching(true);
     const toastId = toast.loading(`Dispatching ${selectedOrders.length} orders...`);
 
     try {
-      const dispatchDate = new Date().toISOString().slice(0, 10);
-      const nowStr = new Date().toLocaleString();
+      const dispatchItems = selectedOrders.map(ord => ({
+        rawId: ord.rawId!,
+        courier: getEffectiveCourier(ord),
+        awbNumber: getEffectiveAwb(ord).trim(),
+        batchId: ord.batchId,
+        batchName: ord.batchName
+      }));
 
-      await db.transaction('rw', db.logistics_orders, async () => {
-        for (const ord of selectedOrders) {
-          if (!ord.rawId) continue;
-          const courier = getEffectiveCourier(ord);
-          const awb = getEffectiveAwb(ord).trim();
+      const res = await executeBulkDispatchOrders(dispatchItems);
 
-          await db.logistics_orders.update(ord.rawId, {
-            courier,
-            awbNumber: awb,
-            stage: 'tracking',
-            status: 'In Transit',
-            dispatchDate,
-            syncedAt: nowStr
-          });
-        }
-      });
-
-      toast.success(`Dispatched ${selectedOrders.length} orders successfully! Moved to Tracking.`, { id: toastId });
-      setSelectedOrderIds(new Set());
-      onDispatchSuccess();
+      if (res.success) {
+        toast.success(`Dispatched ${res.dispatchedCount} orders successfully! Available in Dispatched and Tracking.`, { id: toastId });
+        setSelectedOrderIds(new Set());
+        onDispatchSuccess();
+      } else {
+        toast.error(`Failed to dispatch orders: ${res.errors.join(', ')}`, { id: toastId });
+      }
     } catch (err: any) {
       toast.error('Dispatch failed: ' + err.message, { id: toastId });
     } finally {

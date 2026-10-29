@@ -51,17 +51,34 @@ export const useDispatch = () => {
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
       const filePath = `dispatch/${fileName}`;
 
-      const { error } = await supabase.storage
-        .from('influencer-profiles')
-        .upload(filePath, file);
+      let uploadSuccess = false;
+      let lastErr: any = null;
 
-      if (error) throw error;
+      try {
+        const { error: adminErr } = await supabaseAdmin.storage
+          .from('influencer-profiles')
+          .upload(filePath, file, { cacheControl: '3600', upsert: true });
+        if (!adminErr) {
+          uploadSuccess = true;
+        } else {
+          lastErr = adminErr;
+        }
+      } catch (e) {
+        lastErr = e;
+      }
 
-      const { data: publicData } = supabase.storage
+      if (!uploadSuccess) {
+        const { error } = await supabase.storage
+          .from('influencer-profiles')
+          .upload(filePath, file, { cacheControl: '3600', upsert: true });
+        if (error) throw lastErr || error;
+      }
+
+      const { data: publicData } = supabaseAdmin.storage
         .from('influencer-profiles')
         .getPublicUrl(filePath);
 
-      return publicData.publicUrl;
+      return publicData?.publicUrl || null;
     } catch (err) {
       console.error('Error uploading dispatch photo:', err);
       throw err;
@@ -237,7 +254,7 @@ export const useDispatch = () => {
         // If the current latest attempt is already the replacement attempt (without an issue), update it.
         const shouldCreateNewAttempt = Boolean(prevAttempt && prevAttempt.issue_reported);
 
-        if (prevAttempt && shouldCreateNewAttempt) {
+        if (isDispatchConfirmed && prevAttempt && shouldCreateNewAttempt) {
           // A product issue was previously reported -> Create a replacement attempt (Attempt N+1, RE_DISPATCH)
           await shipmentAttemptService.createReDispatchAttempt({
             campaign_id: numericCampaignId,
@@ -249,7 +266,7 @@ export const useDispatch = () => {
             dispatch_date: normalizedDispatchDate,
             estimated_delivery_date: normalizedExpectedDate
           });
-        } else if (!prevAttempt) {
+        } else if (isDispatchConfirmed && !prevAttempt) {
           // Initial attempt
           await shipmentAttemptService.createInitialShipmentAttempt({
             campaign_id: numericCampaignId,
@@ -261,7 +278,7 @@ export const useDispatch = () => {
             dispatch_date: normalizedDispatchDate,
             estimated_delivery_date: normalizedExpectedDate
           });
-        } else {
+        } else if (prevAttempt && !prevAttempt.issue_reported) {
           // Update the current attempt's details (courier, awb, dispatch date)
           await supabaseAdmin
             .from(SUPABASE_TABLES.shipmentAttempts)
@@ -289,7 +306,7 @@ export const useDispatch = () => {
       }
 
       // When confirming dispatch for a re-dispatch influencer, ensure reDispatchQueueService transitions to Dispatched
-      if (isDispatchConfirmed && (payload.is_re_dispatch || payload.influencer_code)) {
+      if (isDispatchConfirmed && payload.is_re_dispatch) {
         try {
           await reDispatchQueueService.transitionReDispatchToDispatched(numericCampaignId, {
             influencer_id: numericInfluencerId,

@@ -1,15 +1,26 @@
 export type OrderSource = 'shopify' | 'upload' | 'dexie';
 
+export type LogisticsViewSection =
+  | 'active'
+  | 'fulfilled'
+  | 'prepare_dispatch'
+  | 'dispatched'
+  | 'tracking'
+  | 'analytics';
+
 export type UnifiedWorkflowStage =
   | 'active'
+  | 'fulfilled'
   | 'pending'
   | 'prepare_dispatch'
   | 'dispatched'
-  | 'tracking';
+  | 'tracking'
+  | 'analytics';
 
 export type UnifiedTrackingStatus =
   | 'Unfulfilled'
   | 'Not Tracked'
+  | 'Awaiting Tracking Update'
   | 'Info Received'
   | 'Pending'
   | 'In Transit'
@@ -34,11 +45,15 @@ export interface UnifiedLogisticsOrder {
   customerKey: string; // normalized phone e.g. "9567022022" or fallback "order_6674"
   customerName: string;
   phoneNumber: string;
+  phone?: string; // compatibility alias
   rawPhoneNumber?: string;
   alternatePhone?: string;
   address?: string;
+  shippingAddress?: string; // compatibility alias
   city?: string;
+  shippingCity?: string; // compatibility alias
   state?: string;
+  shippingState?: string; // compatibility alias
   pincode?: string;
 
   // Order Details
@@ -46,10 +61,19 @@ export interface UnifiedLogisticsOrder {
   orderDateDisplay?: string;
   orderType: string; // 'Prepaid' | 'COD' | 'Partial COD' | etc.
   amount: number; // numeric amount in INR
+  totalAmount?: number; // compatibility alias
+  isAmountKnown?: boolean;
   products: string; // summarized product names or SKU list
+  productSummary?: string; // compatibility alias
   quantity?: number;
+  totalQuantity?: number;
   lineItems?: Array<{
     name: string;
+    quantity: number;
+    price?: number;
+  }>;
+  items?: Array<{
+    productName: string;
     quantity: number;
     price?: number;
   }>;
@@ -60,11 +84,18 @@ export interface UnifiedLogisticsOrder {
   dispatchDate?: string;
   estimatedDeliveryDate?: string;
   deliveredDate?: string;
+  pickupLocation?: string;
+  transportMode?: 'Surface' | 'Air' | string;
+  zone?: string;
+  cancellationStatus?: 'Requested' | 'Approved' | 'Rejected' | 'Completed' | string;
   remarks?: string;
   // Batch & fulfillment metadata
   batchId?: string;
   batchName?: string;
   fulfillmentStatus?: string;
+  sourceFulfillmentStatus?: string;
+  fulfilledDate?: string;
+  isSourceFulfilled?: boolean;
   financialStatus?: string;
   stage: string;
   workflowStage: UnifiedWorkflowStage;
@@ -79,6 +110,9 @@ export interface UnifiedLogisticsOrder {
   trackingError?: string;
   syncState?: 'queued' | 'checking' | 'retrying' | 'idle';
   deliveryDays?: number;
+  archivedAt?: string;
+  archiveReason?: string;
+  isArchived?: boolean;
 }
 
 export interface UnifiedCustomer {
@@ -106,12 +140,15 @@ export interface UnifiedCustomer {
 
 export interface WorkflowStageCounts {
   active: number;
+  fulfilled: number;
   pending: number;
   prepareDispatch: number;
   dispatched: number;
   tracking: number;
   totalOrders: number;
   totalCustomers: number;
+  analytics?: number;
+  archived?: number;
 }
 
 export type LogisticsMainView = 'customers' | 'orders';

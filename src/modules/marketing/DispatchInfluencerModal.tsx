@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { useDispatch, type DispatchPayload } from '../../hooks/marketing/useDispatch';
 import toast from 'react-hot-toast';
+import { MarketingUploadField } from '../../components/marketing/MarketingUploadField';
 import { getInfluencerResolvedVideoProducts } from './AddCampaignInfluencer';
 import { 
   isInfluencerDispatched, 
@@ -35,7 +36,8 @@ import {
 import { 
   shipmentAttemptService, 
   type ShipmentAttempt, 
-  generateReDispatchOrderId 
+  generateReDispatchOrderId,
+  cleanCodeRef
 } from '../../services/shipmentAttemptService';
 
 // Central Price Config Rules
@@ -165,10 +167,8 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
   };
   
   // Photos
-  const [productPhotoFile, setProductPhotoFile] = useState<File | null>(null);
-  const [productPhotoPreview, setProductPhotoPreview] = useState<string | null>(dispatchDetails?.product_photo_url || null);
-  const [dispatchPhotoFile, setDispatchPhotoFile] = useState<File | null>(null);
-  const [dispatchPhotoPreview, setDispatchPhotoPreview] = useState<string | null>(dispatchDetails?.dispatch_photo_url || null);
+  const [productPhotoUrl, setProductPhotoUrl] = useState<string | null>(dispatchDetails?.product_photo_url || null);
+  const [dispatchPhotoUrl, setDispatchPhotoUrl] = useState<string | null>(dispatchDetails?.dispatch_photo_url || null);
 
   // Sync state if influencer prop changes (prevents stale data across different influencers)
   useEffect(() => {
@@ -199,13 +199,15 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
       }
 
       if (d.total_weight) setTotalWeight(d.total_weight);
-      if (d.product_photo_url) setProductPhotoPreview(d.product_photo_url);
-      if (d.dispatch_photo_url) setDispatchPhotoPreview(d.dispatch_photo_url);
+      setProductPhotoUrl(d.product_photo_url || null);
+      setDispatchPhotoUrl(d.dispatch_photo_url || null);
     } else {
       const todayStr = getLocalDateKey();
       setDispatchDate(todayStr);
       setExpectedDeliveryDate(addDaysToDateString(todayStr, 4));
       setHasManuallyEditedDeliveryDate(false);
+      setProductPhotoUrl(null);
+      setDispatchPhotoUrl(null);
     }
   }, [influencer]);
 
@@ -221,20 +223,6 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
     }, 0);
     setTotalValue(calculatedVal.toString());
   }, [selectedProducts]);
-
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'product' | 'dispatch') => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      const preview = URL.createObjectURL(file);
-      if (type === 'product') {
-        setProductPhotoFile(file);
-        setProductPhotoPreview(preview);
-      } else {
-        setDispatchPhotoFile(file);
-        setDispatchPhotoPreview(preview);
-      }
-    }
-  };
 
   const isAlreadyDispatched = isInfluencerDispatched(influencer);
 
@@ -255,23 +243,60 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
     return () => { isMounted = false; };
   }, [campaign?.id, influencer?.id]);
 
-  const rawDispStatus = (influencer.dispatchDetails?.dispatch_status || (influencer as any).dispatch_status || '').toLowerCase();
-  const prevAttemptWithIssue = attempts.slice().reverse().find(a => a.issue_reported);
-  const activeReDispatchAttempt = attempts.slice().reverse().find(a => a.shipment_type === 'RE_DISPATCH');
-  const isReDispatchMode = rawDispStatus.includes('re_dispatch') || rawDispStatus.includes('re-dispatch') || Boolean(prevAttemptWithIssue) || Boolean(activeReDispatchAttempt);
+  const rawDispStatus = (influencer.dispatchDetails?.dispatch_status || (influencer as any).dispatch_status || '').toLowerCase().trim();
+  
+  // Guard against 'prepare_dispatch' matching 're_dispatch' substring
+  const isDraftOrPrepareStatus = 
+    rawDispStatus === 'prepare_dispatch' || 
+    rawDispStatus === 'pending_confirmation' || 
+    rawDispStatus === 'ready to dispatch' || 
+    rawDispStatus === 'draft' ||
+    rawDispStatus.includes('prepare');
 
-  // If there's already an active replacement attempt (e.g. Attempt 2), use its attempt number.
-  // Otherwise, if in re-dispatch mode without a replacement attempt yet, this will be Attempt N+1.
+  const prevAttemptWithIssue = attempts.slice().reverse().find(a => a.issue_reported === true);
+  const activeReDispatchAttempt = attempts.slice().reverse().find(a => a.shipment_type === 'RE_DISPATCH' && !a.issue_reported);
+
+  // Explicit re-dispatch status from database (must not be draft or prepare_dispatch)
+  const isExplicitReDispatchStatus = !isDraftOrPrepareStatus && (
+    rawDispStatus === 're_dispatch' ||
+    rawDispStatus === 're-dispatch' ||
+    rawDispStatus === 'redispatch' ||
+    rawDispStatus === 're-dispatch required' ||
+    rawDispStatus === 'issue reported'
+  );
+
+  // A genuine re-dispatch requires either:
+  // 1. A recorded shipment attempt with an issue reported, OR
+  // 2. An existing RE_DISPATCH shipment attempt, OR
+  // 3. An explicit re-dispatch status AND some prior dispatch history (attempts or tracking ID), OR
+  // 4. An explicit flag from notes indicating a re-dispatch is required
+  const hasPriorDispatchHistory = attempts.length > 0 || Boolean(influencer.dispatchDetails?.tracking_id);
+  const isReDispatchMode = Boolean(
+    prevAttemptWithIssue || 
+    activeReDispatchAttempt || 
+    (isExplicitReDispatchStatus && (hasPriorDispatchHistory || (influencer as any).re_dispatch_required === true))
+  );
+
+  // Attempt number calculation:
+  // - If active RE_DISPATCH attempt exists, use its attempt_number.
+  // - Otherwise, if previous attempt had an issue, this next attempt is previous + 1.
+  // - Otherwise, if genuine re-dispatch mode, attempt is 2.
+  // - Otherwise, this is First Dispatch (Attempt #1).
   const displayAttemptNumber = activeReDispatchAttempt
     ? activeReDispatchAttempt.attempt_number
-    : (prevAttemptWithIssue ? prevAttemptWithIssue.attempt_number + 1 : (isReDispatchMode ? 2 : 1));
+    : (prevAttemptWithIssue 
+        ? prevAttemptWithIssue.attempt_number + 1 
+        : (isReDispatchMode ? Math.max(attempts.length + 1, 2) : 1));
 
-  const reDispatchOrderId = activeReDispatchAttempt?.order_id || generateReDispatchOrderId(influencer.code, courierPartner, Math.max(displayAttemptNumber, 2));
+  const cleanInfluencerCode = cleanCodeRef(influencer.code || influencer.name || '');
+  const dynamicOrderId = isReDispatchMode
+    ? (activeReDispatchAttempt?.order_id || generateReDispatchOrderId(cleanInfluencerCode, courierPartner, Math.max(displayAttemptNumber, 2)))
+    : (attempts[0]?.order_id || (cleanInfluencerCode ? `#${cleanInfluencerCode}` : ''));
 
   // Synchronize form logistics details when attempts load or change in re-dispatch mode
   useEffect(() => {
     if (!attempts || attempts.length === 0) return;
-    const activeReDispatch = attempts.slice().reverse().find(a => a.shipment_type === 'RE_DISPATCH');
+    const activeReDispatch = attempts.slice().reverse().find(a => a.shipment_type === 'RE_DISPATCH' && !a.issue_reported);
     const hasIssue = attempts.some(a => a.issue_reported);
 
     if (activeReDispatch) {
@@ -295,29 +320,49 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
 
   const [showConfirmStep, setShowConfirmStep] = useState(false);
 
+  const creatorName = (influencer.influencer_name || influencer.name || '').trim();
+  const isDispatchFormValid = Boolean(
+    creatorName && 
+    dispatchDate && 
+    dispatchDate.trim() && 
+    courierPartner && 
+    courierPartner.trim() && 
+    trackingId && 
+    trackingId.trim()
+  );
+
   const executeDispatch = async (status: 'Dispatched' | 'Pending Confirmation') => {
     if (isSubmitting) return;
 
-    const creatorName = influencer.influencer_name || influencer.name;
-    if (!creatorName || !creatorName.trim()) {
-      toast.error('Please fill in Creator Name.');
-      return;
-    }
+    const isConfirming = status === 'Dispatched';
     
-    if (!dispatchDate) {
-      toast.error('Please enter a valid Dispatch Date.');
-      return;
-    }
-    
-    if (selectedProducts.length === 0) {
-      toast.error('No selected products found for this influencer.');
-      return;
+    // Genuinely required validation ONLY when officially confirming dispatch
+    if (isConfirming) {
+      if (!creatorName) {
+        toast.error('Please fill in Creator Name.');
+        return;
+      }
+      
+      if (!dispatchDate || !dispatchDate.trim()) {
+        toast.error('Please enter a valid Dispatch Date.');
+        return;
+      }
+
+      if (!courierPartner || !courierPartner.trim()) {
+        toast.error('Please select a Courier Partner to confirm dispatch.');
+        return;
+      }
+
+      if (!trackingId || !trackingId.trim()) {
+        toast.error('Please enter a Tracking ID / AWB number to confirm dispatch.');
+        return;
+      }
     }
 
     const payload: DispatchPayload = {
       influencer_id: String(influencer.id),
       campaign_id: String(campaign.id),
-      creator_name: creatorName.trim(),
+      creator_name: creatorName,
       phone_number: phone || null,
       alternative_phone_number: altPhone || null,
       address: address || null,
@@ -326,24 +371,24 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
       pincode: pincode || null,
       languages: language || null,
       campaign_name: campaign.campaign_name,
-      product_name: selectedProducts.map((p: any) => p.product_name).join(', ') || null,
-      selected_products: selectedProducts,
-      total_products: totalProducts,
-      total_product_value: totalValue ? parseFloat(totalValue) : null,
+      product_name: selectedProducts.length > 0 ? selectedProducts.map((p: any) => p.product_name).join(', ') : null,
+      selected_products: selectedProducts || [],
+      total_products: totalProducts || 0,
+      total_product_value: totalValue ? parseFloat(totalValue) : 0,
       total_weight: totalWeight || null,
-      product_photo_url: productPhotoPreview?.startsWith('http') ? productPhotoPreview : null,
+      product_photo_url: productPhotoUrl || null,
       courier_partner: courierPartner || null,
-      dispatch_photo_url: dispatchPhotoPreview?.startsWith('http') ? dispatchPhotoPreview : null,
+      dispatch_photo_url: dispatchPhotoUrl || null,
       tracking_id: trackingId || null,
-      dispatch_date: dispatchDate,
+      dispatch_date: dispatchDate || getLocalDateKey(),
       expected_delivery_date: expectedDeliveryDate || null,
       dispatch_status: status,
       influencer_code: influencer.code || null,
-      order_id: isReDispatchMode ? reDispatchOrderId : (attempts[0]?.order_id || null),
+      order_id: dynamicOrderId || null,
       is_re_dispatch: isReDispatchMode
     };
 
-    const result = await dispatchInfluencer(payload, productPhotoFile, dispatchPhotoFile);
+    const result = await dispatchInfluencer(payload, null, null);
     if (result.success) {
       if (status === 'Dispatched') {
         toast.success('Influencer marked as Dispatched successfully!');
@@ -358,19 +403,30 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
+    if (!creatorName) {
+      toast.error('Please fill in Creator Name.');
+      return;
+    }
+    if (!dispatchDate || !dispatchDate.trim()) {
+      toast.error('Please enter a valid Dispatch Date.');
+      return;
+    }
+    if (!courierPartner || !courierPartner.trim()) {
+      toast.error('Please select a Courier Partner to confirm dispatch.');
+      return;
+    }
+    if (!trackingId || !trackingId.trim()) {
+      toast.error('Please enter a Tracking ID / AWB number to confirm dispatch.');
+      return;
+    }
+
     if (isAlreadyDispatched) {
       executeDispatch('Dispatched');
       return;
     }
-    const creatorName = influencer.influencer_name || influencer.name;
-    if (!creatorName || !dispatchDate) {
-      toast.error('Please fill in Creator Name and Dispatch Date.');
-      return;
-    }
-    if (selectedProducts.length === 0) {
-      toast.error('No selected products found for this influencer.');
-      return;
-    }
+
     setShowConfirmStep(true);
   };
 
@@ -395,9 +451,17 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                     {batchInfo.batchName} · Influencer {batchInfo.current} of {batchInfo.total}
                   </span>
                 )}
-                {isAlreadyDispatched && (
+                {isAlreadyDispatched ? (
                   <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1 uppercase tracking-wider">
                     <CheckCircle size={12} /> Dispatched
+                  </span>
+                ) : isReDispatchMode ? (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1 uppercase tracking-wider">
+                    <AlertTriangle size={12} /> Re-Dispatch (Attempt #{displayAttemptNumber})
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30 flex items-center gap-1 uppercase tracking-wider">
+                    <Package size={12} /> First Dispatch
                   </span>
                 )}
               </div>
@@ -419,8 +483,8 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
         {/* Scrollable Form Body */}
         <form onSubmit={handleFormSubmit} className="overflow-y-auto p-5 sm:p-6 flex-1 [scrollbar-width:thin] [scrollbar-color:#334155_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-700/60 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-600">
           
-          {/* Re-Dispatch Notice Banner */}
-          {isReDispatchMode && (
+          {/* Dispatch Notice Banner */}
+          {isReDispatchMode ? (
             <div className="mb-5 bg-amber-950/30 border border-amber-500/40 rounded-2xl p-4 flex items-start gap-3.5 shadow-lg shadow-amber-950/20 animate-fade-in">
               <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 mt-0.5">
                 <AlertTriangle size={20} />
@@ -446,7 +510,29 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                 <div className="mt-2 flex items-center gap-2 text-xs text-slate-300 font-mono">
                   <span>Dynamic Order ID:</span>
                   <span className="px-2 py-0.5 rounded bg-[#0b101b] border border-amber-500/40 text-amber-400 font-bold">
-                    {reDispatchOrderId}
+                    {dynamicOrderId}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="mb-5 bg-blue-950/20 border border-blue-500/30 rounded-2xl p-4 flex items-start gap-3.5 shadow-md shadow-blue-950/10 animate-fade-in">
+              <div className="w-9 h-9 rounded-xl bg-blue-500/15 border border-blue-500/25 flex items-center justify-center text-blue-400 shrink-0 mt-0.5">
+                <Package size={20} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="px-2 py-0.5 bg-blue-500/20 border border-blue-500/35 text-blue-300 font-bold text-[11px] uppercase tracking-wider rounded">
+                    First Dispatch · Attempt #1
+                  </span>
+                  <span className="text-white font-bold text-sm">
+                    Initial Shipment for {influencer.code || influencer.name}
+                  </span>
+                </div>
+                <div className="mt-2 flex items-center gap-2 text-xs text-slate-300 font-mono">
+                  <span>Dynamic Order ID:</span>
+                  <span className="px-2 py-0.5 rounded bg-[#0b101b] border border-blue-500/30 text-blue-300 font-bold">
+                    {dynamicOrderId}
                   </span>
                 </div>
               </div>
@@ -477,6 +563,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                       <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
                         <User size={13} className="text-slate-400 shrink-0" />
                         <span>Creator Name</span>
+                        <span className="text-purple-400 font-bold ml-0.5" title="Required for dispatch">*</span>
                       </label>
                       <input 
                         type="text" 
@@ -655,7 +742,10 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                         );
                       })
                     ) : (
-                      <p className="text-slate-500 text-xs text-center italic py-4">No products selected for this influencer.</p>
+                      <div className="py-4 px-3 rounded-xl bg-[#0b101b]/40 border border-slate-800/60 text-center">
+                        <p className="text-slate-300 text-xs font-medium">No campaign products assigned.</p>
+                        <p className="text-slate-500 text-[11px] mt-0.5">You can still confirm dispatch with courier and tracking details.</p>
+                      </div>
                     )}
                   </div>
                   
@@ -717,49 +807,33 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                 </div>
 
                 <div className="grid grid-cols-2 gap-3.5">
-                  {/* Pack Photo */}
-                  <div>
-                    <div className="flex items-center gap-1.5 text-xs font-medium text-purple-400 mb-2">
-                      <ImageIcon size={13} />
-                      <span className="text-slate-300 font-medium">Product Photo</span>
-                    </div>
-                    <div className="border border-dashed border-slate-700/80 hover:border-purple-500/70 bg-[#0b101b]/60 rounded-xl p-3 text-center relative transition-colors group cursor-pointer min-h-[140px] flex items-center justify-center">
-                      {productPhotoPreview ? (
-                        <div className="relative w-full h-28">
-                          <img src={productPhotoPreview} alt="Product" className="w-full h-full object-contain rounded-lg" />
-                        </div>
-                      ) : (
-                        <div className="py-3 flex flex-col items-center justify-center">
-                          <UploadCloud className="text-purple-400/80 mb-2 group-hover:text-purple-300 transition-colors" size={26} />
-                          <span className="text-xs font-semibold text-slate-300">Click to upload</span>
-                          <span className="text-[10px] text-slate-500 mt-0.5">JPG, PNG, WEBP (Max 5MB)</span>
-                        </div>
-                      )}
-                      <input type="file" accept="image/*" onChange={(e) => handlePhotoUpload(e, 'product')} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                    </div>
-                  </div>
+                  {/* Product Photo */}
+                  <MarketingUploadField
+                    label="Product Photo"
+                    icon={<ImageIcon size={13} className="text-purple-400 shrink-0" />}
+                    value={productPhotoUrl}
+                    fileType="image"
+                    accept="image/*"
+                    storageFolder={`dispatch/campaigns/${campaign.id}/influencers/${influencer.id}`}
+                    filePrefix="product_photo"
+                    isRequired={false}
+                    disabled={isSubmitting}
+                    onChange={(url) => setProductPhotoUrl(url)}
+                  />
                   
-                  {/* Final Photo */}
-                  <div>
-                    <div className="flex items-center gap-1.5 text-xs font-medium text-purple-400 mb-2">
-                      <ImageIcon size={13} />
-                      <span className="text-slate-300 font-medium">Dispatch Photo</span>
-                    </div>
-                    <div className="border border-dashed border-slate-700/80 hover:border-purple-500/70 bg-[#0b101b]/60 rounded-xl p-3 text-center relative transition-colors group cursor-pointer min-h-[140px] flex items-center justify-center">
-                      {dispatchPhotoPreview ? (
-                        <div className="relative w-full h-28">
-                          <img src={dispatchPhotoPreview} alt="Dispatch" className="w-full h-full object-contain rounded-lg" />
-                        </div>
-                      ) : (
-                        <div className="py-3 flex flex-col items-center justify-center">
-                          <UploadCloud className="text-purple-400/80 mb-2 group-hover:text-purple-300 transition-colors" size={26} />
-                          <span className="text-xs font-semibold text-slate-300">Click to upload</span>
-                          <span className="text-[10px] text-slate-500 mt-0.5">JPG, PNG, WEBP (Max 5MB)</span>
-                        </div>
-                      )}
-                      <input type="file" accept="image/*" onChange={(e) => handlePhotoUpload(e, 'dispatch')} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                    </div>
-                  </div>
+                  {/* Dispatch Photo */}
+                  <MarketingUploadField
+                    label="Dispatch Photo"
+                    icon={<ImageIcon size={13} className="text-purple-400 shrink-0" />}
+                    value={dispatchPhotoUrl}
+                    fileType="image"
+                    accept="image/*"
+                    storageFolder={`dispatch/campaigns/${campaign.id}/influencers/${influencer.id}`}
+                    filePrefix="dispatch_photo"
+                    isRequired={false}
+                    disabled={isSubmitting}
+                    onChange={(url) => setDispatchPhotoUrl(url)}
+                  />
                 </div>
               </div>
 
@@ -781,6 +855,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                       <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
                         <Truck size={13} className="text-slate-400 shrink-0" />
                         <span>Courier Partner</span>
+                        <span className="text-purple-400 font-bold ml-0.5" title="Required to confirm dispatch">*</span>
                       </label>
                       <select 
                         value={courierPartner} 
@@ -796,19 +871,26 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                         <option value="IThink Amazon">IThink Amazon</option>
                         <option value="IThink Delhivery">IThink Delhivery</option>
                       </select>
+                      {!courierPartner && (
+                        <p className="text-[11px] text-slate-500 mt-1">Required to confirm dispatch</p>
+                      )}
                     </div>
                     <div>
                       <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
                         <Hash size={13} className="text-slate-400 shrink-0" />
                         <span>Tracking ID</span>
+                        <span className="text-purple-400 font-bold ml-0.5" title="Required to confirm dispatch">*</span>
                       </label>
                       <input 
                         type="text" 
                         value={trackingId} 
                         onChange={e => setTrackingId(e.target.value)} 
-                        placeholder="Tracking ID"
+                        placeholder="Tracking ID / AWB"
                         className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition-colors" 
                       />
+                      {!trackingId && (
+                        <p className="text-[11px] text-slate-500 mt-1">Required to confirm dispatch</p>
+                      )}
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3.5">
@@ -816,12 +898,12 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                       <label className="flex items-center gap-1.5 text-xs font-medium text-slate-400 mb-1.5">
                         <Calendar size={13} className="text-slate-400 shrink-0" />
                         <span>Dispatch Date</span>
+                        <span className="text-purple-400 font-bold ml-0.5" title="Required for dispatch">*</span>
                       </label>
                       <input 
                         type="date" 
                         value={dispatchDate} 
                         onChange={e => handleDispatchDateChange(e.target.value)} 
-                        required 
                         className="w-full bg-[#0b101b] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-purple-500 [color-scheme:dark] transition-colors" 
                       />
                     </div>
@@ -851,7 +933,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                 <div>
                   <h4 className="text-sm font-bold text-white">Confirm Official Shipment Dispatch?</h4>
                   <p className="text-xs text-slate-300 mt-0.5">
-                    This will officially mark <span className="text-white font-semibold">{influencer.influencer_name || influencer.name}</span> as <strong className="text-emerald-400">Dispatched</strong> with {totalProducts} product(s) via {courierPartner || 'selected courier'}.
+                    This will officially mark <span className="text-white font-semibold">{influencer.influencer_name || influencer.name}</span> as <strong className="text-emerald-400">Dispatched</strong> {totalProducts > 0 ? `with ${totalProducts} product(s)` : '(without campaign products)'} via {courierPartner || 'selected courier'}.
                   </p>
                 </div>
               </div>
@@ -909,7 +991,18 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
               )}
             </div>
 
-            <div className="flex items-center justify-end gap-3">
+            <div className="flex items-center justify-end gap-3 flex-wrap">
+              {!isDispatchFormValid && !isSubmitting && (
+                <span className="text-[11px] text-amber-400/90 flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-lg">
+                  <AlertCircle size={12} className="shrink-0" />
+                  {!courierPartner && !trackingId ? 'Enter courier partner and tracking ID to confirm dispatch' :
+                   !courierPartner ? 'Select courier partner to confirm dispatch' :
+                   !trackingId ? 'Enter tracking ID to confirm dispatch' :
+                   !dispatchDate ? 'Select dispatch date to confirm dispatch' :
+                   'Fill required dispatch details to confirm'}
+                </span>
+              )}
+
               <button 
                 type="button" 
                 onClick={onClose} 
@@ -923,7 +1016,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                 <button 
                   type="button" 
                   onClick={() => executeDispatch('Dispatched')}
-                  disabled={isSubmitting || selectedProducts.length === 0} 
+                  disabled={isSubmitting || !isDispatchFormValid} 
                   className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-semibold shadow-lg shadow-emerald-600/30 flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 >
                   {isSubmitting ? (
@@ -942,7 +1035,7 @@ export const DispatchInfluencerModal: React.FC<DispatchInfluencerModalProps> = (
                 !showConfirmStep && (
                   <button 
                     type="submit" 
-                    disabled={isSubmitting || selectedProducts.length === 0} 
+                    disabled={isSubmitting || !isDispatchFormValid} 
                     className="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-semibold shadow-lg shadow-purple-600/30 flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   >
                     {isSubmitting ? (

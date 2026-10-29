@@ -32,20 +32,22 @@ export const CampaignDescriptionSection: React.FC<CampaignDescriptionSectionProp
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // Filters
+  // Filter: Product only (strictly isolated to current campaign.id)
   const [selectedProduct, setSelectedProduct] = useState<string>('All');
 
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [descriptionToEdit, setDescriptionToEdit] = useState<CampaignDescription | null>(null);
 
-  // Load descriptions
+  // Load descriptions strictly for this campaign
   const loadDescriptions = useCallback(async () => {
     setIsLoading(true);
     setFetchError(null);
     try {
       const data = await fetchCampaignDescriptions(campaign.id);
-      setDescriptions(data);
+      // Strict guard: only keep descriptions belonging to this campaign ID
+      const isolated = data.filter(d => String(d.campaign_id) === String(campaign.id));
+      setDescriptions(isolated);
     } catch (err: any) {
       console.error('Error loading campaign descriptions:', err);
       const msg = err?.message || 'Failed to load descriptions.';
@@ -97,11 +99,12 @@ export const CampaignDescriptionSection: React.FC<CampaignDescriptionSectionProp
     }
   };
 
-  // Filtered list
+  // Filtered list by product
   const filteredDescriptions = useMemo(() => {
     return descriptions.filter(d => {
       if (selectedProduct === 'All') return true;
-      return d.product.toLowerCase() === selectedProduct.toLowerCase();
+      return d.product.toLowerCase().includes(selectedProduct.toLowerCase()) || 
+             selectedProduct.toLowerCase().includes(d.product.toLowerCase());
     });
   }, [descriptions, selectedProduct]);
 
@@ -124,7 +127,7 @@ export const CampaignDescriptionSection: React.FC<CampaignDescriptionSectionProp
             </div>
             <div>
               <h3 className="text-base font-bold text-white leading-tight">Description Management</h3>
-              <p className="text-xs text-slate-400 mt-0.5">{campaign.campaign_name}</p>
+              <p className="text-xs text-purple-300 font-medium mt-0.5">{campaign.campaign_name}</p>
             </div>
           </div>
         </div>
@@ -144,23 +147,26 @@ export const CampaignDescriptionSection: React.FC<CampaignDescriptionSectionProp
 
       {/* Filters Bar & Results Summary */}
       <div className="bg-[#0b1329] border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
-            <Filter size={13} className="text-purple-400" />
-            <span>Product:</span>
-          </span>
-          <select
-            value={selectedProduct}
-            onChange={(e) => setSelectedProduct(e.target.value)}
-            className="bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors cursor-pointer w-full sm:w-auto"
-          >
-            <option value="All">All Products</option>
-            {SCRIPT_PRODUCTS.map((prod) => (
-              <option key={prod} value={prod}>
-                {prod}
-              </option>
-            ))}
-          </select>
+        <div className="flex items-center gap-3 w-full sm:w-auto flex-wrap">
+          {/* Filter: Product */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1.5">
+              <Filter size={13} className="text-purple-400" />
+              <span>Product:</span>
+            </span>
+            <select
+              value={selectedProduct}
+              onChange={(e) => setSelectedProduct(e.target.value)}
+              className="bg-[#070c18] border border-slate-700/80 focus:border-purple-500 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-colors cursor-pointer w-full sm:w-auto"
+            >
+              <option value="All">All Products</option>
+              {SCRIPT_PRODUCTS.map((prod) => (
+                <option key={prod} value={prod}>
+                  {prod}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Count & Refresh */}
@@ -198,41 +204,50 @@ export const CampaignDescriptionSection: React.FC<CampaignDescriptionSectionProp
           <button
             type="button"
             onClick={loadDescriptions}
-            className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 cursor-pointer"
+            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white transition-colors"
           >
             Try Again
           </button>
         </div>
       ) : filteredDescriptions.length === 0 ? (
-        /* Empty State */
-        <div className="bg-[#0b1329]/60 border border-slate-800/90 rounded-2xl p-12 sm:p-16 flex flex-col items-center justify-center text-center shadow-sm">
-          <div className="w-16 h-16 rounded-2xl bg-purple-600/10 border border-purple-500/30 text-purple-400 flex items-center justify-center mb-4 shadow-inner">
-            {descriptions.length === 0 ? <FileText size={32} /> : <SearchX size={32} />}
+        <div className="bg-[#0b1329]/60 border border-slate-800/80 rounded-2xl p-16 flex flex-col items-center justify-center text-center shadow-sm">
+          <div className="w-12 h-12 rounded-2xl bg-purple-600/10 border border-purple-500/20 text-purple-400 flex items-center justify-center mb-4">
+            {descriptions.length === 0 ? <FileText size={24} /> : <SearchX size={24} />}
           </div>
-          <h4 className="text-base sm:text-lg font-bold text-white mb-1.5">
-            {descriptions.length === 0 ? 'No descriptions created yet' : 'No descriptions found'}
+          <h4 className="text-base font-bold text-slate-200">
+            {descriptions.length === 0 ? 'No descriptions found for this campaign' : 'No matching descriptions'}
           </h4>
-          <p className="text-xs sm:text-sm text-slate-400 max-w-md mb-6 leading-relaxed">
+          <p className="text-xs text-slate-400 max-w-sm mt-1.5 mb-5">
             {descriptions.length === 0
-              ? `Get started by creating your first product description for ${campaign.campaign_name}.`
-              : 'No descriptions match the selected product filter. Try selecting another product or create a new description.'}
+              ? 'Descriptions created here will be saved specifically for this campaign.'
+              : 'Try adjusting your product filter to see other saved descriptions.'}
           </p>
-          <button
-            type="button"
-            onClick={handleOpenCreate}
-            className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-md shadow-purple-900/25 cursor-pointer"
-          >
-            <Plus size={16} />
-            <span>Create Description</span>
-          </button>
+          {descriptions.length === 0 ? (
+            <button
+              type="button"
+              onClick={handleOpenCreate}
+              className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md shadow-purple-900/20 cursor-pointer"
+            >
+              <Plus size={15} />
+              <span>Create First Description</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setSelectedProduct('All')}
+              className="text-xs text-purple-400 hover:text-purple-300 font-semibold underline underline-offset-2 cursor-pointer"
+            >
+              Reset Filters
+            </button>
+          )}
         </div>
       ) : (
-        /* Cards Grid */
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filteredDescriptions.map((desc) => (
             <CampaignDescriptionCard
               key={desc.id}
               description={desc}
+              campaignName={campaign.campaign_name}
               onEdit={handleOpenEdit}
               onDelete={handleDelete}
             />
@@ -241,16 +256,15 @@ export const CampaignDescriptionSection: React.FC<CampaignDescriptionSectionProp
       )}
 
       {/* Create / Edit Modal */}
-      <CampaignDescriptionModal
-        isOpen={isModalOpen}
-        onClose={() => {
-          setIsModalOpen(false);
-          setDescriptionToEdit(null);
-        }}
-        campaign={campaign}
-        descriptionToEdit={descriptionToEdit}
-        onSuccess={handleModalSuccess}
-      />
+      {isModalOpen && (
+        <CampaignDescriptionModal
+          isOpen={isModalOpen}
+          onClose={() => setIsModalOpen(false)}
+          campaign={campaign}
+          descriptionToEdit={descriptionToEdit}
+          onSuccess={handleModalSuccess}
+        />
+      )}
     </div>
   );
 };

@@ -105,7 +105,11 @@ export function detectColumnMapping(headers: string[]): ColumnMapping {
 
   // 4. ADDRESS DETECTION
   const addressCandidates = [
-    'shipping address', 'shipping_address', 'shipping address 1', 'shipping address line 1',
+    'shipping address1', 'shipping_address1', 'shipping address 1', 'shipping address line 1',
+    'shipping street', 'shipping_street',
+    'shipping address', 'shipping_address',
+    'billing address1', 'billing_address1', 'billing address 1', 'billing address line 1',
+    'billing street', 'billing_street',
     'billing address', 'billing_address',
     'address', 'address1', 'address 1', 'address line 1', 'street'
   ];
@@ -252,6 +256,60 @@ export function detectColumnMapping(headers: string[]): ColumnMapping {
     const idx = lowerHeaders.findIndex(h => h === candidate);
     if (idx !== -1) {
       mapping.orderDate = cleanHeaders[idx];
+      break;
+    }
+  }
+
+  // 14. FULFILLMENT STATUS DETECTION
+  const fulfillmentCandidates = [
+    'fulfillment status', 'fulfillment_status', 'fulfillmentstatus',
+    'fulfilment status', 'fulfilment_status', 'fulfilmentstatus',
+    'fulfillments', 'fulfillment', 'fulfilment'
+  ];
+  for (const candidate of fulfillmentCandidates) {
+    const idx = lowerHeaders.findIndex(h => h === candidate);
+    if (idx !== -1) {
+      mapping.fulfillmentStatus = cleanHeaders[idx];
+      break;
+    }
+  }
+
+  // 15. FINANCIAL STATUS DETECTION
+  const financialCandidates = [
+    'financial status', 'financial_status', 'financialstatus'
+  ];
+  for (const candidate of financialCandidates) {
+    const idx = lowerHeaders.findIndex(h => h === candidate);
+    if (idx !== -1) {
+      mapping.financialStatus = cleanHeaders[idx];
+      break;
+    }
+  }
+
+  // 16. AWB / TRACKING NUMBER DETECTION
+  const awbCandidates = [
+    'tracking number', 'tracking_number', 'trackingnumber',
+    'tracking #', 'tracking#', 'tracking',
+    'awb', 'awb number', 'awb_number', 'awbno', 'awb no',
+    'waybill', 'consignment no', 'consignment_no'
+  ];
+  for (const candidate of awbCandidates) {
+    const idx = lowerHeaders.findIndex(h => h === candidate);
+    if (idx !== -1) {
+      mapping.awbNumber = cleanHeaders[idx];
+      break;
+    }
+  }
+
+  // 17. COURIER / CARRIER DETECTION
+  const courierCandidates = [
+    'carrier', 'courier', 'shipping company', 'shipping_company',
+    'shipping method', 'shipping_method', 'shipping partner', 'delivery partner'
+  ];
+  for (const candidate of courierCandidates) {
+    const idx = lowerHeaders.findIndex(h => h === candidate);
+    if (idx !== -1) {
+      mapping.courier = cleanHeaders[idx];
       break;
     }
   }
@@ -430,6 +488,16 @@ export function normalizeOrderId(val: any): string {
   let str = String(val).trim().replace(/[\r\n\t]/g, '');
   return str.replace(/^#+/, '').toLowerCase();
 }
+
+export const cleanOrderId = (val: any): string => {
+  if (val === null || val === undefined) return '';
+  let str = String(val).trim().replace(/[\r\n\t]/g, '');
+  if (str.startsWith('#')) str = str.slice(1).trim();
+  if ((str.startsWith('"') && str.endsWith('"')) || (str.startsWith("'") && str.endsWith("'"))) {
+    str = str.slice(1, -1).trim();
+  }
+  return str.replace(/^#+/, '');
+};
 
 export function normalizeIndianPhoneNumber(val: any): string {
   if (val === null || val === undefined) return '-';
@@ -982,7 +1050,18 @@ export function consolidateRawRows(
     };
 
     const customerName = getFirstVal(mapping.customerName, 'customer_name', orderId) || '-';
-    const address = getFirstVal(mapping.address) || '-';
+    let address = getFirstVal(mapping.address);
+    if (!address || address === '-') {
+      for (const r of rows) {
+        const obj = r.raw_data || r;
+        const candidate = obj['Shipping Street'] || obj['Shipping Address1'] || obj['Billing Street'] || obj['Billing Address1'] || obj['shipping street'] || obj['shipping address1'] || obj['address'] || obj['Address'] || '';
+        if (candidate && String(candidate).trim() && String(candidate).trim() !== '-') {
+          address = String(candidate).trim();
+          break;
+        }
+      }
+    }
+    address = address || '-';
     const rawState = getFirstVal(mapping.state);
     const state = normalizeState(rawState);
     const rawCity = getFirstVal(mapping.city);
@@ -1047,6 +1126,24 @@ export function consolidateRawRows(
       quantity: productQtyMap.get(prod)!
     }));
 
+    let rawFulfillmentStatus = getFirstVal(mapping.fulfillmentStatus);
+    if (!rawFulfillmentStatus) {
+      for (const r of rows) {
+        const obj = r.raw_data || r;
+        const candidate = obj['Fulfillment Status'] || obj['fulfillment_status'] || obj['Lineitem fulfillment status'] || '';
+        if (candidate && String(candidate).trim()) {
+          rawFulfillmentStatus = String(candidate).trim();
+          break;
+        }
+      }
+    }
+    const fulfillmentStatus = rawFulfillmentStatus ? rawFulfillmentStatus.toLowerCase().trim() : '';
+    const rawFinancialStatus = getFirstVal(mapping.financialStatus);
+    const financialStatus = rawFinancialStatus ? rawFinancialStatus.toLowerCase().trim() : '';
+    const rawAwb = getFirstVal(mapping.awbNumber);
+    const rawCourier = getFirstVal(mapping.courier);
+    const isFulfilled = fulfillmentStatus === 'fulfilled' || fulfillmentStatus === 'shipped' || fulfillmentStatus === 'delivered';
+
     const orderRecord: WebsiteConsolidatedOrder = {
       id: crypto.randomUUID(),
       order_id: orderId,
@@ -1073,7 +1170,12 @@ export function consolidateRawRows(
       data_conflict: dataConflict,
       conflict_details: conflictDetails || undefined,
       created_at: new Date().toISOString(),
-      items: orderItems
+      items: orderItems,
+      fulfillment_status: fulfillmentStatus || undefined,
+      financial_status: financialStatus || undefined,
+      awb_number: rawAwb || undefined,
+      courier: rawCourier || undefined,
+      fulfilled_date: isFulfilled ? orderDate : undefined
     };
 
     consolidatedOrders.push(orderRecord);

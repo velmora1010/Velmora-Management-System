@@ -48,9 +48,65 @@ import {
 import { isActiveStatus } from '../../utils/marketingUtils';
 import toast from 'react-hot-toast';
 
+/**
+ * Verified Shopify handles from Justmixx store (https://www.justmixx.com/products.json)
+ */
+export const VERIFIED_SHOPIFY_HANDLES: Record<string, string> = {
+  // Standard 12 products
+  'diy detergent liquid': 'diy-detergent-liquid',
+  'detergent': 'diy-detergent-liquid',
+  'diy dishwash liquid': 'diy-dishwash-liquid',
+  'dishwash': 'diy-dishwash-liquid',
+  'diy fabric conditioner': 'diy-fabric-conditioner-liquid',
+  'diy fabric conditioner liquid': 'diy-fabric-conditioner-liquid',
+  'fabric conditioner': 'diy-fabric-conditioner-liquid',
+  'comfort': 'diy-fabric-conditioner-liquid',
+  'kitchen cleaner': 'kitchen-cleaner',
+  'diy kitchen cleaner': 'kitchen-cleaner',
+  'bbc cleaner — brass, bronze & copper cleaner': 'bbc-cleaner-brass-bronze-copper-cleaner',
+  'bbc cleaner': 'bbc-cleaner-brass-bronze-copper-cleaner',
+  'diy bbc cleaner': 'bbc-cleaner-brass-bronze-copper-cleaner',
+  'diy bbc cleaner — brass, bronze & copper cleaner': 'bbc-cleaner-brass-bronze-copper-cleaner',
+  'handwash': 'handwash',
+  'diy handwash liquid': 'handwash',
+  'hand wash': 'handwash',
+  'floor cleaner': 'floor-cleaner',
+  'diy floor cleaner': 'floor-cleaner',
+  'glass cleaner': 'glass-cleaner',
+  'diy glass cleaner': 'glass-cleaner',
+  'bike shampoo': 'bike-shampoo',
+  'diy bike shampoo': 'bike-shampoo',
+  'car shampoo': 'car-shampoo',
+  'diy car shampoo': 'car-shampoo',
+  'bamboo kitchen towel': 'bamboo-kitchen-towel',
+  'snow foam sprayer — new product': 'snow-foam-sprayer',
+  'snow foam sprayer': 'snow-foam-sprayer'
+};
+
 export const getDefaultProductUrl = (prodName: string): string => {
   if (!prodName) return '';
-  const slug = prodName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const clean = prodName.trim().toLowerCase();
+
+  const mappedHandle = VERIFIED_SHOPIFY_HANDLES[clean];
+  if (mappedHandle) {
+    return `https://www.justmixx.com/products/${mappedHandle}`;
+  }
+
+  // Handle aliases & partial variations
+  if (clean.includes('detergent')) return 'https://www.justmixx.com/products/diy-detergent-liquid';
+  if (clean.includes('dishwash')) return 'https://www.justmixx.com/products/diy-dishwash-liquid';
+  if (clean.includes('fabric conditioner') || clean.includes('conditioner')) return 'https://www.justmixx.com/products/diy-fabric-conditioner-liquid';
+  if (clean.includes('kitchen towel') || clean.includes('bamboo')) return 'https://www.justmixx.com/products/bamboo-kitchen-towel';
+  if (clean.includes('bbc cleaner') || clean.includes('brass')) return 'https://www.justmixx.com/products/bbc-cleaner-brass-bronze-copper-cleaner';
+  if (clean.includes('kitchen cleaner')) return 'https://www.justmixx.com/products/kitchen-cleaner';
+  if (clean.includes('glass cleaner')) return 'https://www.justmixx.com/products/glass-cleaner';
+  if (clean.includes('floor cleaner')) return 'https://www.justmixx.com/products/floor-cleaner';
+  if (clean.includes('car shampoo')) return 'https://www.justmixx.com/products/car-shampoo';
+  if (clean.includes('bike shampoo')) return 'https://www.justmixx.com/products/bike-shampoo';
+  if (clean.includes('handwash')) return 'https://www.justmixx.com/products/handwash';
+  if (clean.includes('snow foam') || clean.includes('foam sprayer')) return 'https://www.justmixx.com/products/snow-foam-sprayer';
+
+  const slug = clean.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   return `https://www.justmixx.com/products/${slug}`;
 };
 
@@ -307,6 +363,7 @@ interface CampaignTrackingLinkModalProps {
   influencers: CampaignInfluencer[];
   linkToEdit?: InfluencerTrackingLink | null;
   defaultProduct?: string;
+  defaultMarketplace?: MarketplaceType;
   onSuccess: (savedLinks: InfluencerTrackingLink[]) => void;
 }
 
@@ -317,6 +374,7 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
   influencers,
   linkToEdit,
   defaultProduct,
+  defaultMarketplace,
   onSuccess
 }) => {
   // Modal State
@@ -324,7 +382,7 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
 
   // Form Fields: Unified Marketplace Selection
   const [selectedMarketplace, setSelectedMarketplace] = useState<MarketplaceType>('website');
-  const [selectedProduct, setSelectedProduct] = useState<string>('Kitchen Cleaner');
+  const [selectedProduct, setSelectedProduct] = useState<string>('DIY Detergent Liquid');
   const [productUrl, setProductUrl] = useState<string>(''); // For Website / Shopify
   const [destinationUrl, setDestinationUrl] = useState<string>(''); // For Amazon, Flipkart, Meesho
   const [customSlug, setCustomSlug] = useState<string>('');
@@ -421,39 +479,35 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
             setEditTrackingUrl(buildBrandedTrackingUrl(initialSlug));
           }
         } else {
-          setProductUrl(linkToEdit.base_product_url || getDefaultProductUrl(linkToEdit.product || 'Kitchen Cleaner'));
+          setProductUrl(linkToEdit.base_product_url || getDefaultProductUrl(linkToEdit.product || SCRIPT_PRODUCTS[0]));
           setDestinationUrl('');
         }
         setSelectedVideoId(linkToEdit.video_number || 'Video 1');
       } else {
         // Defaults for batch generation
-        setSelectedMarketplace('website');
+        const initialMarketplace = defaultMarketplace || 'website';
+        setSelectedMarketplace(initialMarketplace);
         setCustomSlug('');
         const initialProd = (defaultProduct && defaultProduct !== 'All')
           ? defaultProduct
-          : 'Kitchen Cleaner';
+          : (SCRIPT_PRODUCTS[0] || 'DIY Detergent Liquid');
         setSelectedProduct(initialProd);
-        setProductUrl(getDefaultProductUrl(initialProd));
+        setProductUrl(initialMarketplace === 'website' ? getDefaultProductUrl(initialProd) : '');
         setDestinationUrl('');
         setSelectedVideoId('Video 1');
         setEditTrackingUrl('');
         setEditNotes('');
       }
     }
-  }, [isOpen, linkToEdit, defaultProduct]);
+  }, [isOpen, linkToEdit, defaultProduct, defaultMarketplace]);
 
   // Handle product change in batch form
   const handleProductChange = (newProd: string) => {
-    const prevDefault = getDefaultProductUrl(selectedProduct);
     setSelectedProduct(newProd);
     setValidationError(null);
 
-    // Update productUrl if Website is selected and URL was empty, previously default, or had an unencoded space
-    if (selectedMarketplace === 'website') {
-      if (!productUrl.trim() || productUrl.trim() === prevDefault || productUrl.includes('%20')) {
-        setProductUrl(getDefaultProductUrl(newProd));
-      }
-    }
+    // Automatically update the Website product URL to the newly selected product's verified Shopify URL
+    setProductUrl(getDefaultProductUrl(newProd));
   };
 
   // Active marketplace config
@@ -489,6 +543,9 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
       return buildBrandedTrackingUrl(sampleSlug);
     }
     const effectiveUrl = productUrl.trim() || getDefaultProductUrl(selectedProduct);
+    if (!effectiveUrl) {
+      return '';
+    }
     return buildInfluencerTrackingUrl(
       effectiveUrl,
       currentMarketplace.utmSource,
@@ -969,6 +1026,12 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                       <span className="text-slate-300 font-mono truncate">{cleanBaseUrl}</span>
                     </div>
                   )}
+                  {!productUrl.trim() && (
+                    <div className="mt-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300 flex items-center gap-1.5">
+                      <AlertCircle size={13} className="shrink-0 text-amber-400" />
+                      <span>Please enter a valid Shopify product URL.</span>
+                    </div>
+                  )}
                 </div>
               ) : selectedMarketplace === 'amazon' ? (
                 <div>
@@ -1154,7 +1217,7 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                 </div>
 
                 {/* Sample Preview Link */}
-                {samplePreviewUrl && (
+                {samplePreviewUrl ? (
                   <div className="bg-[#070c18] p-3 rounded-xl border border-slate-800 space-y-1.5">
                     <div className="flex items-center justify-between text-[11px] text-slate-400">
                       <span className="font-semibold text-slate-300 flex items-center gap-1.5">
@@ -1185,6 +1248,11 @@ export const CampaignTrackingLinkModal: React.FC<CampaignTrackingLinkModalProps>
                     }`}>
                       {samplePreviewUrl}
                     </p>
+                  </div>
+                ) : (
+                  <div className="bg-[#070c18] p-3 rounded-xl border border-slate-800/80 text-[11px] text-slate-400 flex items-center gap-2">
+                    <AlertCircle size={14} className="text-amber-400 shrink-0" />
+                    <span>Enter a valid product destination URL above to preview the generated tracking link.</span>
                   </div>
                 )}
               </div>

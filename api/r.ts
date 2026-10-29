@@ -1,3 +1,14 @@
+
+function normalizeTrackingSlug(input?: string | null): string {
+  if (!input) return '';
+  let str = String(input).trim();
+  if (str.includes('/')) {
+    const cleanPath = str.split('?')[0].split('#')[0];
+    const parts = cleanPath.split('/').filter(Boolean);
+    str = parts[parts.length - 1] || '';
+  }
+  return str.replace(/^#+/, '').trim().toLowerCase();
+}
 import type { IncomingMessage, ServerResponse } from 'http';
 
 // Allowed marketplace domains to prevent open-redirect vulnerabilities
@@ -132,10 +143,6 @@ function parseCookies(cookieHeader?: string): Record<string, string> {
 const DEFAULT_SUPABASE_URL = 'https://utusdosvijjuxtowzhta.supabase.co';
 const DEFAULT_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV0dXNkb3N2aWpqdXh0b3d6aHRhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MjA4NDE5MiwiZXhwIjoyMDk3NjYwMTkyfQ.U2lv4o8wF1G56B_WoXQADqRTuJEjdYSKXPDQMlJHHA4';
 
-// Default Upstash Redis credentials (fallback for persistent atomic click counter)
-const DEFAULT_UPSTASH_REDIS_URL = 'https://still-griffon-217114.upstash.io';
-const DEFAULT_UPSTASH_REDIS_TOKEN = 'gQAAAAAAA1AaAQIgcDE4N2EzMzUyNWVhNzQ0MjZiOWEyOTk2YTU5M2IxMmFlOA';
-
 export default async function handler(
   req: IncomingMessage & { query?: Record<string, string> },
   res: ServerResponse
@@ -161,9 +168,28 @@ export default async function handler(
     return;
   }
 
-  const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || DEFAULT_UPSTASH_REDIS_URL;
-  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || DEFAULT_UPSTASH_REDIS_TOKEN;
-  const isRedisConfigured = Boolean(redisUrl && redisToken);
+  let redisUrl = (
+    process.env.UPSTASH_REDIS_REST_URL || 
+    process.env.KV_REST_API_URL || 
+    process.env.UPSTASH_URL || 
+    process.env.REDIS_URL || 
+    ''
+  ).trim();
+  const redisToken = (
+    process.env.UPSTASH_REDIS_REST_TOKEN || 
+    process.env.KV_REST_API_TOKEN || 
+    process.env.UPSTASH_TOKEN || 
+    process.env.REDIS_TOKEN || 
+    ''
+  ).trim();
+  if (redisUrl && !redisUrl.startsWith('http://') && !redisUrl.startsWith('https://')) {
+    redisUrl = `https://${redisUrl}`;
+  }
+  const isRedisConfigured = Boolean(
+    redisUrl && 
+    redisToken && 
+    !redisUrl.includes('still-griffon-217114.upstash.io')
+  );
 
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
   let canonicalLinkId = isUuid ? identifier : '';
@@ -344,24 +370,83 @@ export default async function handler(
   const isDuplicateClick = Boolean(cookies[dedupeCookieKey]);
   const isBotRequest = isBot(userAgent);
 
-  // 7. Increment persistent atomic counter in Redis if genuine visitor
-  if (isRedisConfigured && !isBotRequest && !isDuplicateClick) {
-    try {
-      const incrRes = await fetch(redisUrl, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${redisToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(['INCR', `click:${canonicalLinkId}`])
-      });
-      if (incrRes.ok) {
-        const data = await incrRes.json();
-        console.log(`[Tracking Redirect] Incremented click for ${canonicalLinkId} (via ${identifier}), new count: ${data?.result}`);
-      }
-    } catch (err) {
-      console.error('[Tracking Redirect] Failed to increment click counter in Redis:', err);
+  // 7. Increment persistent atomic counter if genuine visitor
+  // Atomically increments counter for both the specific slug (e.g. his1-v2) and canonical ID (UUID)
+  if (!isBotRequest && !isDuplicateClick) {
+    const rawKeys = Array.from(new Set([
+      identifier ? identifier.toLowerCase() : null,
+      canonicalLinkId ? String(canonicalLinkId).trim() : null
+    ].filter(Boolean))) as string[];
+
+    const incrementTasks: Promise<any>[] = [];
+
+    // Upstash / KV Redis increment (if configured)
+    if (isRedisConfigured) {
+      incrementTasks.push(
+        Promise.all(
+          rawKeys.map(key =>
+            fetch(redisUrl, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${redisToken}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(['INCR', `click:${key}`])
+            }).then(r => r.json()).then(d => {
+              console.log(`[Tracking Redirect] Redis incremented click:${key} ->`, d?.result);
+            }).catch(err => {
+              console.warn(`[Tracking Redirect] Redis INCR failed for ${key}:`, err?.message || err);
+            })
+          )
+        )
+      );
     }
+
+    // Supabase persistent counter increment (always active fallback & primary sync)
+    incrementTasks.push(
+      (async () => {
+        try {
+          const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || DEFAULT_SUPABASE_URL;
+          const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_KEY;
+
+          const getRes = await fetch(`${supabaseUrl}/rest/v1/system_settings?setting_key=eq.tracking_link_clicks&select=setting_value`, {
+            headers: {
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`
+            }
+          });
+
+          let currentCounts: Record<string, number> = {};
+          if (getRes.ok) {
+            const data = await getRes.json();
+            currentCounts = (data && data[0]?.setting_value) || {};
+          }
+
+          rawKeys.forEach(key => {
+            currentCounts[key] = (Number(currentCounts[key]) || 0) + 1;
+          });
+
+          await fetch(`${supabaseUrl}/rest/v1/system_settings?setting_key=eq.tracking_link_clicks`, {
+            method: 'PATCH',
+            headers: {
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              setting_value: currentCounts,
+              updated_at: new Date().toISOString()
+            })
+          });
+          console.log(`[Tracking Redirect] Supabase incremented clicks for keys: ${rawKeys.join(', ')}`);
+        } catch (supaErr: any) {
+          console.error('[Tracking Redirect] Supabase click increment error:', supaErr?.message || supaErr);
+        }
+      })()
+    );
+
+    // CRITICAL: Await all increment promises before redirecting
+    await Promise.all(incrementTasks);
   }
 
   // 8. Set short deduplication cookie to protect against double counting from fast page refreshes

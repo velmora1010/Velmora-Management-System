@@ -51,15 +51,23 @@ export const MainLayout = () => {
     navigate('/login', { replace: true });
   };
 
+  const closeSwitchModal = () => {
+    setIsSwitchUserOpen(false);
+    setSwitchPassword('');
+    setSelectedAccount('');
+    setSwitchError(null);
+  };
+
   const handleSwitchUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedAccount || !switchPassword) return;
+    const targetEmail = selectedAccount.trim().toLowerCase();
+    if (!targetEmail || !switchPassword) return;
 
     setIsSwitching(true);
     setSwitchError(null);
     try {
       const { error } = await supabase.auth.signInWithPassword({
-        email: selectedAccount.trim().toLowerCase(),
+        email: targetEmail,
         password: switchPassword,
       });
 
@@ -67,10 +75,8 @@ export const MainLayout = () => {
         setSwitchError(error.message || 'Invalid login credentials');
         toast.error(error.message || 'Invalid password');
       } else {
-        toast.success(`Switched account to ${selectedAccount}`);
-        setIsSwitchUserOpen(false);
-        setSwitchPassword('');
-        setSelectedAccount('');
+        toast.success(`Switched account to ${targetEmail}`);
+        closeSwitchModal();
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to switch user';
@@ -259,14 +265,29 @@ export const MainLayout = () => {
                 </div>
               </div>
               <button 
-                onClick={() => { setIsSwitchUserOpen(false); setSwitchPassword(''); setSwitchError(null); }}
+                type="button"
+                onClick={closeSwitchModal}
                 className="text-slate-400 hover:text-white text-lg font-bold p-1 rounded-lg hover:bg-slate-800 transition-colors"
+                title="Close"
               >
                 ✕
               </button>
             </div>
 
             <form onSubmit={handleSwitchUser} className="space-y-4">
+              {/* Accessible hidden username input so browser credential managers associate credentials with the selected account */}
+              <input
+                type="email"
+                name="username"
+                id="switch-account-username"
+                autoComplete="username"
+                value={selectedAccount}
+                readOnly
+                tabIndex={-1}
+                aria-hidden="true"
+                className="sr-only"
+              />
+
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Select Account</label>
                 <div className="space-y-2">
@@ -277,8 +298,11 @@ export const MainLayout = () => {
                       <div
                         key={accEmail}
                         onClick={() => {
-                          setSelectedAccount(accEmail);
-                          setSwitchError(null);
+                          if (selectedAccount !== accEmail) {
+                            setSelectedAccount(accEmail);
+                            setSwitchPassword('');
+                            setSwitchError(null);
+                          }
                         }}
                         className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
                           isSelected
@@ -305,16 +329,19 @@ export const MainLayout = () => {
 
               {selectedAccount && (
                 <div className="space-y-2 pt-2">
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                  <label htmlFor="switch-account-password" className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
                     Password for {selectedAccount}
                   </label>
                   <input
                     type="password"
+                    name="password"
+                    id="switch-account-password"
+                    autoComplete="current-password"
                     required
                     value={switchPassword}
                     onChange={(e) => setSwitchPassword(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 text-white text-sm rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 block p-3 transition-colors"
-                    placeholder="Enter password"
+                    placeholder={`Enter password for ${selectedAccount}`}
                     autoFocus
                   />
                 </div>
@@ -329,7 +356,7 @@ export const MainLayout = () => {
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
                 <button
                   type="button"
-                  onClick={() => { setIsSwitchUserOpen(false); setSwitchPassword(''); setSwitchError(null); }}
+                  onClick={closeSwitchModal}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition-colors"
                 >
                   Cancel

@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { Campaign, CampaignInfluencer, InfluencerPlatformDetail, InfluencerPricing, InfluencerProduct, InfluencerBrandPerformance, InfluencerPostDate } from '../../types';
-import { Save, X, Plus, Upload, Trash2, AlertTriangle, Loader2, Video, Calendar } from 'lucide-react';
+import { Save, X, Plus, Upload, Trash2, AlertTriangle, Loader2, Video, Calendar, CheckCircle2, Eye, RefreshCw } from 'lucide-react';
 import { useCampaignInfluencers, notifyInfluencerChange, notifyPostDateChange } from '../../hooks/marketing/useCampaignInfluencers';
 import { UploadPlatformDetailsModal } from '../../components/marketing/UploadPlatformDetailsModal';
 import { ImportAutoDmModal } from '../../components/marketing/ImportAutoDmModal';
 import { supabase } from '../../lib/supabase';
+import { supabaseAdmin } from '../../lib/supabaseAdmin';
 import { SUPABASE_TABLES } from '../../config/supabaseTables';
 import toast from 'react-hot-toast';
 import { getDepartmentNavigation, saveDepartmentNavigation } from '../../utils/navigationPersistence';
@@ -856,24 +857,48 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
       const fileName = `${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${fileExt}`;
       const filePath = `${fileName}`;
 
-      const { error: uploadErr } = await supabase.storage
-        .from('influencer-profiles')
-        .upload(filePath, file);
+      let uploadSuccess = false;
+      let lastErr: any = null;
 
-      if (uploadErr) throw uploadErr;
+      try {
+        const { error: adminErr } = await supabaseAdmin.storage
+          .from('influencer-profiles')
+          .upload(filePath, file, { cacheControl: '3600', upsert: true });
+        if (!adminErr) {
+          uploadSuccess = true;
+        } else {
+          lastErr = adminErr;
+        }
+      } catch (e) {
+        lastErr = e;
+      }
 
-      const { data: publicData } = supabase.storage
+      if (!uploadSuccess) {
+        const { error: uploadErr } = await supabase.storage
+          .from('influencer-profiles')
+          .upload(filePath, file, { cacheControl: '3600', upsert: true });
+        if (uploadErr) throw lastErr || uploadErr;
+      }
+
+      const { data: publicData } = supabaseAdmin.storage
         .from('influencer-profiles')
         .getPublicUrl(filePath);
 
+      const finalUrl = publicData?.publicUrl || '';
+      if (!finalUrl) {
+        throw new Error('Failed to generate public URL for uploaded image');
+      }
+
       setFormState(prev => ({
         ...prev,
-        basicInfo: { ...prev.basicInfo, profile_file_url: publicData.publicUrl }
+        basicInfo: { ...prev.basicInfo, profile_file_url: finalUrl }
       }));
       setUploadedFileName(file.name);
+      toast.success('Profile image uploaded successfully.');
     } catch (err: unknown) {
       console.error("Upload error:", err);
       setUploadError(err instanceof Error ? err.message : 'Upload failed');
+      toast.error('Failed to upload image: ' + (err instanceof Error ? err.message : 'Storage error'));
     } finally {
       setIsUploadingImage(false);
     }
@@ -1702,37 +1727,89 @@ export const AddCampaignInfluencer: React.FC<AddCampaignInfluencerProps> = ({ ca
               
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm text-slate-400 mb-1">Influencer Profile Image</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-sm text-slate-400">Influencer Profile Image</label>
+                    {basicInfo.profile_file_url && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                        <CheckCircle2 size={10} /> Upload complete
+                      </span>
+                    )}
+                  </div>
                   <div className="flex items-center gap-3">
-                    <label className="cursor-pointer px-4 py-2 bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 rounded-lg text-sm transition-colors">
-                      {isUploadingImage ? 'Uploading...' : 'Choose File'}
-                      <input 
-                        type="file" 
-                        accept="image/*" 
-                        onChange={handleImageUpload} 
-                        className="hidden" 
-                        disabled={isUploadingImage}
-                      />
-                    </label>
-                    {uploadedFileName ? (
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-emerald-400 truncate max-w-[150px]" title={uploadedFileName}>
-                          {uploadedFileName}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setIsRemoveImageModalOpen(true)}
-                          className="px-2.5 py-1 bg-red-950/60 hover:bg-red-900 border border-red-800/40 text-red-300 hover:text-red-200 rounded text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer shrink-0"
-                          title="Remove profile image"
+                    {basicInfo.profile_file_url ? (
+                      <div className="flex items-center gap-3 p-2 bg-[#0b101b] border border-slate-700 rounded-xl">
+                        <a 
+                          href={basicInfo.profile_file_url} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="relative w-12 h-12 rounded-lg overflow-hidden bg-black/60 border border-slate-700 group block shrink-0"
+                          title="Click to view full image"
                         >
-                          <Trash2 size={12} /> Remove Image
-                        </button>
+                          <img 
+                            src={basicInfo.profile_file_url} 
+                            alt="Profile" 
+                            className="w-full h-full object-cover" 
+                          />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                            <Eye size={14} className="text-white" />
+                          </div>
+                        </a>
+                        <div className="min-w-0 pr-1">
+                          <span className="text-xs text-slate-200 font-semibold block truncate max-w-[150px]" title={uploadedFileName || 'Profile Image'}>
+                            {uploadedFileName || 'Profile Image'}
+                          </span>
+                          <span className="text-[10px] text-emerald-400 font-medium block">
+                            Uploaded
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0 ml-auto">
+                          <label className="cursor-pointer p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs transition-colors border border-slate-700" title="Replace image">
+                            <RefreshCw size={12} />
+                            <input 
+                              type="file" 
+                              accept="image/*" 
+                              onChange={handleImageUpload} 
+                              className="hidden" 
+                              disabled={isUploadingImage}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setIsRemoveImageModalOpen(true)}
+                            className="p-1.5 bg-red-950/60 hover:bg-red-900 border border-red-800/40 text-red-300 hover:text-red-200 rounded-lg text-xs transition-colors cursor-pointer"
+                            title="Remove profile image"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
                       </div>
                     ) : (
-                      <span className="text-sm text-slate-500 italic">No image selected</span>
+                      <>
+                        <label className="cursor-pointer px-4 py-2 bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-300 rounded-lg text-sm transition-colors flex items-center gap-2">
+                          {isUploadingImage ? (
+                            <>
+                              <Loader2 size={14} className="animate-spin text-purple-400" />
+                              <span>Uploading...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Upload size={14} />
+                              <span>Choose Image</span>
+                            </>
+                          )}
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            onChange={handleImageUpload} 
+                            className="hidden" 
+                            disabled={isUploadingImage}
+                          />
+                        </label>
+                        <span className="text-xs text-slate-500 italic">No image selected</span>
+                      </>
                     )}
                     {uploadError && (
-                      <span className="text-sm text-red-400 truncate max-w-[150px]" title={uploadError}>
+                      <span className="text-xs text-red-400 truncate max-w-[150px]" title={uploadError}>
                         {uploadError}
                       </span>
                     )}

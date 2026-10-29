@@ -234,6 +234,8 @@ export interface CampaignScript {
   id: string;
   campaign_id: string;
   product: string;
+  product_ids?: string[];
+  product_scripts?: Record<string, { model_script: string; key_points: string }>;
   language: string;
   model_script: string;
   key_points: string;

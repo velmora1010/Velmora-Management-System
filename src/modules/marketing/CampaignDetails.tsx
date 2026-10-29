@@ -434,7 +434,13 @@ export const CampaignDetails: React.FC<CampaignDetailsProps> = ({ campaign, onBa
                  onMoveToStatus={handleMoveToStatus} 
                />;
       case 'status-tracking':
-        return <CampaignStatusTracking campaign={campaign} onBack={() => handleViewChange('overview')} />;
+        return (
+          <CampaignStatusTracking 
+            campaign={campaign} 
+            onBack={() => handleViewChange('overview')} 
+            onNavigateToTrackingLinks={() => handleViewChange('tracking-link')}
+          />
+        );
       case 'script':
         return <CampaignScriptSection campaign={campaign} onBack={() => handleViewChange('overview')} />;
       case 'description':

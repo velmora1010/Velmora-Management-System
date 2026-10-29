@@ -23,11 +23,39 @@ function saveLocalDescriptions(campaignId: string | number, items: CampaignDescr
 }
 
 /**
- * Fetch all descriptions for a campaign
+ * Fetch all descriptions across all campaigns
+ */
+export async function fetchAllCampaignDescriptions(): Promise<CampaignDescription[]> {
+  const client = supabaseAdmin || supabase;
+
+  try {
+    const { data, error } = await client
+      .from(SUPABASE_TABLES.campaignDescriptions)
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.warn('Supabase fetchAllCampaignDescriptions error:', error.message);
+      return [];
+    }
+
+    return (data || []) as CampaignDescription[];
+  } catch (err) {
+    console.warn('Exception in fetchAllCampaignDescriptions:', err);
+    return [];
+  }
+}
+
+/**
+ * Fetch all descriptions for a campaign or all campaigns
  */
 export async function fetchCampaignDescriptions(
-  campaignId: string | number
+  campaignId?: string | number | 'all'
 ): Promise<CampaignDescription[]> {
+  if (!campaignId || campaignId === 'all') {
+    return fetchAllCampaignDescriptions();
+  }
+
   const cleanId = String(campaignId).trim();
   const client = supabaseAdmin || supabase;
 
@@ -48,9 +76,7 @@ export async function fetchCampaignDescriptions(
       return data as CampaignDescription[];
     }
 
-    // Check if we have local cached records
-    const local = getLocalDescriptions(cleanId);
-    return local;
+    return getLocalDescriptions(cleanId);
   } catch (err) {
     console.warn('Exception in fetchCampaignDescriptions, using local fallback:', err);
     return getLocalDescriptions(cleanId);
@@ -110,6 +136,7 @@ export async function createCampaignDescription(
 }
 
 export interface UpdateDescriptionParams {
+  campaign_id?: string | number;
   product: string;
   description: string;
 }
@@ -126,11 +153,14 @@ export async function updateCampaignDescription(
   const client = supabaseAdmin || supabase;
   const now = new Date().toISOString();
 
-  const updates = {
+  const updates: any = {
     product: params.product.trim(),
     description: params.description.trim(),
     updated_at: now
   };
+  if (params.campaign_id !== undefined) {
+    updates.campaign_id = String(params.campaign_id).trim();
+  }
 
   try {
     const { data, error } = await client
@@ -171,9 +201,9 @@ export async function updateCampaignDescription(
  */
 export async function deleteCampaignDescription(
   id: string,
-  campaignId: string | number
+  campaignId?: string | number
 ): Promise<void> {
-  const cleanCampaignId = String(campaignId).trim();
+  const cleanCampaignId = campaignId ? String(campaignId).trim() : '';
   const client = supabaseAdmin || supabase;
 
   try {
