@@ -15,6 +15,7 @@ import {
   CITY_ALIASES,
   STATE_ALIASES,
 } from '../../../data/indiaLocations';
+import { normalizeShopifyFulfillmentStatus } from '../../../utils/logisticsOrderUtils';
 
 // ============================================================================
 // 1. COLUMN MATCHING UTILITIES WITH PRECISE HEADER DETECTION
@@ -1312,21 +1313,28 @@ export function consolidateRawRows(
     if (!rawFulfillmentStatus) {
       for (const r of rows) {
         const obj = r.raw_data || r;
-        const candidate = obj['Fulfillment Status'] || obj['fulfillment_status'] || obj['Lineitem fulfillment status'] || '';
+        const candidate = obj['Fulfillment Status'] || obj['fulfillment_status'] || obj['Fulfilment Status'] || obj['Lineitem fulfillment status'] || '';
         if (candidate && String(candidate).trim()) {
           rawFulfillmentStatus = String(candidate).trim();
           break;
         }
       }
     }
-    const fulfillmentStatus = isCancelled 
-      ? 'cancelled' 
-      : (rawFulfillmentStatus ? rawFulfillmentStatus.toLowerCase().trim() : '');
+
+    const normalizedFulfillment = normalizeShopifyFulfillmentStatus(rawFulfillmentStatus);
     const rawFinancialStatus = getFirstVal(mapping.financialStatus);
     const financialStatus = rawFinancialStatus ? rawFinancialStatus.toLowerCase().trim() : '';
     const rawAwb = getFirstVal(mapping.awbNumber);
     const rawCourier = getFirstVal(mapping.courier);
-    const isFulfilled = !isCancelled && (fulfillmentStatus === 'fulfilled' || fulfillmentStatus === 'shipped' || fulfillmentStatus === 'delivered');
+    
+    // Financial status pending just means payment pending (e.g. COD), NEVER unfulfilled!
+    // Fulfillment status must remain strictly independent of financial status.
+    const isFulfilled = !isCancelled && (normalizedFulfillment === 'Fulfilled' || rawFulfillmentStatus?.toLowerCase().trim() === 'fulfilled');
+    const isPartiallyFulfilled = !isCancelled && (normalizedFulfillment === 'Partially Fulfilled');
+
+    const fulfillmentStatus = isCancelled 
+      ? 'Cancelled' 
+      : (normalizedFulfillment || 'Unfulfilled');
 
     const orderRecord: WebsiteConsolidatedOrder = {
       id: crypto.randomUUID(),
@@ -1355,9 +1363,9 @@ export function consolidateRawRows(
       conflict_details: conflictDetails || undefined,
       created_at: new Date().toISOString(),
       items: orderItems,
-      order_status: isCancelled ? 'CANCELLED' : (isFulfilled ? 'FULFILLED' : 'CONFIRMED'),
-      fulfillment_status: isCancelled ? 'cancelled' : (fulfillmentStatus || undefined),
-      financial_status: financialStatus || undefined,
+      order_status: isCancelled ? 'CANCELLED' : (isFulfilled ? 'FULFILLED' : (isPartiallyFulfilled ? 'PARTIAL_FULFILLED' : 'CONFIRMED')),
+      fulfillment_status: isCancelled ? 'Cancelled' : fulfillmentStatus,
+      financial_status: financialStatus || (paymentMode === 'PREPAID' ? 'paid' : 'pending'),
       awb_number: rawAwb || undefined,
       courier: rawCourier || undefined,
       fulfilled_date: isFulfilled ? orderDate : undefined,

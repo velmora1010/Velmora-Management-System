@@ -716,12 +716,16 @@ export const WebsiteOrders: React.FC = () => {
                   const isCancelledOrder = o.order_status === 'CANCELLED' || o.cancellation?.status === 'CANCELLED' || (o.fulfillment_status || '').toLowerCase().trim() === 'cancelled';
                   const rawFulfillment = (o.fulfillment_status || '').toLowerCase().trim();
                   const rawDispatch = (o.dispatch_status || '').toUpperCase().trim();
-                  const isUnfulfilled = !isCancelledOrder && (
-                    rawFulfillment === 'unfulfilled' || 
-                    rawFulfillment.includes('unfulfill') || 
-                    (!rawFulfillment.includes('fulfill') && !rawFulfillment.includes('deliv') && !rawFulfillment.includes('ship') && rawDispatch !== 'DELIVERED')
+                  const isFulfilled = !isCancelledOrder && (
+                    rawFulfillment === 'fulfilled' || 
+                    rawFulfillment === 'shipped' || 
+                    o.order_status === 'FULFILLED' ||
+                    rawDispatch === 'DELIVERED'
                   );
-                  const isFulfilled = !isCancelledOrder && !isUnfulfilled;
+                  const isPartiallyFulfilled = !isCancelledOrder && !isFulfilled && (
+                    rawFulfillment.includes('partial')
+                  );
+                  const isUnfulfilled = !isCancelledOrder && !isFulfilled && !isPartiallyFulfilled;
 
                   return (
                     <tr 
@@ -819,9 +823,17 @@ export const WebsiteOrders: React.FC = () => {
                               ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
                               : isFulfilled
                               ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                              : 'bg-slate-800 text-slate-400 border border-slate-700'
+                              : isPartiallyFulfilled
+                              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                              : 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
                           }`}>
-                            {isCancelledOrder ? 'Cancelled' : (o.fulfillment_status || 'Unfulfilled')}
+                            {isCancelledOrder 
+                              ? 'Cancelled' 
+                              : (isFulfilled 
+                                  ? 'Fulfilled' 
+                                  : (isPartiallyFulfilled 
+                                      ? 'Partially Fulfilled' 
+                                      : (o.fulfillment_status || 'Unfulfilled')))}
                           </span>
                         </div>
                         {o.awb_number ? (

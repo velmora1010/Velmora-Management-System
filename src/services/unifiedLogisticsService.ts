@@ -225,7 +225,8 @@ import {
   parseOrderAmount, 
   normalizeOrderPhone,
   validateCourierAwb,
-  isDispatchedOrder
+  isDispatchedOrder,
+  normalizeShopifyFulfillmentStatus
 } from '../utils/logisticsOrderUtils';
 import { normalizeCourier } from '../config/courierConfig';
 
@@ -307,9 +308,9 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
     batchId: order.batchId,
     batchName: order.batchName,
     fulfillmentStatus: order.fulfillmentStatus,
-    sourceFulfillmentStatus: order.fulfillmentStatus || order.sourceFulfillmentStatus,
-    fulfilledDate: order.fulfilledDate || (order.fulfillmentStatus === 'fulfilled' ? (parsedDispatchDate.displayDate || parsedOrderDate.displayDate) : undefined),
-    isSourceFulfilled: (order.fulfillmentStatus || '').toLowerCase() === 'fulfilled' || order.stage === 'fulfilled',
+    sourceFulfillmentStatus: order.sourceFulfillmentStatus || order.fulfillmentStatus,
+    fulfilledDate: order.fulfilledDate || ((order.fulfillmentStatus || order.sourceFulfillmentStatus || '').toLowerCase() === 'fulfilled' ? (parsedDispatchDate.displayDate || parsedOrderDate.displayDate) : undefined),
+    isSourceFulfilled: (order.fulfillmentStatus || order.sourceFulfillmentStatus || '').toLowerCase() === 'fulfilled' || order.stage === 'fulfilled',
     financialStatus: order.financialStatus,
     stage: order.stage || 'order_data',
     workflowStage,
@@ -824,8 +825,12 @@ export const syncSalesUploadToLogistics = async (
                      seenInBatch.get(lowerId) ||
                      (baseId ? seenInBatch.get(baseId) : undefined);
 
-    const fStatus = (order.fulfillment_status || '').toLowerCase().trim();
-    const isFulfilled = fStatus === 'fulfilled' || fStatus === 'shipped' || fStatus === 'delivered';
+    const fStatusRaw = (order.fulfillment_status || '').toLowerCase().trim();
+    const isFulfilled = fStatusRaw === 'fulfilled' || 
+                        fStatusRaw === 'shipped' || 
+                        fStatusRaw === 'delivered' || 
+                        (order as any).stage === 'fulfilled' ||
+                        (order as any).order_status === 'FULFILLED';
     const cleanPhone = normalizePhoneNumber(order.phone);
 
     const hasRequiredInfo = !!(
@@ -855,13 +860,13 @@ export const syncSalesUploadToLogistics = async (
       if (isConfirmedCancelled) {
         stage = 'order_data';
         status = 'Cancelled';
-      } else if (order.stage === 'tracking' || (order.awb_number && order.stage !== 'active')) {
-        stage = 'tracking';
-        status = order.status || 'Awaiting Tracking Update';
       } else if (isFulfilled) {
         stage = 'fulfilled';
         status = 'Fulfilled';
         fulfilledCount++;
+      } else if (order.stage === 'tracking' || (order.awb_number && order.stage !== 'active')) {
+        stage = 'tracking';
+        status = order.status || 'Awaiting Tracking Update';
       } else if (!hasRequiredInfo) {
         stage = 'pending';
         status = 'Pending';
@@ -892,8 +897,8 @@ export const syncSalesUploadToLogistics = async (
         orderDate,
         orderDateDisplay,
         fulfilledDate,
-        fulfillmentStatus: isFulfilled ? 'fulfilled' : 'unfulfilled',
-        sourceFulfillmentStatus: isFulfilled ? 'fulfilled' : 'unfulfilled',
+        fulfillmentStatus: isFulfilled ? 'Fulfilled' : (fStatusRaw.includes('partial') ? 'Partially Fulfilled' : 'Unfulfilled'),
+        sourceFulfillmentStatus: isFulfilled ? 'Fulfilled' : (fStatusRaw.includes('partial') ? 'Partially Fulfilled' : 'Unfulfilled'),
         financialStatus: order.financial_status,
         batchId: order.batchId,
         batchName: order.batchName,
@@ -956,6 +961,18 @@ export const syncSalesUploadToLogistics = async (
       if (inWorkflow) {
         // STRICT RULE: Preserve dispatch preparation and tracking stages!
         preservedWorkflowCount++;
+        if (isFulfilled) {
+          patch.fulfillmentStatus = 'Fulfilled';
+          patch.sourceFulfillmentStatus = 'Fulfilled';
+          if (!existing.fulfilledDate) patch.fulfilledDate = fulfilledDate;
+        }
+      } else if (isFulfilled) {
+        patch.stage = 'fulfilled';
+        patch.status = 'Fulfilled';
+        patch.fulfillmentStatus = 'Fulfilled';
+        patch.sourceFulfillmentStatus = 'Fulfilled';
+        if (!existing.fulfilledDate) patch.fulfilledDate = fulfilledDate;
+        fulfilledCount++;
       } else if (order.stage === 'tracking' || order.awb_number) {
         patch.stage = 'tracking';
         patch.status = order.status || existing.status || 'Awaiting Tracking Update';
@@ -965,13 +982,6 @@ export const syncSalesUploadToLogistics = async (
       } else if (existing.stage === 'fulfilled') {
         patch.stage = 'fulfilled';
         patch.status = 'Fulfilled';
-      } else if (isFulfilled) {
-        patch.stage = 'fulfilled';
-        patch.status = 'Fulfilled';
-        patch.fulfillmentStatus = 'fulfilled';
-        patch.sourceFulfillmentStatus = 'fulfilled';
-        if (!existing.fulfilledDate) patch.fulfilledDate = fulfilledDate;
-        fulfilledCount++;
       } else if (existing.stage === 'pending' && hasRequiredInfo) {
         patch.stage = 'active';
         patch.status = 'Unfulfilled';
@@ -1130,8 +1140,28 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
       getCustomerOrderIdentifierVariants(so.order_id).forEach(v => validSalesOrderKeys.add(v.toLowerCase()));
     });
 
+    // Build map of fulfillment states from active sales orders
+    const salesOrderFulfillmentMap = new Map<string, { isFulfilled: boolean; fStatus: string }>();
+    activeSalesOrders.forEach(so => {
+      const c = cleanOrderId(so.order_id).toLowerCase();
+      const extra = so.extra_data || {};
+      const normExtraFStatus = normalizeShopifyFulfillmentStatus(extra.fulfillment_status);
+      const isSourceFulfilled = normExtraFStatus === 'Fulfilled' || 
+                                String(extra.fulfillment_status || '').toLowerCase() === 'fulfilled' ||
+                                so.order_status === 'FULFILLED' ||
+                                so.dispatch_status === 'DELIVERED';
+      const info = {
+        isFulfilled: isSourceFulfilled,
+        fStatus: isSourceFulfilled ? 'Fulfilled' : (normExtraFStatus || 'Unfulfilled')
+      };
+      if (c) salesOrderFulfillmentMap.set(c, info);
+      const b = extractCustomerOrderBaseId(so.order_id).toLowerCase();
+      if (b) salesOrderFulfillmentMap.set(b, info);
+    });
+
     // Reconcile Dexie: Any order in Dexie that does not exist in valid active sales orders from Supabase
     // or that matches a deleted/stale ID must be trashed/removed!
+    // Also, reconcile fulfillment states: if Sales has marked an order Fulfilled, promote Dexie record.
     const dexieAll = await db.logistics_orders.toArray();
     for (const rec of dexieAll) {
       if (!rec.id) continue;
@@ -1150,6 +1180,17 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
             status: 'Deleted',
             deletedAt: new Date().toISOString(),
             trashReason: isKnownStale ? 'Obsolete order purged from Logistics' : 'Synchronized with Supabase Sales orders'
+          });
+        }
+      } else {
+        const salesInfo = salesOrderFulfillmentMap.get(cId) || (bId ? salesOrderFulfillmentMap.get(bId) : undefined);
+        if (salesInfo?.isFulfilled && (rec.stage === 'active' || (rec.status || '').toLowerCase() === 'unfulfilled')) {
+          await db.logistics_orders.update(rec.id, {
+            stage: 'fulfilled',
+            status: 'Fulfilled',
+            fulfillmentStatus: 'Fulfilled',
+            sourceFulfillmentStatus: 'Fulfilled',
+            fulfilledDate: rec.fulfilledDate || rec.orderDateDisplay || rec.orderDate
           });
         }
       }
@@ -1190,26 +1231,26 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
                                    extra.fulfillment_status === 'cancelled';
       const isPendingCancellation = cData.status === 'PENDING_LOGISTICS_APPROVAL';
 
-      const hasShipment = !!existingShipment;
+      const normExtraFStatus = normalizeShopifyFulfillmentStatus(extra.fulfillment_status);
+      const isSourceFulfilled = normExtraFStatus === 'Fulfilled' || 
+                                String(extra.fulfillment_status || '').toLowerCase() === 'fulfilled' ||
+                                so.order_status === 'FULFILLED' ||
+                                so.dispatch_status === 'DELIVERED';
+
+      const hasShipment = !isConfirmedCancelled && !!existingShipment;
       const isDispatched = !isConfirmedCancelled && (hasShipment || (so.dispatch_status === 'DISPATCHED' && !!extra.awb_number));
-      const isFulfilled = !isConfirmedCancelled && !isDispatched && (
-        extra.fulfillment_status === 'fulfilled' ||
-        extra.fulfillment_status === 'shipped' ||
-        so.order_status === 'FULFILLED' ||
-        so.dispatch_status === 'DELIVERED'
-      );
 
       const fStatus = isConfirmedCancelled 
         ? 'cancelled' 
-        : (isFulfilled ? 'fulfilled' : (isDispatched ? 'dispatched' : 'unfulfilled'));
+        : (isSourceFulfilled ? 'Fulfilled' : (normExtraFStatus === 'Partially Fulfilled' ? 'Partially Fulfilled' : (isDispatched ? 'dispatched' : 'Unfulfilled')));
 
       const status = isConfirmedCancelled 
         ? 'Cancelled' 
-        : (existingShipment?.status || (isDispatched ? 'Awaiting Tracking Update' : (isFulfilled ? 'Fulfilled' : 'Unfulfilled')));
+        : (isSourceFulfilled ? 'Fulfilled' : (existingShipment?.status || (isDispatched ? 'Awaiting Tracking Update' : 'Unfulfilled')));
 
       const stage = isConfirmedCancelled
         ? 'order_data'
-        : (isDispatched ? 'tracking' : (isFulfilled ? 'fulfilled' : undefined));
+        : (isSourceFulfilled ? (hasShipment ? 'tracking' : 'fulfilled') : (isDispatched ? 'tracking' : undefined));
 
       const cancellationStatus = isConfirmedCancelled 
         ? 'Completed' 
@@ -1235,7 +1276,7 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
         stage,
         status,
         dispatch_date: existingShipment?.dispatch_date || (isDispatched ? so.dispatch_date : undefined),
-        fulfilled_date: extra.fulfilled_date || (isFulfilled ? so.order_date : undefined),
+        fulfilled_date: extra.fulfilled_date || (isSourceFulfilled ? so.order_date : undefined),
         batchId: so.upload_id,
         cancellationStatus,
         cancellationReason: cData.reason || (isConfirmedCancelled ? 'Cancelled in source export' : undefined),

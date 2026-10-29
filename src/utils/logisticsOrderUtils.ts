@@ -371,10 +371,70 @@ export const detectOrderChanges = (
     changedFields.push('Order Date');
   }
 
+  // 11. Fulfillment Status (reconcile changes without overwriting valid data with empty/blank)
+  if (incoming.fulfillmentStatus && String(incoming.fulfillmentStatus).trim() !== '') {
+    const normIn = normalizeShopifyFulfillmentStatus(incoming.fulfillmentStatus) || String(incoming.fulfillmentStatus).trim();
+    const normEx = normalizeShopifyFulfillmentStatus(existing.fulfillmentStatus) || (existing.fulfillmentStatus ? String(existing.fulfillmentStatus).trim() : '');
+    if (normIn && normIn.toLowerCase() !== normEx.toLowerCase()) {
+      patch.fulfillmentStatus = normIn;
+      patch.sourceFulfillmentStatus = normIn;
+      if (normIn === 'Fulfilled' && (existing.stage === 'active' || existing.status === 'Unfulfilled')) {
+        patch.stage = 'fulfilled';
+        patch.status = 'Fulfilled';
+        if (!existing.fulfilledDate) {
+          patch.fulfilledDate = incoming.fulfilledDate || existing.orderDateDisplay || existing.orderDate;
+        }
+      } else if (normIn === 'Partially Fulfilled' && existing.stage === 'active') {
+        patch.status = 'Partially Fulfilled';
+      }
+      changedFields.push('Fulfillment Status');
+    }
+  }
+
+  // 12. Financial Status (strictly independent of fulfillment status)
+  if (incoming.financialStatus && String(incoming.financialStatus).trim() !== '') {
+    const finIn = String(incoming.financialStatus).trim().toLowerCase();
+    const finEx = (existing.financialStatus ? String(existing.financialStatus).trim() : '').toLowerCase();
+    if (finIn && finIn !== finEx) {
+      patch.financialStatus = String(incoming.financialStatus).trim();
+      changedFields.push('Financial Status');
+    }
+  }
+
   return {
     hasChanges: changedFields.length > 0,
     patch,
     changedFields
   };
+};
+
+export type CanonicalFulfillmentStatus = 'Fulfilled' | 'Unfulfilled' | 'Partially Fulfilled' | 'Restocked';
+
+/**
+ * Normalizes source fulfillment statuses from Shopify exports and internal formats.
+ * Safely trims whitespace and handles case differences cleanly.
+ * - 'fulfilled' -> 'Fulfilled'
+ * - 'unfulfilled' -> 'Unfulfilled'
+ * - 'partial' / 'partially fulfilled' -> 'Partially Fulfilled'
+ * - 'restocked' -> 'Restocked'
+ */
+export const normalizeShopifyFulfillmentStatus = (raw?: any): CanonicalFulfillmentStatus | undefined => {
+  if (raw === undefined || raw === null) return undefined;
+  const s = String(raw).trim().toLowerCase();
+  if (!s || s === '-' || s === 'null' || s === 'undefined') return undefined;
+
+  if (s === 'fulfilled' || (s.includes('fulfil') && !s.includes('unfulfil') && !s.includes('part'))) {
+    return 'Fulfilled';
+  }
+  if (s === 'unfulfilled' || s.includes('unfulfil') || s === 'not fulfilled') {
+    return 'Unfulfilled';
+  }
+  if (s === 'partial' || s === 'partially fulfilled' || s.includes('partially') || s.includes('partial')) {
+    return 'Partially Fulfilled';
+  }
+  if (s === 'restocked' || s.includes('restock')) {
+    return 'Restocked';
+  }
+  return undefined;
 };
 

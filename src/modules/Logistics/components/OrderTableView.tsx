@@ -162,6 +162,30 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
 
   const getStatusBadgeStyle = (status: string) => {
     const s = (status || '').toLowerCase();
+    if (s.includes('fulfilled') && !s.includes('unfulfilled') && !s.includes('partial')) {
+      return {
+        bg: 'bg-emerald-950/70',
+        text: 'text-emerald-300',
+        border: 'border-emerald-700/60',
+        dot: 'bg-emerald-400'
+      };
+    }
+    if (s.includes('partial')) {
+      return {
+        bg: 'bg-amber-950/70',
+        text: 'text-amber-300',
+        border: 'border-amber-700/60',
+        dot: 'bg-amber-400'
+      };
+    }
+    if (s.includes('restocked')) {
+      return {
+        bg: 'bg-cyan-950/70',
+        text: 'text-cyan-300',
+        border: 'border-cyan-700/60',
+        dot: 'bg-cyan-400'
+      };
+    }
     if (s.includes('unfulfilled') || s.includes('awaiting')) {
       return {
         bg: 'bg-purple-950/70',
@@ -1013,12 +1037,20 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                               </span>
                             )}
                           </div>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold border bg-purple-950/60 text-purple-300 border-purple-800/60">
-                            <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
-                            <span>Unfulfilled</span>
-                          </span>
-                        )}
+                        ) : (() => {
+                          const fRaw = (order.fulfillmentStatus || order.sourceFulfillmentStatus || order.status || 'Unfulfilled').trim();
+                          const fLower = fRaw.toLowerCase();
+                          const displayStatus = fLower === 'fulfilled' 
+                            ? 'Fulfilled' 
+                            : (fLower.includes('partial') ? 'Partially Fulfilled' : (fLower === 'restocked' ? 'Restocked' : 'Unfulfilled'));
+                          const colBadge = getStatusBadgeStyle(displayStatus);
+                          return (
+                            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold border ${colBadge.bg} ${colBadge.text} ${colBadge.border}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${colBadge.dot} shrink-0`} />
+                              <span>{displayStatus}</span>
+                            </span>
+                          );
+                        })()}
                       </td>
                     </>
                   )}

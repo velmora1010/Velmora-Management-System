@@ -15,6 +15,7 @@ import type {
   OrderCancellationData
 } from './types';
 import { getCustomerOrderIdentifierVariants, areCustomerOrdersMatching, extractCustomerOrderBaseId } from '../../../utils/orderIdUtils';
+import { normalizeShopifyFulfillmentStatus } from '../../../utils/logisticsOrderUtils';
 import { 
   syncSalesUploadToLogistics,
   deleteLogisticsOrderByOrderId,
@@ -288,7 +289,34 @@ export class WebsiteSalesService {
           const isExistingCancelled = existingRecord?.order_status === 'CANCELLED' || Boolean(existingRecord?.extra_data?.cancellation);
           const isCancelled = isIncomingCancelled || isExistingCancelled;
 
-          const isFulfilled = !isCancelled && (fStatus === 'fulfilled' || fStatus === 'shipped' || fStatus === 'delivered');
+          const normFulfillment = normalizeShopifyFulfillmentStatus(o.fulfillment_status);
+          const existingFulfillment = existingRecord?.extra_data?.fulfillment_status;
+
+          const isFulfilled = !isCancelled && (
+            normFulfillment === 'Fulfilled' || 
+            fStatus === 'fulfilled' || 
+            fStatus === 'shipped' || 
+            fStatus === 'delivered' ||
+            (existingRecord?.order_status === 'FULFILLED' && !normFulfillment)
+          );
+          const isPartiallyFulfilled = !isCancelled && !isFulfilled && (
+            normFulfillment === 'Partially Fulfilled' || 
+            fStatus === 'partial' || 
+            fStatus === 'partially fulfilled'
+          );
+
+          // Resolve canonical fulfillment status safely:
+          let finalFulfillmentStatus: string;
+          if (isCancelled) {
+            finalFulfillmentStatus = 'Cancelled';
+          } else if (normFulfillment) {
+            finalFulfillmentStatus = normFulfillment;
+          } else if (existingFulfillment) {
+            finalFulfillmentStatus = normalizeShopifyFulfillmentStatus(existingFulfillment) || existingFulfillment;
+            console.warn(`[Fulfillment Warning] Order ${o.order_id} had missing/unrecognized fulfillment status in upload; preserved existing: ${finalFulfillmentStatus}`);
+          } else {
+            finalFulfillmentStatus = isFulfilled ? 'Fulfilled' : 'Unfulfilled';
+          }
 
           let cancellationData = existingRecord?.extra_data?.cancellation || o.cancellation;
           if (isCancelled && !cancellationData) {
@@ -301,17 +329,17 @@ export class WebsiteSalesService {
               confirmed_at: new Date().toISOString(),
               confirmed_by: 'Source System',
               logistics_action: 'CONFIRMED',
-              previous_fulfillment_status: fStatus && fStatus !== 'cancelled' ? fStatus : 'unfulfilled'
+              previous_fulfillment_status: fStatus && fStatus !== 'cancelled' ? fStatus : 'Unfulfilled'
             };
           }
 
           const finalOrderStatus = isCancelled 
             ? 'CANCELLED' 
-            : (isFulfilled ? 'FULFILLED' : 'CONFIRMED');
+            : (isFulfilled ? 'FULFILLED' : (isPartiallyFulfilled ? 'PARTIAL_FULFILLED' : 'CONFIRMED'));
 
           const finalDispatchStatus = isCancelled
             ? 'CANCELLED'
-            : (isFulfilled ? 'DELIVERED' : 'UNFULFILLED');
+            : (isFulfilled ? 'DELIVERED' : (existingRecord?.dispatch_status || 'UNFULFILLED'));
 
           orderPayloads.push({
             id: orderUuid,
@@ -344,8 +372,8 @@ export class WebsiteSalesService {
               payment_classification_reason: o.payment_classification_reason || existingRecord?.extra_data?.payment_classification_reason || '',
               data_conflict: o.data_conflict || false,
               conflict_details: o.conflict_details || '',
-              fulfillment_status: isCancelled ? 'cancelled' : (isFulfilled ? 'fulfilled' : (fStatus || 'unfulfilled')),
-              financial_status: o.financial_status || existingRecord?.extra_data?.financial_status || '',
+              fulfillment_status: finalFulfillmentStatus,
+              financial_status: o.financial_status || existingRecord?.extra_data?.financial_status || (o.payment_mode === 'PREPAID' ? 'paid' : 'pending'),
               awb_number: o.awb_number || existingRecord?.extra_data?.awb_number || '',
               courier: o.courier || existingRecord?.extra_data?.courier || '',
               fulfilled_date: o.fulfilled_date || (isFulfilled ? o.order_date : ''),
@@ -1246,10 +1274,13 @@ export class WebsiteSalesService {
       const hasFulfilled = norms.includes('FULFILLED');
       const hasUnfulfilled = norms.includes('UNFULFILLED');
 
-      if (hasFulfilled && !hasUnfulfilled) {
+      const hasPartial = norms.includes('PARTIALLY FULFILLED') || norms.includes('PARTIAL');
+      if (hasFulfilled && !hasUnfulfilled && !hasPartial) {
         query = query.eq('order_status', 'FULFILLED');
-      } else if (hasUnfulfilled && !hasFulfilled) {
-        query = query.neq('order_status', 'FULFILLED');
+      } else if (hasUnfulfilled && !hasFulfilled && !hasPartial) {
+        query = query.neq('order_status', 'FULFILLED').neq('order_status', 'PARTIAL_FULFILLED');
+      } else if (hasPartial && !hasFulfilled && !hasUnfulfilled) {
+        query = query.eq('order_status', 'PARTIAL_FULFILLED');
       }
     }
 
@@ -1423,8 +1454,10 @@ export class WebsiteSalesService {
         created_at: o.created_at,
         items,
         fulfillment_status: o.order_status === 'CANCELLED' || extra.cancellation?.status === 'CANCELLED'
-          ? 'cancelled'
-          : (extra.fulfillment_status || (o.dispatch_status === 'DELIVERED' ? 'fulfilled' : 'unfulfilled')),
+          ? 'Cancelled'
+          : (normalizeShopifyFulfillmentStatus(extra.fulfillment_status) || 
+             (o.order_status === 'FULFILLED' || o.dispatch_status === 'DELIVERED' ? 'Fulfilled' : 
+              (o.order_status === 'PARTIAL_FULFILLED' ? 'Partially Fulfilled' : 'Unfulfilled'))),
         financial_status: extra.financial_status || (o.payment_mode === 'PREPAID' ? 'paid' : 'pending'),
         awb_number: awb,
         courier: courier,

@@ -8,7 +8,9 @@ interface WebsiteFulfillmentDropdownProps {
 
 const FULFILLMENT_OPTIONS = [
   { id: 'Fulfilled', label: 'Fulfilled', description: 'Order fulfilled in sales' },
-  { id: 'Unfulfilled', label: 'Unfulfilled', description: 'Awaiting sales fulfillment' }
+  { id: 'Unfulfilled', label: 'Unfulfilled', description: 'Awaiting sales fulfillment' },
+  { id: 'Partially Fulfilled', label: 'Partially Fulfilled', description: 'Partially fulfilled order' },
+  { id: 'Restocked', label: 'Restocked', description: 'Restocked items' }
 ];
 
 export const WebsiteFulfillmentDropdown: React.FC<WebsiteFulfillmentDropdownProps> = ({

@@ -164,11 +164,10 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
       return operationalOrders;
     }
     if (currentStage === 'fulfilled') {
-      return operationalOrders.filter(o => 
-        o.workflowStage === 'fulfilled' || 
-        o.sourceFulfillmentStatus === 'fulfilled' || 
-        o.stage === 'fulfilled'
-      );
+      return operationalOrders.filter(o => {
+        const fStatus = (o.fulfillmentStatus || o.sourceFulfillmentStatus || '').toLowerCase();
+        return o.workflowStage === 'fulfilled' || fStatus === 'fulfilled' || o.stage === 'fulfilled';
+      });
     }
     if (currentStage === 'dispatched' || currentStage === 'tracking') {
       return operationalOrders.filter(o => isDispatchedOrder(o));
@@ -183,17 +182,19 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
       if (selectedStatusTab === 'Pending') {
         return operationalOrders.filter(o => o.workflowStage === 'pending');
       }
-      return operationalOrders.filter(o => 
-        o.workflowStage === 'active' && 
-        o.stage !== 'fulfilled' && 
-        o.sourceFulfillmentStatus !== 'fulfilled'
-      );
+      return operationalOrders.filter(o => {
+        const fStatus = (o.fulfillmentStatus || o.sourceFulfillmentStatus || '').toLowerCase();
+        return o.workflowStage === 'active' && 
+               o.stage !== 'fulfilled' && 
+               fStatus !== 'fulfilled';
+      });
     }
-    return operationalOrders.filter(o => 
-      o.workflowStage === 'active' && 
-      o.stage !== 'fulfilled' && 
-      o.sourceFulfillmentStatus !== 'fulfilled'
-    );
+    return operationalOrders.filter(o => {
+      const fStatus = (o.fulfillmentStatus || o.sourceFulfillmentStatus || '').toLowerCase();
+      return o.workflowStage === 'active' && 
+             o.stage !== 'fulfilled' && 
+             fStatus !== 'fulfilled';
+    });
   }, [unifiedOrders, currentStage, selectedStatusTab]);
 
   // Sanitize legacy serial dates, normalize states, and enrich missing details on mount
@@ -254,6 +255,17 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
           if (rec.stage === 'order_data' && rec.status === 'Not Tracked') {
             patch.status = 'Unfulfilled';
+            needsUpdate = true;
+          }
+
+          // If record has source status fulfilled but is in active stage, promote to fulfilled
+          const isRecFulfilled = (rec.fulfillmentStatus || '').toLowerCase() === 'fulfilled' ||
+                                 (rec.sourceFulfillmentStatus || '').toLowerCase() === 'fulfilled';
+          if (isRecFulfilled && rec.stage === 'active') {
+            patch.stage = 'fulfilled';
+            patch.status = 'Fulfilled';
+            patch.fulfillmentStatus = 'Fulfilled';
+            patch.sourceFulfillmentStatus = 'Fulfilled';
             needsUpdate = true;
           }
 
@@ -369,11 +381,12 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
   const activeFilterCounts = useMemo(() => {
     let prepaid = 0;
     let cod = 0;
-    const activeList = unifiedOrders.filter(o => 
-      o.workflowStage === 'active' && 
-      o.stage !== 'fulfilled' && 
-      o.sourceFulfillmentStatus !== 'fulfilled'
-    );
+    const activeList = unifiedOrders.filter(o => {
+      const fStatus = (o.fulfillmentStatus || o.sourceFulfillmentStatus || '').toLowerCase();
+      return o.workflowStage === 'active' && 
+             o.stage !== 'fulfilled' && 
+             fStatus !== 'fulfilled';
+    });
     activeList.forEach(s => {
       const type = (s.orderType || '').toLowerCase();
       if (type.includes('cod')) {
@@ -473,8 +486,8 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
   // Filtered orders displayed in the view
   const filteredOrders = useMemo(() => {
-    // Apply comprehensive section and attribute filters
-    let result = applyLogisticsFilters(unifiedOrders, logisticsFilters);
+    // Apply comprehensive section and attribute filters on current stage's shipments
+    let result = applyLogisticsFilters(stageShipments, logisticsFilters);
 
     // 2. Search Query (Top toolbar search bar with searchMode support)
     if (searchTerm.trim()) {
@@ -488,7 +501,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         const matchesCity = (order.city || order.shippingCity || '').toLowerCase().includes(q);
         const matchesState = (order.state || order.shippingState || '').toLowerCase().includes(q);
 
-        if (mode === 'awb') return matchesAwb;
+        if (mode === 'awb') return matchesAwb || matchesId;
         if (mode === 'order') return matchesId;
         if (mode === 'customer') return matchesCust || matchesPhone;
         return matchesId || matchesCust || matchesPhone || matchesAwb || matchesCity || matchesState;
@@ -511,7 +524,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
     }
 
     return result;
-  }, [unifiedOrders, logisticsFilters, searchTerm, selectedCourier, selectedStatusTab]);
+  }, [stageShipments, logisticsFilters, searchTerm, selectedCourier, selectedStatusTab]);
 
   // Selected orders array for side panel review
   const selectedOrdersList = useMemo(() => {
