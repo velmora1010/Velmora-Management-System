@@ -3,7 +3,8 @@ import {
   ExtensionResponse, 
   VELMORA_RND_SOURCE, 
   VELMORA_RND_EXTENSION,
-  ExtensionCommandType
+  ExtensionCommandType,
+  DiagnosticResult
 } from '../types/extensionTypes';
 
 class RndExtensionService {
@@ -118,6 +119,29 @@ class RndExtensionService {
       throw new Error(response.error || 'Unknown error occurred during research');
     } catch (err: any) {
       throw err;
+    }
+  }
+
+  public async runReelDiagnostic(username: string): Promise<DiagnosticResult> {
+    try {
+      // 35-second timeout for diagnostic handshake, navigation, and passive DOM snapshot
+      const response = await this.sendMessage('DIAGNOSE_REEL_DISCOVERY', { username }, 35000);
+      if (response.type === 'DIAGNOSTIC_COMPLETED') {
+        return response.payload;
+      }
+      return {
+        stage: 'communication_failure',
+        success: false,
+        message: response.error || 'Diagnostic returned an unexpected response format.',
+        error: response.error || 'INVALID_RESPONSE'
+      };
+    } catch (err: any) {
+      return {
+        stage: 'communication_failure',
+        success: false,
+        message: err.message || 'Diagnostic request timed out or extension is disconnected.',
+        error: err.message || 'COMMUNICATION_ERROR'
+      };
     }
   }
 }
