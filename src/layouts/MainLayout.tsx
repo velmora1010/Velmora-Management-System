@@ -14,6 +14,10 @@ const SWITCHABLE_ACCOUNTS = [
   'admin@velmora1.com',
   'admin@velmora2.com',
   'admin@velmora3.com',
+  'dhesan.m@company.com',
+  'dinesh.k@company.com',
+  'priya.k@company.com',
+  'unlinked.employee@company.com',
 ];
 
 export const MainLayout = () => {
@@ -215,7 +219,7 @@ export const MainLayout = () => {
                 {user?.email || 'admin@velmora.com'}
               </div>
               <div className="text-[11px] text-muted font-medium mt-0.5">
-                {user?.email === 'admin@velmora.com' ? 'Main Admin' : 'User'}
+                {user?.email?.startsWith('admin@') ? 'Administrator' : 'Staff / Employee'}
               </div>
             </div>
           </div>

@@ -68,10 +68,12 @@ export const LeaveModule: React.FC<LeaveModuleProps> = ({
       <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-base font-extrabold text-[#172B4D] tracking-tight">
-            Leave Management
+            {canApproveLeave ? 'Leave Management' : 'My Leave History'}
           </h2>
           <p className="text-xs text-[#64748B]">
-            Process time-off applications, vacation requests, and wellness leaves
+            {canApproveLeave
+              ? 'Process time-off applications, vacation requests, and wellness leaves'
+              : 'Submit time-off applications and track your approval status'}
           </p>
         </div>
 

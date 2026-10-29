@@ -33,7 +33,9 @@ export type NavigationTab =
   | 'employee-welfare'
   | 'payroll'
   | 'reports'
-  | 'settings';
+  | 'settings'
+  | 'my-profile'
+  | 'product-select';
 
 interface SidebarProps {
   currentTab: NavigationTab;

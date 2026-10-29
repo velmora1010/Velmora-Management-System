@@ -5,6 +5,7 @@ import { safeSetItem, safeGetItem } from '../utils/storage';
 import { useAuth as useVelmoraAuth } from '../../../hooks/useAuth';
 import { useRBAC as useVelmoraRBAC } from '../../../hooks/useRBAC';
 import { ROLES } from '../../../types/rbac';
+import { findLinkedEmployee } from '../utils/employeeIdentity';
 
 function getStoredEmployees(): Employee[] {
   const saved = safeGetItem('hrms_employees_v3');
@@ -28,20 +29,17 @@ function buildSyncedUsers(): UserProfile[] {
 
   employees.forEach((emp, idx) => {
     const emailLower = (emp.email || '').trim().toLowerCase();
-    const nameLower = (emp.fullName || '').trim().toLowerCase();
 
     const alreadyInList = synced.some(
-      (u) =>
-        (emailLower && (u.email || '').trim().toLowerCase() === emailLower) ||
-        (nameLower && (u.name || '').trim().toLowerCase() === nameLower)
+      (u) => emailLower && (u.email || '').trim().toLowerCase() === emailLower
     );
     if (alreadyInList) return;
 
     const presetUser = INITIAL_USERS.find(
       (u) =>
         u.role === 'employee' &&
-        ((emailLower && (u.email || '').trim().toLowerCase() === emailLower) ||
-          (nameLower && (u.name || '').trim().toLowerCase() === nameLower))
+        emailLower &&
+        (u.email || '').trim().toLowerCase() === emailLower
     );
 
     const baseId = presetUser
@@ -66,6 +64,8 @@ function buildSyncedUsers(): UserProfile[] {
 interface AuthContextType {
   currentUser: UserProfile;
   allUsers: UserProfile[];
+  isLinkedEmployee: boolean;
+  linkedEmployee: Employee | null;
   switchUser: (userId: string) => void;
   switchRole: (role: UserRole) => void;
   refreshUsers: () => void;
@@ -86,47 +86,70 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [allUsers, setAllUsers] = useState<UserProfile[]>(() => buildSyncedUsers());
 
-  // Derive HR role from Velmora authenticated session & RBAC
+  // Derive HR role strictly from Velmora authenticated session & verified role
   const isVelmoraAdminOrManager = useMemo(() => {
-    if (!velmoraRole) {
-      // Default to admin for super admin / local dev accounts
+    if (!velmoraUser) return false;
+    const emailLower = (velmoraUser.email || '').toLowerCase().trim();
+    if (
+      emailLower === 'admin@velmora.com' ||
+      emailLower === 'admin@velmora1.com' ||
+      emailLower === 'admin@velmora2.com' ||
+      emailLower === 'admin@velmora3.com' ||
+      emailLower.startsWith('admin@')
+    ) {
       return true;
     }
     return (
       velmoraRole === ROLES.SUPER_ADMIN ||
       velmoraRole === ROLES.ADMIN ||
-      velmoraRole === ROLES.MANAGER ||
-      (velmoraUser?.email && velmoraUser.email.toLowerCase().includes('admin'))
+      velmoraRole === ROLES.MANAGER
     );
   }, [velmoraRole, velmoraUser]);
 
   const hrRole: UserRole = isVelmoraAdminOrManager ? 'admin' : 'employee';
 
+  const employees = useMemo(() => getStoredEmployees(), []);
+
+  // Verified employee link resolution
+  const linkedEmployee = useMemo<Employee | null>(() => {
+    if (isVelmoraAdminOrManager) {
+      // Admins operate in administrative context
+      return null;
+    }
+    const userEmail = velmoraUser?.email?.trim().toLowerCase() || '';
+    const metadataId = (velmoraUser?.user_metadata?.employeeId || velmoraUser?.user_metadata?.employeeCode || '').trim();
+
+    return (
+      findLinkedEmployee(
+        {
+          email: userEmail,
+          employeeId: metadataId,
+          role: 'employee',
+        },
+        employees
+      ) || null
+    );
+  }, [isVelmoraAdminOrManager, velmoraUser, employees]);
+
+  const isLinkedEmployee = isVelmoraAdminOrManager || !!linkedEmployee;
+
   const currentUser = useMemo<UserProfile>(() => {
-    const userEmail = velmoraUser?.email?.trim().toLowerCase() || 'admin@company.com';
+    const userEmail = velmoraUser?.email?.trim().toLowerCase() || 'admin@velmora.com';
     const userName =
       velmoraUser?.user_metadata?.full_name ||
       velmoraUser?.email?.split('@')[0] ||
       (isVelmoraAdminOrManager ? 'Administrator' : 'Employee');
 
-    // Find linked employee if present
-    const employees = getStoredEmployees();
-    const linkedEmp = employees.find(
-      (e) =>
-        (e.email && e.email.trim().toLowerCase() === userEmail) ||
-        (e.fullName && e.fullName.trim().toLowerCase() === userName.toLowerCase())
-    );
-
     return {
       id: velmoraUser?.id || (isVelmoraAdminOrManager ? 'user-admin' : 'user-staff'),
-      name: linkedEmp ? linkedEmp.fullName : userName,
-      email: velmoraUser?.email || (linkedEmp ? linkedEmp.email : 'admin@velmora.com'),
+      name: linkedEmployee ? linkedEmployee.fullName : userName,
+      email: velmoraUser?.email || (linkedEmployee ? linkedEmployee.email : userEmail),
       role: hrRole,
-      employeeId: linkedEmp?.id,
-      avatar: linkedEmp?.avatar || '',
-      title: linkedEmp?.designation || (isVelmoraAdminOrManager ? 'HR Administrator' : 'Staff Member'),
+      employeeId: linkedEmployee?.id,
+      avatar: linkedEmployee?.avatar || '',
+      title: linkedEmployee?.designation || (isVelmoraAdminOrManager ? 'HR Administrator' : 'Staff Member'),
     };
-  }, [velmoraUser, isVelmoraAdminOrManager, hrRole]);
+  }, [velmoraUser, isVelmoraAdminOrManager, hrRole, linkedEmployee]);
 
   const refreshUsers = useCallback(() => {
     const updatedUsers = buildSyncedUsers();
@@ -137,20 +160,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     safeSetItem('hrms_current_user_v4', JSON.stringify(currentUser));
   }, [currentUser]);
 
-  // Safe no-op handlers for any remaining switch calls to preserve security
-  const switchUser = useCallback((_userId: string) => {
-    // In production Velmora, user switching is handled exclusively via Velmora auth shell
-  }, []);
-
-  const switchRole = useCallback((_role: UserRole) => {
-    // Role is derived directly from authenticated Velmora session
-  }, []);
+  // Safe no-op handlers for any remaining switch calls to prevent security bypasses
+  const switchUser = useCallback((_userId: string) => {}, []);
+  const switchRole = useCallback((_role: UserRole) => {}, []);
 
   // Strict permissions derived from authenticated Velmora role
-  const canViewPayroll = isVelmoraAdminOrManager;
+  const canViewPayroll =
+    isVelmoraAdminOrManager &&
+    (velmoraRole === ROLES.SUPER_ADMIN ||
+      velmoraRole === ROLES.ADMIN ||
+      velmoraUser?.email === 'admin@velmora.com' ||
+      velmoraUser?.email === 'admin@velmora1.com');
   const canManageEmployees = isVelmoraAdminOrManager;
   const canApproveLeave = isVelmoraAdminOrManager;
-  const canApplyLeave = !isVelmoraAdminOrManager;
+  const canApplyLeave = !isVelmoraAdminOrManager && !!linkedEmployee;
   const canManageDepartments = isVelmoraAdminOrManager;
   const canManageShifts = isVelmoraAdminOrManager;
   const canManageSettings = isVelmoraAdminOrManager;
@@ -160,6 +183,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{
         currentUser,
         allUsers,
+        isLinkedEmployee,
+        linkedEmployee,
         switchUser,
         switchRole,
         refreshUsers,

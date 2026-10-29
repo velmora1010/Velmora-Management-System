@@ -125,6 +125,8 @@ export const TopNav: React.FC<TopNavProps> = ({
     payroll: { title: 'Salary & Payroll', subtitle: 'Generate payslips, process allowances, and taxes' },
     reports: { title: 'Analytics & Reports', subtitle: 'Comprehensive HR insights and performance metrics' },
     settings: { title: 'System Settings', subtitle: 'Company profile, fiscal calendars, and policies' },
+    'my-profile': { title: 'My Profile', subtitle: 'View verified personal information and company records' },
+    'product-select': { title: 'Monthly Product Select', subtitle: 'Select your monthly employee welfare product' },
   };
 
   const roleLabels: Record<UserRole, { label: string; color: string }> = {

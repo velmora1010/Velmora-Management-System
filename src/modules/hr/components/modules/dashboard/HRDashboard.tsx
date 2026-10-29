@@ -8,6 +8,7 @@ import { DepartmentDonutChart } from './DepartmentDonutChart';
 import { LeaveSummaryChart } from './LeaveSummaryChart';
 import { EmployeeGrowthChart } from './EmployeeGrowthChart';
 import { DashboardWidgets } from './DashboardWidgets';
+import { EmployeeDashboard } from './EmployeeDashboard';
 import { Employee, LeaveRequest } from '../../../types/hrms';
 import {
   Users,
@@ -52,7 +53,17 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({
     settings,
   } = useHRMS();
 
-  const { canViewPayroll } = useAuth();
+  const { canViewPayroll, currentUser } = useAuth();
+
+  if (currentUser.role === 'employee') {
+    return (
+      <EmployeeDashboard
+        onNavigateTab={onNavigateTab}
+        onSelectLeave={onSelectLeave}
+        onOpenCheckIn={onOpenCheckIn}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">

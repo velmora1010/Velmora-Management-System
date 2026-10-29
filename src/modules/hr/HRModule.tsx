@@ -13,6 +13,7 @@ import {
   CircleDollarSign,
   BarChart3,
   Settings,
+  AlertCircle,
 } from 'lucide-react';
 
 import './index.css';
@@ -68,9 +69,11 @@ const HRLayoutContent: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { employees, deleteEmployee, deleteDepartment, dashboardMetrics, leaveRequests } = useHRMS();
-  const { currentUser, canManageEmployees, canViewPayroll } = useAuth();
+  const { currentUser, canManageEmployees, canViewPayroll, isLinkedEmployee, linkedEmployee } = useAuth();
   const { taskAssignments } = useWorkAssignment();
   const { showToast } = useToast();
+
+  const isEmployee = currentUser.role === 'employee';
 
   // Determine current active HR tab from pathname
   const currentTab = useMemo<NavigationTab>(() => {
@@ -101,9 +104,17 @@ const HRLayoutContent: React.FC = () => {
 
   const handleNavigateTab = useCallback(
     (tab: NavigationTab) => {
+      if (tab === 'my-profile') {
+        handleOpenMyProfile();
+        return;
+      }
+      if (tab === 'product-select') {
+        handleOpenMyProfileProductSelect();
+        return;
+      }
       navigate(`/hr/${tab}`);
     },
-    [navigate]
+    [navigate, handleOpenMyProfile, handleOpenMyProfileProductSelect]
   );
 
   // Modal States
@@ -204,10 +215,54 @@ const HRLayoutContent: React.FC = () => {
     return personalPending > 0 ? personalPending : null;
   }, [canManageEmployees, currentUser, employees, taskAssignments]);
 
-  // Navigation items partitioned into two clean rows:
-  // Row 1: Exactly 7 tabs ending with Work Assignment
-  // Row 2: Remaining modules preserving existing order and role-based visibility
+  // Navigation items partitioned into clean rows:
+  // For Employee: permitted employee-facing tabs only, with administrative modules hidden
+  // For Admin: Row 1 ending with Work Assignment, Row 2 with remaining administrative modules
   const { row1Items, row2Items } = useMemo(() => {
+    if (isEmployee) {
+      const r1 = [
+        {
+          id: 'dashboard' as NavigationTab,
+          label: 'My Dashboard',
+          icon: LayoutDashboard,
+          badge: null,
+        },
+        {
+          id: 'my-profile' as NavigationTab,
+          label: 'My Profile',
+          icon: Users,
+          badge: null,
+        },
+        {
+          id: 'attendance' as NavigationTab,
+          label: 'My Attendance',
+          icon: CalendarCheck,
+          badge: null,
+        },
+        {
+          id: 'leave' as NavigationTab,
+          label: 'My Leave History',
+          icon: CalendarDays,
+          badge: pendingLeaves > 0 ? pendingLeaves : null,
+          badgeColor: 'bg-amber-500 text-white',
+        },
+        {
+          id: 'assigned-works' as NavigationTab,
+          label: 'Assigned Works',
+          icon: ClipboardCheck,
+          badge: assignedWorksBadge,
+          badgeColor: 'bg-indigo-600 text-white',
+        },
+        {
+          id: 'product-select' as NavigationTab,
+          label: 'Product Select',
+          icon: HeartHandshake,
+          badge: null,
+        },
+      ];
+      return { row1Items: r1, row2Items: [] };
+    }
+
     const r1 = [
       {
         id: 'dashboard' as NavigationTab,
@@ -246,46 +301,31 @@ const HRLayoutContent: React.FC = () => {
         icon: Clock,
         badge: null,
       },
-      ...(canManageEmployees
-        ? [
-            {
-              id: 'work-assignment' as NavigationTab,
-              label: 'Work Assignment',
-              icon: ClipboardList,
-              badge: null,
-            },
-          ]
-        : []),
+      {
+        id: 'work-assignment' as NavigationTab,
+        label: 'Work Assignment',
+        icon: ClipboardList,
+        badge: null,
+      },
     ];
 
     const r2 = [
-      ...(!canManageEmployees
-        ? [
-            {
-              id: 'assigned-works' as NavigationTab,
-              label: 'Assigned Works',
-              icon: ClipboardCheck,
-              badge: assignedWorksBadge,
-              badgeColor: 'bg-[#206DA6] text-white',
-            },
-          ]
-        : []),
-      ...(canManageEmployees
-        ? [
-            {
-              id: 'employee-welfare' as NavigationTab,
-              label: 'Employee Welfare',
-              icon: HeartHandshake,
-              badge: null,
-            },
-          ]
-        : []),
       {
-        id: 'payroll' as NavigationTab,
-        label: 'Salary / Payroll',
-        icon: CircleDollarSign,
-        badge: canViewPayroll ? 'Active' : 'Locked',
+        id: 'employee-welfare' as NavigationTab,
+        label: 'Employee Welfare',
+        icon: HeartHandshake,
+        badge: null,
       },
+      ...(canViewPayroll
+        ? [
+            {
+              id: 'payroll' as NavigationTab,
+              label: 'Salary / Payroll',
+              icon: CircleDollarSign,
+              badge: 'Active',
+            },
+          ]
+        : []),
       {
         id: 'reports' as NavigationTab,
         label: 'Reports',
@@ -301,7 +341,13 @@ const HRLayoutContent: React.FC = () => {
     ];
 
     return { row1Items: r1, row2Items: r2 };
-  }, [dashboardMetrics, pendingLeaves, assignedWorksBadge, canManageEmployees, canViewPayroll]);
+  }, [
+    isEmployee,
+    dashboardMetrics,
+    pendingLeaves,
+    assignedWorksBadge,
+    canViewPayroll,
+  ]);
 
   const renderNavTabButton = useCallback(
     (item: {
@@ -346,6 +392,40 @@ const HRLayoutContent: React.FC = () => {
     [currentTab, handleNavigateTab]
   );
 
+  // Unlinked employee account state: protect employee records and display contact-HR message
+  if (isEmployee && !isLinkedEmployee) {
+    return (
+      <div className="hr-module-root flex-1 flex flex-col min-h-full bg-background text-main">
+        <TopNav
+          currentTab="dashboard"
+          onToggleSidebar={() => {}}
+          onOpenSearch={() => {}}
+          onOpenCheckIn={() => {}}
+          onNavigateTab={() => {}}
+          onOpenMyProfile={() => {}}
+          onOpenMyProfileProductSelect={() => {}}
+        />
+        <main className="flex-1 p-6 flex items-center justify-center">
+          <div className="flex flex-col items-center justify-center p-8 text-center max-w-lg w-full bg-card rounded-2xl border border-border shadow-velmora">
+            <div className="w-16 h-16 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center mb-4">
+              <AlertCircle className="w-8 h-8" />
+            </div>
+            <h2 className="text-xl font-bold text-white mb-2">Account Linking Required</h2>
+            <p className="text-sm text-slate-300 max-w-md mb-6 leading-relaxed">
+              Your account is not linked to an employee profile. Please contact HR.
+            </p>
+            <div className="p-4 rounded-xl bg-slate-900/60 border border-border text-xs text-muted w-full text-left">
+              <p className="font-semibold text-slate-200 mb-1">Authenticated Account Details:</p>
+              <p>Email: <span className="text-white font-mono">{currentUser.email}</span></p>
+              <p>Role: <span className="text-white capitalize">{currentUser.role}</span></p>
+              <p className="text-amber-400/90 mt-2">Protected employee records remain inaccessible until an HR administrator associates your account with a verified employee profile.</p>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="hr-module-root flex-1 flex flex-col min-h-full bg-background text-main">
       {/* Top HR Header & Action Bar */}
@@ -359,17 +439,19 @@ const HRLayoutContent: React.FC = () => {
         onOpenMyProfileProductSelect={handleOpenMyProfileProductSelect}
       />
 
-      {/* Two-Row HR Navigation Bar (No horizontal slider or scrollbar) */}
+      {/* Two-Row HR Navigation Bar */}
       <div className="sticky top-16 z-10 bg-card/95 backdrop-blur-md border-b border-border px-4 sm:px-6 py-2.5 shadow-velmora flex flex-col gap-2">
-        {/* Row 1: Fixed 7 tabs ending with Work Assignment */}
+        {/* Row 1 */}
         <div className="flex items-center gap-2 flex-wrap">
           {row1Items.map(renderNavTabButton)}
         </div>
 
-        {/* Row 2: Remaining modules below */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {row2Items.map(renderNavTabButton)}
-        </div>
+        {/* Row 2: Rendered only when administrative modules exist */}
+        {row2Items.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {row2Items.map(renderNavTabButton)}
+          </div>
+        )}
       </div>
 
       {/* Dynamic Module Body */}
@@ -396,23 +478,22 @@ const HRLayoutContent: React.FC = () => {
           <Route
             path="employees"
             element={
-              <EmployeeDirectory
-                onSelectEmployee={handleSelectEmployee}
-                onAddEmployee={() => {
-                  if (!canManageEmployees) return;
-                  setEmployeeToEdit(null);
-                  setIsEmployeeFormOpen(true);
-                }}
-                onEditEmployee={(emp) => {
-                  if (!canManageEmployees) return;
-                  setEmployeeToEdit(emp);
-                  setIsEmployeeFormOpen(true);
-                }}
-                onDeleteEmployee={(emp) => {
-                  if (!canManageEmployees) return;
-                  setEmployeeToDelete(emp);
-                }}
-              />
+              canManageEmployees ? (
+                <EmployeeDirectory
+                  onSelectEmployee={handleSelectEmployee}
+                  onAddEmployee={() => {
+                    setEmployeeToEdit(null);
+                    setIsEmployeeFormOpen(true);
+                  }}
+                  onEditEmployee={(emp) => {
+                    setEmployeeToEdit(emp);
+                    setIsEmployeeFormOpen(true);
+                  }}
+                  onDeleteEmployee={(emp) => setEmployeeToDelete(emp)}
+                />
+              ) : (
+                <Navigate to="/hr/dashboard" replace />
+              )
             }
           />
           <Route
@@ -421,6 +502,7 @@ const HRLayoutContent: React.FC = () => {
               <AttendanceModule
                 onOpenCheckIn={() => setIsCheckInOpen(true)}
                 onOpenManualEntry={(rec, initialStatus) => {
+                  if (!canManageEmployees) return;
                   setAttendanceToEdit(rec || null);
                   setManualAttendanceInitialStatus(initialStatus || null);
                   setIsManualAttendanceOpen(true);
@@ -432,17 +514,21 @@ const HRLayoutContent: React.FC = () => {
           <Route
             path="departments"
             element={
-              <DepartmentModule
-                onSelectDepartment={(dept) => setSelectedDepartment(dept)}
-                onAddDepartment={() => {
-                  setDepartmentToEdit(null);
-                  setIsDepartmentFormOpen(true);
-                }}
-                onEditDepartment={(dept) => {
-                  setDepartmentToEdit(dept);
-                  setIsDepartmentFormOpen(true);
-                }}
-              />
+              canManageEmployees ? (
+                <DepartmentModule
+                  onSelectDepartment={(dept) => setSelectedDepartment(dept)}
+                  onAddDepartment={() => {
+                    setDepartmentToEdit(null);
+                    setIsDepartmentFormOpen(true);
+                  }}
+                  onEditDepartment={(dept) => {
+                    setDepartmentToEdit(dept);
+                    setIsDepartmentFormOpen(true);
+                  }}
+                />
+              ) : (
+                <Navigate to="/hr/dashboard" replace />
+              )
             }
           />
           <Route
@@ -457,11 +543,15 @@ const HRLayoutContent: React.FC = () => {
           <Route
             path="shifts"
             element={
-              <ShiftModule
-                onOpenAssignShift={(emp) => setShiftAssignEmployee(emp)}
-                onSelectEmployee={handleSelectEmployee}
-                onOpenAddShift={() => setIsShiftFormOpen(true)}
-              />
+              canManageEmployees ? (
+                <ShiftModule
+                  onOpenAssignShift={(emp) => setShiftAssignEmployee(emp)}
+                  onSelectEmployee={handleSelectEmployee}
+                  onOpenAddShift={() => setIsShiftFormOpen(true)}
+                />
+              ) : (
+                <Navigate to="/hr/dashboard" replace />
+              )
             }
           />
           <Route
@@ -476,13 +566,7 @@ const HRLayoutContent: React.FC = () => {
           />
           <Route
             path="assigned-works"
-            element={
-              !canManageEmployees ? (
-                <AssignedWorksModule />
-              ) : (
-                <Navigate to="/hr/work-assignment" replace />
-              )
-            }
+            element={<AssignedWorksModule />}
           />
           <Route
             path="employee-welfare"
@@ -490,21 +574,43 @@ const HRLayoutContent: React.FC = () => {
               canManageEmployees ? (
                 <EmployeeWelfareModule />
               ) : (
-                <Navigate to="/hr/employees" replace />
+                <Navigate to="/hr/dashboard" replace />
               )
             }
           />
           <Route
             path="payroll"
             element={
-              <PayrollModule
-                onOpenGeneratePayroll={() => setIsGeneratePayrollOpen(true)}
-                onSelectPayroll={(rec) => setSelectedPayroll(rec)}
-              />
+              canViewPayroll ? (
+                <PayrollModule
+                  onOpenGeneratePayroll={() => setIsGeneratePayrollOpen(true)}
+                  onSelectPayroll={(rec) => setSelectedPayroll(rec)}
+                />
+              ) : (
+                <Navigate to="/hr/dashboard" replace />
+              )
             }
           />
-          <Route path="reports" element={<ReportsModule />} />
-          <Route path="settings" element={<SettingsModule />} />
+          <Route
+            path="reports"
+            element={
+              canManageEmployees ? (
+                <ReportsModule />
+              ) : (
+                <Navigate to="/hr/dashboard" replace />
+              )
+            }
+          />
+          <Route
+            path="settings"
+            element={
+              canManageEmployees ? (
+                <SettingsModule />
+              ) : (
+                <Navigate to="/hr/dashboard" replace />
+              )
+            }
+          />
           <Route path="*" element={<Navigate to="dashboard" replace />} />
         </Routes>
       </main>

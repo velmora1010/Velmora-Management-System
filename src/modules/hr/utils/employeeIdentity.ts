@@ -114,12 +114,6 @@ export function findLinkedEmployee(
         });
 
         if (canonicalCandidates.length > 0) {
-          if (userName) {
-            const byName = canonicalCandidates.find(
-              (e) => (e.fullName || '').trim().toLowerCase() === userName
-            );
-            if (byName) return byName;
-          }
           if (canonicalCandidates.length === 1) {
             return canonicalCandidates[0];
           }
@@ -128,14 +122,8 @@ export function findLinkedEmployee(
     }
   }
 
-  // 4. Verified full-name match for employee accounts
-  if (userName && user.role === 'employee') {
-    const byFullName = employees.find(
-      (e) => e.fullName && e.fullName.trim().toLowerCase() === userName
-    );
-    if (byFullName) return byFullName;
-  }
-
+  // Strict Rule: Never match accounts using display names alone.
+  // If neither verified employeeId/code nor verified email matches, account is unlinked.
   return undefined;
 }
 

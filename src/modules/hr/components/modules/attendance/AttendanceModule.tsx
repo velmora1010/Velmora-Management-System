@@ -54,7 +54,7 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
     saveAttendanceRecord,
   } = useHRMS();
 
-  const { canManageEmployees, currentUser } = useAuth();
+  const { canManageEmployees, currentUser, linkedEmployee } = useAuth();
   const { showToast } = useToast();
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [shiftFilter, setShiftFilter] = useState<string>('all');
@@ -68,6 +68,14 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
     currentStatus: AttendanceStatus;
   } | null>(null);
 
+  // Scoped employees: Only the verified authenticated employee when not Admin/HR
+  const scopedEmployees = useMemo(() => {
+    if (canManageEmployees) return employees;
+    if (linkedEmployee) return [linkedEmployee];
+    const found = employees.find((e) => e.id === currentUser.employeeId);
+    return found ? [found] : [];
+  }, [canManageEmployees, employees, linkedEmployee, currentUser.employeeId]);
+
   // Daily records for selected date
   const dateRecords = useMemo(
     () => attendanceRecords.filter((a) => a.date === selectedDate),
@@ -77,7 +85,7 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
   // Combine employees with dynamic evaluation of their attendance status
   // STRICT RULE: Actual punch times (checkInTime, checkOutTime) are NEVER fabricated.
   const combinedList = useMemo(() => {
-    return employees.map((emp) => {
+    return scopedEmployees.map((emp) => {
       const realRecord = dateRecords.find((r) => r.employeeId === emp.id);
       const shift = resolveEmployeeShift(emp, shiftTemplates);
 
@@ -237,53 +245,61 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
   return (
     <div className="space-y-6">
       {/* Top Filter and Actions Bar */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
+      <div className="bg-card p-5 rounded-2xl border border-border shadow-velmora flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
         <div>
-          <h2 className="text-base font-extrabold text-[#172B4D] tracking-tight">Attendance Register</h2>
-          <p className="text-xs text-[#64748B]">
-            Automatic shift-based tracking, punctuality monitoring, and timesheet adjustments
+          <h2 className="text-base font-extrabold text-white tracking-tight">
+            {canManageEmployees ? 'Attendance Register' : 'My Attendance'}
+          </h2>
+          <p className="text-xs text-muted">
+            {canManageEmployees
+              ? 'Automatic shift-based tracking, punctuality monitoring, and timesheet adjustments'
+              : 'Track your clock-ins, daily logs, and work hours'}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
           {/* Date Picker */}
-          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 rounded-xl px-3 py-2 text-xs text-slate-700">
+          <div className="flex items-center gap-1.5 bg-slate-900/60 border border-border rounded-xl px-3 py-2 text-xs text-slate-200">
             <Calendar className="w-3.5 h-3.5 text-slate-400" />
             <input
               type="date"
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
-              className="bg-transparent font-medium focus:outline-hidden cursor-pointer font-mono"
+              className="bg-transparent font-medium focus:outline-hidden cursor-pointer font-mono text-slate-200"
             />
           </div>
 
-          {/* Department Filter */}
-          <select
-            value={selectedDepartment}
-            onChange={(e) => setSelectedDepartment(e.target.value)}
-            className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-700 font-medium focus:outline-hidden"
-          >
-            <option value="all">All Departments</option>
-            {departments.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
+          {/* Department Filter (Admin only) */}
+          {canManageEmployees && (
+            <select
+              value={selectedDepartment}
+              onChange={(e) => setSelectedDepartment(e.target.value)}
+              className="text-xs bg-slate-900/60 border border-border rounded-xl px-3 py-2 text-slate-200 font-medium focus:outline-hidden"
+            >
+              <option value="all" className="bg-sidebar">All Departments</option>
+              {departments.map((d) => (
+                <option key={d.id} value={d.id} className="bg-sidebar">
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          )}
 
-          {/* Shift Filter */}
-          <select
-            value={shiftFilter}
-            onChange={(e) => setShiftFilter(e.target.value)}
-            className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-700 font-medium focus:outline-hidden"
-          >
-            <option value="all">All Shifts</option>
-            {shiftTemplates.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+          {/* Shift Filter (Admin only) */}
+          {canManageEmployees && (
+            <select
+              value={shiftFilter}
+              onChange={(e) => setShiftFilter(e.target.value)}
+              className="text-xs bg-slate-900/60 border border-border rounded-xl px-3 py-2 text-slate-200 font-medium focus:outline-hidden"
+            >
+              <option value="all" className="bg-sidebar">All Shifts</option>
+              {shiftTemplates.map((s) => (
+                <option key={s.id} value={s.id} className="bg-sidebar">
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          )}
 
           {/* Status Filter */}
           <select

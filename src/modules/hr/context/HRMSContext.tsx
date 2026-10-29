@@ -915,6 +915,10 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const saveAttendanceRecord = (record: Partial<AttendanceRecord> & { employeeId: string; date: string }) => {
+    if (!canManageEmployees) {
+      showToast('Unauthorized: Only administrators can modify attendance records manually.', 'error');
+      return;
+    }
     const emp = employees.find((e) => e.id === record.employeeId);
     if (!emp) return;
 
@@ -1117,6 +1121,10 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const removeAttendanceOverride = (employeeId: string, date: string) => {
+    if (!canManageEmployees) {
+      showToast('Unauthorized: Only administrators can revert attendance overrides.', 'error');
+      return;
+    }
     const emp = employees.find((e) => e.id === employeeId);
     if (!emp) return;
 
