@@ -54,10 +54,10 @@ export const RnDUploadArea: React.FC<RnDUploadAreaProps> = ({ onFileSelect }) =>
   return (
     <div className="w-full">
       <div 
-        className={`w-full border-2 border-dashed rounded-xl p-10 flex flex-col items-center justify-center transition-colors cursor-pointer
+        className={`w-full border-2 border-dashed rounded-xl p-10 flex flex-col items-center justify-center transition-all duration-200 cursor-pointer
           ${isDragging 
-            ? 'border-blue-500 bg-blue-500/10' 
-            : 'border-slate-700 bg-slate-800/30 hover:bg-slate-800/50 hover:border-slate-600'
+            ? 'border-[#3B82F6] bg-[#3B82F6]/10' 
+            : 'border-[#293548] bg-[#111827]/60 hover:bg-[#1D2736]/40 hover:border-[#3B82F6]/50'
           }
         `}
         onDragOver={handleDragOver}
@@ -69,27 +69,27 @@ export const RnDUploadArea: React.FC<RnDUploadAreaProps> = ({ onFileSelect }) =>
           type="file" 
           className="hidden" 
           ref={fileInputRef}
-          accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedumedocument.spreadsheetml.sheet"
+          accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           onChange={handleFileInput}
         />
         
-        <div className="w-16 h-16 bg-blue-500/10 text-blue-400 rounded-full flex items-center justify-center mb-4">
-          <UploadCloud size={32} />
+        <div className="w-14 h-14 bg-[#3B82F6]/10 text-[#3B82F6] border border-[#3B82F6]/20 rounded-2xl flex items-center justify-center mb-3.5 shadow-sm">
+          <UploadCloud size={28} />
         </div>
         
-        <h3 className="text-xl font-bold text-slate-200 mb-2">Upload Excel File</h3>
-        <p className="text-slate-400 text-center mb-6 max-w-md">
+        <h3 className="text-lg font-bold text-[#F1F5F9] mb-1.5 tracking-tight">Upload Excel File</h3>
+        <p className="text-[#94A3B8] text-center text-xs sm:text-sm mb-5 max-w-md">
           Drag and drop your influencer list here, or click to browse.
         </p>
 
-        <div className="flex items-center gap-2 text-sm text-slate-500 bg-slate-900/50 px-4 py-2 rounded-lg">
-          <FileSpreadsheet size={16} />
+        <div className="flex items-center gap-2 text-xs text-[#64748B] bg-[#111827] border border-[#293548] px-3.5 py-1.5 rounded-lg">
+          <FileSpreadsheet size={14} className="text-[#3B82F6]" />
           <span>Supported formats: .XLS / .XLSX</span>
         </div>
       </div>
 
       {error && (
-        <div className="mt-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm text-center">
+        <div className="mt-3 p-3 bg-[#EF4444]/10 border border-[#EF4444]/20 rounded-lg text-[#EF4444] text-xs text-center font-medium">
           {error}
         </div>
       )}

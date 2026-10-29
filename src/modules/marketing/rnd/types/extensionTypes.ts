@@ -12,7 +12,8 @@ export type ExtensionCommandType =
   | 'RESUME_RND_JOB'
   | 'STOP_RND_JOB'
   | 'GET_STATUS'
-  | 'START_PROFILE_RESEARCH';
+  | 'START_PROFILE_RESEARCH'
+  | 'DIAGNOSE_REEL_DISCOVERY';
 
 export type ExtensionEventType = 
   | 'PONG'
@@ -38,7 +39,121 @@ export type ExtensionEventType =
   | 'PROFILE_FAILED'
   | 'JOB_PROGRESS'
   | 'JOB_COMPLETED'
-  | 'JOB_FAILED';
+  | 'JOB_FAILED'
+  | 'DIAGNOSTIC_COMPLETED';
+
+export type DiagnosticStage =
+  | 'communication_failure'
+  | 'navigation_failure'
+  | 'zero_reels'
+  | 'reels_discovered';
+
+export interface DiagnosticVisibleAnchor {
+  href: string;
+  text: string;
+}
+
+export interface DiagnosticVisibleMediaItem {
+  tag: string;
+  src?: string;
+  alt?: string;
+  nearestClickableTag?: string | null;
+  nearestClickableHref?: string | null;
+  nearestClickableRole?: string | null;
+  nearestTileAnchorHref?: string | null;
+  containerDescription?: string;
+}
+
+export interface DiagnosticDomEvidence {
+  first10VisibleAnchors: DiagnosticVisibleAnchor[];
+  first20VisibleAnchors?: DiagnosticVisibleAnchor[];
+  allAnchorsInMain?: DiagnosticVisibleAnchor[];
+  mainText?: string;
+  pageTitle?: string;
+  windowScrollY?: number;
+  scrollHeight?: number;
+  first10VisibleMedia: DiagnosticVisibleMediaItem[];
+  sampleTileOuterHTML?: string;
+  totalHrefAnchors: number;
+  reelHrefAnchorsCount: number;
+  reelsHrefAnchorsCount: number;
+  postHrefAnchorsCount: number;
+  containerContext: {
+    isInMain: boolean;
+    isInArticle: boolean;
+    isInDialog: boolean;
+    parentSummary: string;
+  };
+  collectionError?: string | null;
+}
+
+export interface DiagnosticInspectedReel {
+  reelUrl: string;
+  isPinned: boolean;
+  anchorText: string;
+  viewIconFound?: boolean;
+  viewCount?: number | null;
+  rawViewText?: string | null;
+  viewIconLocation?: string | null;
+  descendantTexts: Array<{
+    tag: string;
+    text: string;
+    aria?: string;
+    title?: string;
+    role?: string;
+    className?: string;
+  }>;
+  accessibleLabels: Array<{
+    tag: string;
+    attr: string;
+    value: string;
+  }>;
+  tileContainerTag: string;
+  tileContainerText: string;
+  tileExtraDescendants: Array<{
+    tag: string;
+    text: string;
+    aria?: string;
+    title?: string;
+    role?: string;
+  }>;
+  tileLabels: Array<{
+    tag: string;
+    attr: string;
+    value: string;
+  }>;
+  candidateNumbers: string[];
+  hasViewCountText: boolean;
+  anchorOuterHTML: string;
+  tileOuterHTML: string;
+}
+
+export interface DiagnosticResult {
+  stage: DiagnosticStage;
+  success: boolean;
+  message: string;
+  tabId?: number;
+  actualUrl?: string;
+  targetUrl?: string;
+  readyState?: string;
+  requestedUsername?: string;
+  detectedUsername?: string;
+  totalReelAnchors?: number;
+  uniqueReelUrls?: number;
+  first10Reels?: string[];
+  postAnchorsCount?: number;
+  visibleMediaCount?: number;
+  gridElementCount?: number;
+  snapshotRetried?: boolean;
+  domEvidence?: DiagnosticDomEvidence;
+  inspectedReels?: DiagnosticInspectedReel[];
+  validViewCountsCount?: number;
+  averageViews?: number;
+  rawViewCounts?: number[];
+  pinnedReelsCount?: number;
+  nonPinnedReelsCount?: number;
+  error?: string;
+}
 
 export interface ExtensionMessage {
   source: typeof VELMORA_RND_SOURCE;
