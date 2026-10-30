@@ -54,7 +54,6 @@ import { ShiftFormModal } from './components/modals/ShiftFormModal';
 import { PayslipModal } from './components/modals/PayslipModal';
 import { GeneratePayrollModal } from './components/modals/GeneratePayrollModal';
 import { EmployeeLoginModal } from './components/modals/EmployeeLoginModal';
-import { AdminLoginModal } from './components/modals/AdminLoginModal';
 import { ConfirmDialog } from './components/common/ConfirmDialog';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 
@@ -84,7 +83,6 @@ const HRLayoutContent: React.FC = () => {
   const { showToast } = useToast();
 
   const [isEmployeeLoginOpen, setIsEmployeeLoginOpen] = useState(false);
-  const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false);
 
   const isEmployee = currentUser.role === 'employee';
 
@@ -418,7 +416,6 @@ const HRLayoutContent: React.FC = () => {
           onOpenMyProfile={() => {}}
           onOpenMyProfileProductSelect={() => {}}
           onOpenEmployeeLogin={() => setIsEmployeeLoginOpen(true)}
-          onOpenAdminLogin={() => setIsAdminLoginOpen(true)}
         />
         <main className="flex-1 p-6 flex items-center justify-center">
           <div className="flex flex-col items-center justify-center p-8 text-center max-w-lg w-full bg-card rounded-2xl border border-border shadow-velmora">
@@ -440,16 +437,9 @@ const HRLayoutContent: React.FC = () => {
         <EmployeeLoginModal
           isOpen={isEmployeeLoginOpen}
           onClose={() => setIsEmployeeLoginOpen(false)}
+          employees={employees}
           onSuccess={(sess) => {
             setEmployeeSession(sess);
-            navigate('/hr/dashboard');
-          }}
-        />
-        <AdminLoginModal
-          isOpen={isAdminLoginOpen}
-          onClose={() => setIsAdminLoginOpen(false)}
-          onSuccess={() => {
-            clearEmployeeSession();
             navigate('/hr/dashboard');
           }}
         />
@@ -469,7 +459,6 @@ const HRLayoutContent: React.FC = () => {
         onOpenMyProfile={handleOpenMyProfile}
         onOpenMyProfileProductSelect={handleOpenMyProfileProductSelect}
         onOpenEmployeeLogin={() => setIsEmployeeLoginOpen(true)}
-        onOpenAdminLogin={() => setIsAdminLoginOpen(true)}
       />
 
       {/* Two-Row HR Navigation Bar */}
@@ -792,18 +781,9 @@ const HRLayoutContent: React.FC = () => {
       <EmployeeLoginModal
         isOpen={isEmployeeLoginOpen}
         onClose={() => setIsEmployeeLoginOpen(false)}
+        employees={employees}
         onSuccess={(sess) => {
           setEmployeeSession(sess);
-          navigate('/hr/dashboard');
-        }}
-      />
-
-      {/* HR Administrator Login Modal */}
-      <AdminLoginModal
-        isOpen={isAdminLoginOpen}
-        onClose={() => setIsAdminLoginOpen(false)}
-        onSuccess={() => {
-          clearEmployeeSession();
           navigate('/hr/dashboard');
         }}
       />

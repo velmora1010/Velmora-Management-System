@@ -1,18 +1,22 @@
 import React, { useState } from 'react';
-import { Eye, EyeOff, Lock, Mail, ArrowLeft, ShieldCheck, AlertCircle } from 'lucide-react';
+import { Eye, EyeOff, Lock, Mail, ShieldCheck, AlertCircle, X } from 'lucide-react';
 import { supabase } from '../../../../lib/supabase';
+import { Employee } from '../../types/hrms';
+import { findLinkedEmployee } from '../../utils/employeeIdentity';
 import toast from 'react-hot-toast';
 
 interface EmployeeLoginModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (session: { email: string; token: string; user: any }) => void;
+  onSuccess: (session: { email: string; token: string; user: any; employee?: Employee }) => void;
+  employees?: Employee[];
 }
 
 export const EmployeeLoginModal: React.FC<EmployeeLoginModalProps> = ({
   isOpen,
   onClose,
   onSuccess,
+  employees = [],
 }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -36,7 +40,7 @@ export const EmployeeLoginModal: React.FC<EmployeeLoginModalProps> = ({
     setErrorMessage(null);
 
     try {
-      // Authenticate with existing backend authentication provider (Supabase)
+      // 1. Authenticate with existing backend authentication system (Supabase Auth)
       const { data, error } = await supabase.auth.signInWithPassword({
         email: cleanEmail,
         password,
@@ -49,11 +53,39 @@ export const EmployeeLoginModal: React.FC<EmployeeLoginModalProps> = ({
       }
 
       if (data?.session) {
-        toast.success(`Welcome, ${cleanEmail}!`, { id: 'hr-emp-login-success' });
+        const authUser = data.session.user;
+        const metadataId = (
+          authUser?.user_metadata?.employeeId ||
+          authUser?.user_metadata?.employeeCode ||
+          ''
+        ).trim();
+
+        // 2. Explicitly verify linked employee record
+        const linked = findLinkedEmployee(
+          {
+            id: authUser.id,
+            email: cleanEmail,
+            role: 'employee',
+            employeeId: metadataId || undefined,
+            name: authUser.user_metadata?.full_name || '',
+          },
+          employees
+        );
+
+        if (!linked) {
+          // If no verified employee association exists, display exact required message
+          const unlinkedMsg = 'Your account is not linked to an employee profile. Please contact HR.';
+          setErrorMessage(unlinkedMsg);
+          toast.error(unlinkedMsg, { id: 'hr-emp-unlinked-err' });
+          return;
+        }
+
+        toast.success(`Welcome, ${linked.fullName}!`, { id: 'hr-emp-login-success' });
         onSuccess({
           email: cleanEmail,
           token: data.session.access_token,
           user: data.session.user,
+          employee: linked,
         });
         onClose();
       }
@@ -86,9 +118,9 @@ export const EmployeeLoginModal: React.FC<EmployeeLoginModalProps> = ({
             type="button"
             onClick={onClose}
             className="absolute top-4 right-4 text-muted hover:text-white p-1.5 rounded-lg hover:bg-white/5 transition-colors"
-            title="Cancel"
+            title="Close"
           >
-            ✕
+            <X className="w-4 h-4" />
           </button>
         </div>
 
@@ -108,7 +140,7 @@ export const EmployeeLoginModal: React.FC<EmployeeLoginModalProps> = ({
             {/* Email Address */}
             <div className="space-y-1.5">
               <label htmlFor="hr-emp-email" className="text-xs font-semibold text-slate-300 uppercase tracking-wider block">
-                Registered Email Address
+                Employee Email Address
               </label>
               <div className="relative">
                 <Mail className="w-4 h-4 text-muted absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -154,7 +186,7 @@ export const EmployeeLoginModal: React.FC<EmployeeLoginModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-white p-1 rounded-md transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-white p-1 rounded-md transition-colors cursor-pointer"
                   title={showPassword ? 'Hide password' : 'Show password'}
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -162,12 +194,20 @@ export const EmployeeLoginModal: React.FC<EmployeeLoginModalProps> = ({
               </div>
             </div>
 
-            {/* Submit Button */}
-            <div className="pt-2">
+            {/* Action Buttons: Sign In and Cancel */}
+            <div className="pt-3 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={isLoading}
+                className="w-1/3 py-2.5 px-4 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-sm font-semibold rounded-xl border border-border transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full py-2.5 px-4 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-sm font-semibold rounded-xl shadow-lg shadow-indigo-900/30 transition-all focus:ring-4 focus:ring-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                className="w-2/3 py-2.5 px-4 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-sm font-semibold rounded-xl shadow-lg shadow-indigo-900/30 transition-all focus:ring-4 focus:ring-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {isLoading ? (
                   <>
@@ -175,25 +215,14 @@ export const EmployeeLoginModal: React.FC<EmployeeLoginModalProps> = ({
                     <span>Signing in...</span>
                   </>
                 ) : (
-                  <span>Sign In as Employee</span>
+                  <span>Sign In</span>
                 )}
               </button>
             </div>
           </form>
-
-          {/* Back to Administrator Navigation */}
-          <div className="mt-6 pt-4 border-t border-border text-center">
-            <button
-              type="button"
-              onClick={onClose}
-              className="inline-flex items-center gap-1.5 text-xs text-muted hover:text-white font-medium transition-colors"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Back to Administrator Mode</span>
-            </button>
-          </div>
         </div>
       </div>
     </div>
   );
 };
+
