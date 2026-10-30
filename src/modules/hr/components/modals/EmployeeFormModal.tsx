@@ -738,7 +738,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
           <div className="space-y-4 pt-2">
             {/* Upload Profile */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase mb-2">
+              <label className="block text-xs font-semibold text-white uppercase mb-2">
                 Upload Profile
               </label>
 
@@ -830,14 +830,14 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
 
             {/* Section Divider & Heading: Employee Personal Information */}
             <div className="pt-3 border-t border-slate-100">
-              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+              <h4 className="text-xs font-bold text-white uppercase tracking-wider mb-2">
                 Employee Personal Information
               </h4>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                <label className="block text-xs font-semibold text-white uppercase mb-1">
                   First Name *
                 </label>
                 <input
@@ -862,7 +862,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                <label className="block text-xs font-semibold text-white uppercase mb-1">
                   Last Name *
                 </label>
                 <input
@@ -889,7 +889,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                <label className="block text-xs font-semibold text-white uppercase mb-1">
                   Work Email *
                 </label>
                 <input
@@ -914,7 +914,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Phone Number</label>
+                <label className="block text-xs font-semibold text-white uppercase mb-1">Phone Number</label>
                 <input
                   type="text"
                   value={phone}
@@ -928,7 +928,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Gender</label>
+                <label className="block text-xs font-semibold text-white uppercase mb-1">Gender</label>
                 <select
                   value={gender}
                   onChange={(e) => setGender(e.target.value as any)}
@@ -941,7 +941,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Date of Birth</label>
+                <label className="block text-xs font-semibold text-white uppercase mb-1">Date of Birth</label>
                 <input
                   type="date"
                   value={dateOfBirth}
@@ -951,7 +951,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">City & State</label>
+                <label className="block text-xs font-semibold text-white uppercase mb-1">City & State</label>
                 <input
                   type="text"
                   value={city}
@@ -972,7 +972,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {/* Designation / Role - Modern Searchable Dropdown */}
               <div ref={designationRef} className="relative">
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                <label className="block text-xs font-semibold text-white uppercase mb-1">
                   Designation / Role *
                 </label>
 
@@ -1057,7 +1057,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               {/* Department - Automatically Filtered / Selected with Manual Override */}
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-semibold text-slate-700 uppercase">
+                  <label className="block text-xs font-semibold text-white uppercase">
                     Department *
                   </label>
                   {departmentId && expectedDepartmentName && (
@@ -1115,7 +1115,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
             {/* Middle Row: Status, Employment Type, Work Location */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Status</label>
+                <label className="block text-xs font-semibold text-white uppercase mb-1">Status</label>
                 <select
                   value={status}
                   onChange={(e) => setStatus(e.target.value as any)}
@@ -1129,7 +1129,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Employment Type</label>
+                <label className="block text-xs font-semibold text-white uppercase mb-1">Employment Type</label>
                 <select
                   value={employmentType}
                   onChange={(e) => setEmploymentType(e.target.value as any)}
@@ -1143,7 +1143,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Work Location</label>
+                <label className="block text-xs font-semibold text-white uppercase mb-1">Work Location</label>
                 <select
                   value={workLocation}
                   onChange={(e) => setWorkLocation(e.target.value as any)}
@@ -1159,7 +1159,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
             {/* Bottom Row: Shift Schedule & Joining Date */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                <label className="block text-xs font-semibold text-white uppercase mb-1">
                   Shift Schedule *
                 </label>
                 <select
@@ -1191,7 +1191,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Joining Date</label>
+                <label className="block text-xs font-semibold text-white uppercase mb-1">Joining Date</label>
                 <input
                   type="date"
                   value={joiningDate}
@@ -1215,7 +1215,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+                <label className="block text-xs font-semibold text-white uppercase mb-1">
                   Monthly Base Salary (USD) *
                 </label>
                 <input
@@ -1241,7 +1241,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Disbursing Bank</label>
+                <label className="block text-xs font-semibold text-white uppercase mb-1">Disbursing Bank</label>
                 <input
                   type="text"
                   value={bankName}
@@ -1254,7 +1254,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Account Number</label>
+                <label className="block text-xs font-semibold text-white uppercase mb-1">Account Number</label>
                 <input
                   type="text"
                   value={accountNumber}
@@ -1265,7 +1265,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Tax ID / SSN</label>
+                <label className="block text-xs font-semibold text-white uppercase mb-1">Tax ID / SSN</label>
                 <input
                   type="text"
                   value={taxId}
@@ -1283,7 +1283,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
           <div className="space-y-4 pt-2">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Contact Person Name</label>
+                <label className="block text-xs font-semibold text-white uppercase mb-1">Contact Person Name</label>
                 <input
                   type="text"
                   value={emergencyContactName}
@@ -1294,7 +1294,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Relationship</label>
+                <label className="block text-xs font-semibold text-white uppercase mb-1">Relationship</label>
                 <input
                   type="text"
                   value={emergencyContactRelation}
@@ -1306,7 +1306,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Emergency Phone Number</label>
+              <label className="block text-xs font-semibold text-white uppercase mb-1">Emergency Phone Number</label>
               <input
                 type="text"
                 value={emergencyContactPhone}
@@ -1318,7 +1318,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">Residential Street Address</label>
+              <label className="block text-xs font-semibold text-white uppercase mb-1">Residential Street Address</label>
               <input
                 type="text"
                 value={address}
