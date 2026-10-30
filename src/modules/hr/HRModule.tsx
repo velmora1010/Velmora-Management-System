@@ -102,21 +102,6 @@ const HRLayoutContent: React.FC = () => {
     return 'dashboard';
   }, [location.pathname]);
 
-  const handleNavigateTab = useCallback(
-    (tab: NavigationTab) => {
-      if (tab === 'my-profile') {
-        handleOpenMyProfile();
-        return;
-      }
-      if (tab === 'product-select') {
-        handleOpenMyProfileProductSelect();
-        return;
-      }
-      navigate(`/hr/${tab}`);
-    },
-    [navigate, handleOpenMyProfile, handleOpenMyProfileProductSelect]
-  );
-
   // Modal States
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isCheckInOpen, setIsCheckInOpen] = useState(false);
@@ -154,6 +139,21 @@ const HRLayoutContent: React.FC = () => {
     setEmployeeDetailInitialTab('product_select');
     setSelectedEmployee(ownEmp);
   }, [currentUser, employees, showToast]);
+
+  const handleNavigateTab = useCallback(
+    (tab: NavigationTab) => {
+      if (tab === 'my-profile') {
+        handleOpenMyProfile();
+        return;
+      }
+      if (tab === 'product-select') {
+        handleOpenMyProfileProductSelect();
+        return;
+      }
+      navigate(`/hr/${tab}`);
+    },
+    [navigate, handleOpenMyProfile, handleOpenMyProfileProductSelect]
+  );
 
   // Department Modals
   const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
