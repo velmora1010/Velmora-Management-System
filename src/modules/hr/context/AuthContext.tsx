@@ -76,6 +76,10 @@ interface AuthContextType {
   canManageDepartments: boolean;
   canManageShifts: boolean;
   canManageSettings: boolean;
+  // HR Account Type Switch & Session Management
+  activeHRAccountType: 'admin' | 'employee';
+  setEmployeeSession: (session: { email: string; token: string; user: any }) => void;
+  clearEmployeeSession: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -86,10 +90,56 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [allUsers, setAllUsers] = useState<UserProfile[]>(() => buildSyncedUsers());
 
-  // Derive HR role strictly from Velmora authenticated session & verified role
+  // HR-specific Employee Session state (stored in session storage to persist across refresh)
+  const [employeeSession, setEmployeeSessionState] = useState<{
+    email: string;
+    token: string;
+    user: any;
+  } | null>(() => {
+    try {
+      const stored = sessionStorage.getItem('hr_employee_session_v1');
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const setEmployeeSession = useCallback((session: { email: string; token: string; user: any }) => {
+    setEmployeeSessionState(session);
+    try {
+      sessionStorage.setItem('hr_employee_session_v1', JSON.stringify(session));
+    } catch (e) {
+      console.warn('Failed saving employee session:', e);
+    }
+  }, []);
+
+  const clearEmployeeSession = useCallback(() => {
+    setEmployeeSessionState(null);
+    try {
+      sessionStorage.removeItem('hr_employee_session_v1');
+    } catch (e) {
+      console.warn('Failed removing employee session:', e);
+    }
+  }, []);
+
+  // Determine effective user in HR module:
+  // If an HR employee session is active, effective user is the employee; otherwise the Velmora user
+  const effectiveUser = useMemo(() => {
+    if (employeeSession?.user) {
+      return employeeSession.user;
+    }
+    return velmoraUser;
+  }, [employeeSession, velmoraUser]);
+
+  const activeHRAccountType: 'admin' | 'employee' = employeeSession ? 'employee' : 'admin';
+
+  // Derive HR role strictly from effective authenticated session & verified role
   const isVelmoraAdminOrManager = useMemo(() => {
-    if (!velmoraUser) return false;
-    const emailLower = (velmoraUser.email || '').toLowerCase().trim();
+    // If explicit employee session is active in HR, they are strictly employee
+    if (activeHRAccountType === 'employee') return false;
+
+    if (!effectiveUser) return false;
+    const emailLower = (effectiveUser.email || '').toLowerCase().trim();
     if (
       emailLower === 'admin@velmora.com' ||
       emailLower === 'admin@velmora1.com' ||
@@ -104,7 +154,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       velmoraRole === ROLES.ADMIN ||
       velmoraRole === ROLES.MANAGER
     );
-  }, [velmoraRole, velmoraUser]);
+  }, [activeHRAccountType, effectiveUser, velmoraRole]);
 
   const hrRole: UserRole = isVelmoraAdminOrManager ? 'admin' : 'employee';
 
@@ -116,8 +166,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Admins operate in administrative context
       return null;
     }
-    const userEmail = velmoraUser?.email?.trim().toLowerCase() || '';
-    const metadataId = (velmoraUser?.user_metadata?.employeeId || velmoraUser?.user_metadata?.employeeCode || '').trim();
+    const userEmail = effectiveUser?.email?.trim().toLowerCase() || '';
+    const metadataId = (effectiveUser?.user_metadata?.employeeId || effectiveUser?.user_metadata?.employeeCode || '').trim();
 
     return (
       findLinkedEmployee(
@@ -129,27 +179,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         employees
       ) || null
     );
-  }, [isVelmoraAdminOrManager, velmoraUser, employees]);
+  }, [isVelmoraAdminOrManager, effectiveUser, employees]);
 
   const isLinkedEmployee = isVelmoraAdminOrManager || !!linkedEmployee;
 
   const currentUser = useMemo<UserProfile>(() => {
-    const userEmail = velmoraUser?.email?.trim().toLowerCase() || 'admin@velmora.com';
+    const userEmail = effectiveUser?.email?.trim().toLowerCase() || 'admin@velmora.com';
     const userName =
-      velmoraUser?.user_metadata?.full_name ||
-      velmoraUser?.email?.split('@')[0] ||
+      effectiveUser?.user_metadata?.full_name ||
+      effectiveUser?.email?.split('@')[0] ||
       (isVelmoraAdminOrManager ? 'Administrator' : 'Employee');
 
     return {
-      id: velmoraUser?.id || (isVelmoraAdminOrManager ? 'user-admin' : 'user-staff'),
+      id: effectiveUser?.id || (isVelmoraAdminOrManager ? 'user-admin' : 'user-staff'),
       name: linkedEmployee ? linkedEmployee.fullName : userName,
-      email: velmoraUser?.email || (linkedEmployee ? linkedEmployee.email : userEmail),
+      email: effectiveUser?.email || (linkedEmployee ? linkedEmployee.email : userEmail),
       role: hrRole,
       employeeId: linkedEmployee?.id,
       avatar: linkedEmployee?.avatar || '',
       title: linkedEmployee?.designation || (isVelmoraAdminOrManager ? 'HR Administrator' : 'Staff Member'),
     };
-  }, [velmoraUser, isVelmoraAdminOrManager, hrRole, linkedEmployee]);
+  }, [effectiveUser, isVelmoraAdminOrManager, hrRole, linkedEmployee]);
 
   const refreshUsers = useCallback(() => {
     const updatedUsers = buildSyncedUsers();
@@ -195,6 +245,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         canManageDepartments,
         canManageShifts,
         canManageSettings,
+        activeHRAccountType,
+        setEmployeeSession,
+        clearEmployeeSession,
       }}
     >
       {children}

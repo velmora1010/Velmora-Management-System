@@ -53,6 +53,8 @@ import { ShiftAssignModal } from './components/modals/ShiftAssignModal';
 import { ShiftFormModal } from './components/modals/ShiftFormModal';
 import { PayslipModal } from './components/modals/PayslipModal';
 import { GeneratePayrollModal } from './components/modals/GeneratePayrollModal';
+import { EmployeeLoginModal } from './components/modals/EmployeeLoginModal';
+import { AdminLoginModal } from './components/modals/AdminLoginModal';
 import { ConfirmDialog } from './components/common/ConfirmDialog';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 
@@ -69,9 +71,20 @@ const HRLayoutContent: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { employees, deleteEmployee, deleteDepartment, dashboardMetrics, leaveRequests } = useHRMS();
-  const { currentUser, canManageEmployees, canViewPayroll, isLinkedEmployee, linkedEmployee } = useAuth();
+  const {
+    currentUser,
+    canManageEmployees,
+    canViewPayroll,
+    isLinkedEmployee,
+    linkedEmployee,
+    setEmployeeSession,
+    clearEmployeeSession,
+  } = useAuth();
   const { taskAssignments } = useWorkAssignment();
   const { showToast } = useToast();
+
+  const [isEmployeeLoginOpen, setIsEmployeeLoginOpen] = useState(false);
+  const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false);
 
   const isEmployee = currentUser.role === 'employee';
 
@@ -404,6 +417,8 @@ const HRLayoutContent: React.FC = () => {
           onNavigateTab={() => {}}
           onOpenMyProfile={() => {}}
           onOpenMyProfileProductSelect={() => {}}
+          onOpenEmployeeLogin={() => setIsEmployeeLoginOpen(true)}
+          onOpenAdminLogin={() => setIsAdminLoginOpen(true)}
         />
         <main className="flex-1 p-6 flex items-center justify-center">
           <div className="flex flex-col items-center justify-center p-8 text-center max-w-lg w-full bg-card rounded-2xl border border-border shadow-velmora">
@@ -422,6 +437,22 @@ const HRLayoutContent: React.FC = () => {
             </div>
           </div>
         </main>
+        <EmployeeLoginModal
+          isOpen={isEmployeeLoginOpen}
+          onClose={() => setIsEmployeeLoginOpen(false)}
+          onSuccess={(sess) => {
+            setEmployeeSession(sess);
+            navigate('/hr/dashboard');
+          }}
+        />
+        <AdminLoginModal
+          isOpen={isAdminLoginOpen}
+          onClose={() => setIsAdminLoginOpen(false)}
+          onSuccess={() => {
+            clearEmployeeSession();
+            navigate('/hr/dashboard');
+          }}
+        />
       </div>
     );
   }
@@ -437,6 +468,8 @@ const HRLayoutContent: React.FC = () => {
         onNavigateTab={handleNavigateTab}
         onOpenMyProfile={handleOpenMyProfile}
         onOpenMyProfileProductSelect={handleOpenMyProfileProductSelect}
+        onOpenEmployeeLogin={() => setIsEmployeeLoginOpen(true)}
+        onOpenAdminLogin={() => setIsAdminLoginOpen(true)}
       />
 
       {/* Two-Row HR Navigation Bar */}
@@ -753,6 +786,26 @@ const HRLayoutContent: React.FC = () => {
         message={`Are you sure you want to delete the ${departmentToDelete?.name} department? Departments with active assigned personnel cannot be deleted.`}
         confirmLabel="Delete Department"
         isDestructive={true}
+      />
+
+      {/* HR Exclusive Employee Login Modal */}
+      <EmployeeLoginModal
+        isOpen={isEmployeeLoginOpen}
+        onClose={() => setIsEmployeeLoginOpen(false)}
+        onSuccess={(sess) => {
+          setEmployeeSession(sess);
+          navigate('/hr/dashboard');
+        }}
+      />
+
+      {/* HR Administrator Login Modal */}
+      <AdminLoginModal
+        isOpen={isAdminLoginOpen}
+        onClose={() => setIsAdminLoginOpen(false)}
+        onSuccess={() => {
+          clearEmployeeSession();
+          navigate('/hr/dashboard');
+        }}
       />
     </div>
   );

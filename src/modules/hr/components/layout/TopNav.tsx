@@ -9,6 +9,10 @@ import {
   LogOut,
   Calendar,
   UserCircle,
+  Users2,
+  Shield,
+  User,
+  ChevronRight,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useHRMS } from '../../context/HRMSContext';
@@ -16,6 +20,7 @@ import { NavigationTab } from './Sidebar';
 import { UserRole } from '../../types/hrms';
 import { findLinkedEmployee } from '../../utils/employeeIdentity';
 import { Avatar } from '../common/Avatar';
+import { supabase } from '../../../../lib/supabase';
 
 interface TopNavProps {
   currentTab: NavigationTab;
@@ -25,6 +30,8 @@ interface TopNavProps {
   onNavigateTab?: (tab: NavigationTab) => void;
   onOpenMyProfile?: () => void;
   onOpenMyProfileProductSelect?: () => void;
+  onOpenEmployeeLogin?: () => void;
+  onOpenAdminLogin?: () => void;
 }
 
 export const TopNav: React.FC<TopNavProps> = ({
@@ -35,8 +42,18 @@ export const TopNav: React.FC<TopNavProps> = ({
   onNavigateTab,
   onOpenMyProfile,
   onOpenMyProfileProductSelect,
+  onOpenEmployeeLogin,
+  onOpenAdminLogin,
 }) => {
-  const { currentUser, allUsers, switchUser, switchRole, canManageEmployees } = useAuth();
+  const {
+    currentUser,
+    allUsers,
+    switchUser,
+    switchRole,
+    canManageEmployees,
+    activeHRAccountType,
+    clearEmployeeSession,
+  } = useAuth();
   const {
     employees,
     notifications,
@@ -48,6 +65,7 @@ export const TopNav: React.FC<TopNavProps> = ({
 
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
+  const [isSwitchTypeOpen, setIsSwitchTypeOpen] = useState(false);
 
   const profileRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
@@ -321,13 +339,101 @@ export const TopNav: React.FC<TopNavProps> = ({
                   <div className="overflow-hidden">
                     <p className="text-xs font-bold text-white truncate">{currentUser.name}</p>
                     <p className="text-[11px] text-muted truncate">{currentUser.email}</p>
-                    <span
-                      className={`inline-block mt-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${roleLabels[currentUser.role].color}`}
-                    >
-                      {roleLabels[currentUser.role].label}
-                    </span>
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <span
+                        className={`inline-block text-[10px] font-semibold px-2 py-0.5 rounded-full border ${roleLabels[currentUser.role].color}`}
+                      >
+                        {roleLabels[currentUser.role].label}
+                      </span>
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-400 border border-indigo-500/20 uppercase tracking-wider">
+                        {activeHRAccountType}
+                      </span>
+                    </div>
                   </div>
                 </div>
+              </div>
+
+              {/* Switch Account Type Dropdown Submenu */}
+              <div className="mb-1 border-b border-border/60 pb-1">
+                <button
+                  type="button"
+                  onClick={() => setIsSwitchTypeOpen(!isSwitchTypeOpen)}
+                  className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 hover:text-white rounded-xl transition-colors"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Users2 className="w-4 h-4 text-indigo-400" />
+                    <span>Switch Account Type</span>
+                  </div>
+                  <ChevronRight
+                    className={`w-3.5 h-3.5 text-muted transition-transform ${
+                      isSwitchTypeOpen ? 'rotate-90 text-white' : ''
+                    }`}
+                  />
+                </button>
+
+                {isSwitchTypeOpen && (
+                  <div className="p-1.5 my-1 bg-slate-950/70 border border-slate-800 rounded-xl space-y-1 animate-fade-in">
+                    {/* Option 1: Administrator */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsProfileOpen(false);
+                        setIsSwitchTypeOpen(false);
+                        if (activeHRAccountType === 'admin') {
+                          // Already in admin mode
+                          return;
+                        }
+                        if (onOpenAdminLogin) {
+                          onOpenAdminLogin();
+                        } else {
+                          clearEmployeeSession();
+                        }
+                      }}
+                      className={`w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-lg transition-all ${
+                        activeHRAccountType === 'admin'
+                          ? 'bg-purple-950/40 border border-purple-500/40 text-purple-200'
+                          : 'text-slate-300 hover:bg-white/5 hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Shield className="w-3.5 h-3.5 text-purple-400" />
+                        <span>Administrator</span>
+                      </div>
+                      {activeHRAccountType === 'admin' && (
+                        <span className="text-[10px] font-bold text-green-400 bg-green-500/20 px-1.5 py-0.5 rounded-full border border-green-500/30">
+                          Active
+                        </span>
+                      )}
+                    </button>
+
+                    {/* Option 2: Employee */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsProfileOpen(false);
+                        setIsSwitchTypeOpen(false);
+                        if (onOpenEmployeeLogin) {
+                          onOpenEmployeeLogin();
+                        }
+                      }}
+                      className={`w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-lg transition-all ${
+                        activeHRAccountType === 'employee'
+                          ? 'bg-indigo-950/40 border border-indigo-500/40 text-indigo-200'
+                          : 'text-slate-300 hover:bg-white/5 hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <User className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>Employee</span>
+                      </div>
+                      {activeHRAccountType === 'employee' && (
+                        <span className="text-[10px] font-bold text-green-400 bg-green-500/20 px-1.5 py-0.5 rounded-full border border-green-500/30">
+                          Active
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* My Profile Action */}
@@ -343,6 +449,22 @@ export const TopNav: React.FC<TopNavProps> = ({
                   <span>My Profile</span>
                 </button>
               )}
+
+              {/* Logout Action */}
+              <button
+                onClick={async () => {
+                  setIsProfileOpen(false);
+                  if (activeHRAccountType === 'employee') {
+                    clearEmployeeSession();
+                  } else {
+                    await supabase.auth.signOut();
+                  }
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-red-400 hover:bg-red-500/10 rounded-xl transition-colors"
+              >
+                <LogOut className="w-4 h-4 text-red-400" />
+                <span>{activeHRAccountType === 'employee' ? 'Logout Employee Session' : 'Logout'}</span>
+              </button>
             </div>
           )}
         </div>
