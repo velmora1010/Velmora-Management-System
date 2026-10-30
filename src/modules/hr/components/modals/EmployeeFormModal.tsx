@@ -80,8 +80,8 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
   const [uploadError, setUploadError] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [gender, setGender] = useState<'male' | 'female' | 'other'>('female');
-  const [dateOfBirth, setDateOfBirth] = useState('1994-05-15');
+  const [gender, setGender] = useState<'male' | 'female' | 'other' | ''>('');
+  const [dateOfBirth, setDateOfBirth] = useState('');
   const [city, setCity] = useState('');
 
   // Step 2: Job & Shift
@@ -90,10 +90,10 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
   const [designationCategory, setDesignationCategory] = useState('');
   const [departmentId, setDepartmentId] = useState('');
   const [status, setStatus] = useState<EmployeeStatus>('active');
-  const [employmentType, setEmploymentType] = useState<EmploymentType>('full_time');
-  const [workLocation, setWorkLocation] = useState<'On-site' | 'Remote' | 'Hybrid'>('On-site');
+  const [employmentType, setEmploymentType] = useState<EmploymentType | ''>('');
+  const [workLocation, setWorkLocation] = useState<'On-site' | 'Remote' | 'Hybrid' | ''>('');
   const [shiftId, setShiftId] = useState('');
-  const [joiningDate, setJoiningDate] = useState('2026-10-01');
+  const [joiningDate, setJoiningDate] = useState('');
 
   // Searchable Designation Dropdown state
   const [isDesignationOpen, setIsDesignationOpen] = useState(false);
@@ -101,17 +101,17 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
   const designationRef = useRef<HTMLDivElement | null>(null);
 
   // Step 3: Salary & Bank
-  const [baseSalary, setBaseSalary] = useState<number | ''>(6500);
-  const [bankName, setBankName] = useState('Chase Manhattan Bank');
-  const [accountNumber, setAccountNumber] = useState('****-****-1234');
-  const [taxId, setTaxId] = useState('US-TAX-10293');
+  const [baseSalary, setBaseSalary] = useState<number | ''>('');
+  const [bankName, setBankName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [taxId, setTaxId] = useState('');
 
   // Step 4: Emergency Contact & Address
   const [emergencyContactName, setEmergencyContactName] = useState('');
-  const [emergencyContactRelation, setEmergencyContactRelation] = useState('Spouse');
+  const [emergencyContactRelation, setEmergencyContactRelation] = useState('');
   const [emergencyContactPhone, setEmergencyContactPhone] = useState('');
   const [address, setAddress] = useState('');
-  const [country, setCountry] = useState('United States');
+  const [country, setCountry] = useState('');
   const [bio, setBio] = useState('');
 
   // Close designation dropdown when clicking outside
@@ -143,31 +143,57 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
       setAvatar(employeeToEdit.avatar || '');
       setAvatarFileName(employeeToEdit.avatar ? 'Current Profile Photo' : '');
       setUploadError('');
-      setGender(employeeToEdit.gender || 'female');
-      setDateOfBirth(employeeToEdit.dateOfBirth || '1994-05-15');
-      setJoiningDate(employeeToEdit.joiningDate || '2026-10-01');
-      setDepartmentId(employeeToEdit.departmentId || departments[0]?.id || '');
+      setGender(employeeToEdit.gender || '');
+      setDateOfBirth(employeeToEdit.dateOfBirth || '');
+      setJoiningDate(employeeToEdit.joiningDate || '');
+      setDepartmentId(employeeToEdit.departmentId || '');
       setDesignation(employeeToEdit.designation || '');
       setDesignationId(employeeToEdit.designationId || '');
       setDesignationCategory(employeeToEdit.designationCategory || '');
       setStatus(employeeToEdit.status || 'active');
-      setEmploymentType(employeeToEdit.employmentType || 'full_time');
-      setShiftId(employeeToEdit.shiftId || shiftTemplates[0]?.id || '');
-      setWorkLocation(employeeToEdit.workLocation || 'On-site');
-      setBaseSalary(employeeToEdit.baseSalary || 6500);
-      setBankName(employeeToEdit.bankName || 'Chase Manhattan Bank');
-      setAccountNumber(employeeToEdit.accountNumber || '****-****-1234');
-      setTaxId(employeeToEdit.taxId || 'US-TAX-10293');
-      setEmergencyContactName(employeeToEdit.emergencyContactName || '');
-      setEmergencyContactRelation(employeeToEdit.emergencyContactRelation || 'Spouse');
-      setEmergencyContactPhone(employeeToEdit.emergencyContactPhone || '');
-      setAddress(employeeToEdit.address || '');
+      setEmploymentType(employeeToEdit.employmentType || '');
+      setShiftId(employeeToEdit.shiftId || '');
+      setWorkLocation(employeeToEdit.workLocation || '');
+
+      // Load actual saved values only; purge hardcoded sample defaults
+      const rawBank = (employeeToEdit.bankName || '').trim();
+      const isDemoBank = rawBank === 'Chase Manhattan Bank' || rawBank === 'ICICI Bank' || rawBank === 'HDFC Bank' || rawBank === 'Axis Bank';
+      setBankName(isDemoBank ? '' : rawBank);
+
+      const rawAcc = (employeeToEdit.accountNumber || '').trim();
+      const isDemoAcc = rawAcc === '****-****-1234' || rawAcc.startsWith('••••••••');
+      setAccountNumber(isDemoAcc ? '' : rawAcc);
+
+      const rawTax = (employeeToEdit.taxId || '').trim();
+      const isDemoTax = rawTax === 'US-TAX-10293' || rawTax.startsWith('PAN-100');
+      setTaxId(isDemoTax ? '' : rawTax);
+
+      const rawSalary = employeeToEdit.baseSalary;
+      const isDemoSalary = rawSalary === 6500 || rawSalary === 72000 || rawSalary === 65000 || rawSalary === 58000;
+      setBaseSalary(isDemoSalary || rawSalary === undefined || rawSalary === null ? '' : rawSalary);
+
+      const rawContact = (employeeToEdit.emergencyContactName || '').trim();
+      const isDemoContact = rawContact === 'Karthik S' || rawContact === 'Murugan M' || rawContact === 'Kavitha R' || rawContact === 'Primary Relative';
+      setEmergencyContactName(isDemoContact ? '' : rawContact);
+
+      const rawRelation = (employeeToEdit.emergencyContactRelation || '').trim();
+      const isDemoRelation = isDemoContact || rawRelation === 'Spouse';
+      setEmergencyContactRelation(isDemoRelation ? '' : rawRelation);
+
+      const rawEmergPhone = (employeeToEdit.emergencyContactPhone || '').trim();
+      const isDemoEmergPhone = rawEmergPhone.startsWith('+91 98765 0000') || rawEmergPhone === '+1 (555) 111-2222';
+      setEmergencyContactPhone(isDemoEmergPhone ? '' : rawEmergPhone);
+
+      const rawAddress = (employeeToEdit.address || '').trim();
+      const isDemoAddress = rawAddress === '15 Silicon Valley Avenue' || rawAddress === '42 IT Corridor, Tech Park' || rawAddress === '88 Green Meadows Layout' || rawAddress === '100 Market Street';
+      setAddress(isDemoAddress ? '' : rawAddress);
+
       setCity(employeeToEdit.city || '');
-      setCountry(employeeToEdit.country || 'United States');
+      setCountry(employeeToEdit.country || '');
       setBio(employeeToEdit.bio || '');
       setCompletedTabs(new Set(['personal', 'job', 'financial', 'emergency']));
     } else {
-      // Try restoring saved draft for new employee
+      // New employee: check draft if available, otherwise start completely empty
       let draft: any = null;
       try {
         const stored = localStorage.getItem(DRAFT_STORAGE_KEY);
@@ -180,7 +206,6 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
         setFirstName(draft.firstName || '');
         setLastName(draft.lastName || '');
         setEmail(draft.email || '');
-        // Clear any old sample phone number if previously saved in draft
         const draftPhone =
           draft.phone === '+1 (555) 000-0000' || draft.phone === '+1 (555) 234-5678'
             ? ''
@@ -189,9 +214,8 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
         setAvatar(draft.avatar || '');
         setAvatarFileName(draft.avatar ? 'Draft Profile Photo' : '');
         setUploadError('');
-        setGender(draft.gender || 'female');
-        setDateOfBirth(draft.dateOfBirth || '1994-05-15');
-        // Clear any old sample city if previously saved in draft
+        setGender(draft.gender || '');
+        setDateOfBirth(draft.dateOfBirth === '1994-05-15' ? '' : (draft.dateOfBirth || ''));
         const draftCity = draft.city === 'San Francisco, CA' ? '' : (draft.city || '');
         setCity(draftCity);
         setDesignation(draft.designation || '');
@@ -199,32 +223,39 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
         setDesignationCategory(draft.designationCategory || '');
         setDepartmentId(draft.departmentId || '');
         setStatus(draft.status || 'active');
-        setEmploymentType(draft.employmentType || 'full_time');
-        setWorkLocation(draft.workLocation || 'On-site');
+        setEmploymentType(draft.employmentType || '');
+        setWorkLocation(draft.workLocation || '');
         setShiftId(draft.shiftId || '');
-        setJoiningDate(draft.joiningDate || '2026-10-01');
-        setBaseSalary(draft.baseSalary || 6500);
-        setBankName(draft.bankName || 'Chase Manhattan Bank');
-        setAccountNumber(draft.accountNumber || '****-****-1234');
-        setTaxId(draft.taxId || 'US-TAX-10293');
-        setEmergencyContactName(draft.emergencyContactName || 'Primary Relative');
-        setEmergencyContactRelation(draft.emergencyContactRelation || 'Spouse');
+        setJoiningDate(draft.joiningDate === '2026-10-01' ? '' : (draft.joiningDate || ''));
+
+        const draftSalary = draft.baseSalary === 6500 ? '' : (draft.baseSalary || '');
+        setBaseSalary(draftSalary);
+        const draftBank = draft.bankName === 'Chase Manhattan Bank' ? '' : (draft.bankName || '');
+        setBankName(draftBank);
+        const draftAcc = draft.accountNumber === '****-****-1234' ? '' : (draft.accountNumber || '');
+        setAccountNumber(draftAcc);
+        const draftTax = draft.taxId === 'US-TAX-10293' ? '' : (draft.taxId || '');
+        setTaxId(draftTax);
+        const draftContact = draft.emergencyContactName === 'Primary Relative' ? '' : (draft.emergencyContactName || '');
+        setEmergencyContactName(draftContact);
+        const draftRelation = draft.emergencyContactRelation === 'Spouse' ? '' : (draft.emergencyContactRelation || '');
+        setEmergencyContactRelation(draftRelation);
         const draftEmergPhone =
-          draft.emergencyContactPhone === '+1 (555) 111-2222' ||
-          draft.emergencyContactPhone === '+1 (555) 998-1122'
+          draft.emergencyContactPhone === '+1 (555) 111-2222' || draft.emergencyContactPhone === '+1 (555) 998-1122'
             ? ''
             : (draft.emergencyContactPhone || '');
         setEmergencyContactPhone(draftEmergPhone);
         const draftAddress =
-          draft.address === '100 Market Street' ||
-          draft.address === '428 Willow Creek Lane, Apt 2B'
+          draft.address === '100 Market Street' || draft.address === '428 Willow Creek Lane, Apt 2B'
             ? ''
             : (draft.address || '');
         setAddress(draftAddress);
-        setCountry(draft.country || 'United States');
+        const draftCountry = draft.country === 'United States' ? '' : (draft.country || '');
+        setCountry(draftCountry);
         setBio(draft.bio || '');
         setCompletedTabs(new Set(draft.completedTabs || []));
       } else {
+        // Completely empty new employee form
         setFirstName('');
         setLastName('');
         setEmail('');
@@ -232,27 +263,27 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
         setAvatar('');
         setAvatarFileName('');
         setUploadError('');
-        setGender('female');
-        setDateOfBirth('1994-05-15');
+        setGender('');
+        setDateOfBirth('');
         setCity('');
         setDesignation('');
         setDesignationId('');
         setDesignationCategory('');
         setDepartmentId('');
         setStatus('active');
-        setEmploymentType('full_time');
-        setWorkLocation('On-site');
+        setEmploymentType('');
+        setWorkLocation('');
         setShiftId('');
-        setJoiningDate('2026-10-01');
-        setBaseSalary(6500);
-        setBankName('Chase Manhattan Bank');
-        setAccountNumber('****-****-1234');
-        setTaxId('US-TAX-10293');
-        setEmergencyContactName('Primary Relative');
-        setEmergencyContactRelation('Spouse');
+        setJoiningDate('');
+        setBaseSalary('');
+        setBankName('');
+        setAccountNumber('');
+        setTaxId('');
+        setEmergencyContactName('');
+        setEmergencyContactRelation('');
         setEmergencyContactPhone('');
         setAddress('');
-        setCountry('United States');
+        setCountry('');
         setBio('');
         setCompletedTabs(new Set());
       }
@@ -920,7 +951,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
-                  placeholder=""
+                  placeholder="e.g. +1 (555) 000-0000"
                   autoComplete="off"
                 />
               </div>
@@ -934,8 +965,9 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   onChange={(e) => setGender(e.target.value as any)}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl"
                 >
-                  <option value="female">Female</option>
+                  <option value="">Select Gender...</option>
                   <option value="male">Male</option>
+                  <option value="female">Female</option>
                   <option value="other">Other</option>
                 </select>
               </div>
@@ -957,7 +989,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   value={city}
                   onChange={(e) => setCity(e.target.value)}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
-                  placeholder=""
+                  placeholder="e.g. San Francisco, CA"
                   autoComplete="off"
                 />
               </div>
@@ -1135,6 +1167,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   onChange={(e) => setEmploymentType(e.target.value as any)}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl"
                 >
+                  <option value="">Select Employment Type...</option>
                   <option value="full_time">Full Time</option>
                   <option value="part_time">Part Time</option>
                   <option value="contract">Contract</option>
@@ -1149,6 +1182,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   onChange={(e) => setWorkLocation(e.target.value as any)}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl"
                 >
+                  <option value="">Select Work Location...</option>
                   <option value="On-site">On-site (HQ)</option>
                   <option value="Hybrid">Hybrid</option>
                   <option value="Remote">Remote</option>
@@ -1235,7 +1269,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   className={`w-full px-3 py-2 text-sm bg-slate-50 border rounded-xl font-mono focus:outline-hidden focus:ring-2 focus:ring-[#206DA6] ${
                     errors.baseSalary ? 'border-red-500' : 'border-slate-200'
                   }`}
-                  placeholder="6500"
+                  placeholder="e.g. 6500"
                 />
                 {errors.baseSalary && <span className="text-[11px] text-red-500">{errors.baseSalary}</span>}
               </div>
@@ -1247,7 +1281,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   value={bankName}
                   onChange={(e) => setBankName(e.target.value)}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl"
-                  placeholder="Silicon Valley Bank / Chase"
+                  placeholder="e.g. Silicon Valley Bank / Chase"
                 />
               </div>
             </div>
@@ -1260,7 +1294,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   value={accountNumber}
                   onChange={(e) => setAccountNumber(e.target.value)}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl font-mono"
-                  placeholder="****-****-8821"
+                  placeholder="e.g. 1234567890"
                 />
               </div>
 
@@ -1271,7 +1305,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   value={taxId}
                   onChange={(e) => setTaxId(e.target.value)}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl font-mono"
-                  placeholder="US-TAX-98211"
+                  placeholder="e.g. US-TAX-98211"
                 />
               </div>
             </div>
@@ -1300,7 +1334,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   value={emergencyContactRelation}
                   onChange={(e) => setEmergencyContactRelation(e.target.value)}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl"
-                  placeholder="Spouse / Parent / Sibling"
+                  placeholder="e.g. Spouse / Parent / Sibling"
                 />
               </div>
             </div>
@@ -1312,7 +1346,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                 value={emergencyContactPhone}
                 onChange={(e) => setEmergencyContactPhone(e.target.value)}
                 className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
-                placeholder=""
+                placeholder="e.g. +1 (555) 000-0000"
                 autoComplete="off"
               />
             </div>
@@ -1324,7 +1358,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
                 className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
-                placeholder=""
+                placeholder="e.g. 123 Main Street, Suite 400"
                 autoComplete="off"
               />
             </div>

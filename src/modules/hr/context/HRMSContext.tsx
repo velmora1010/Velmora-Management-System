@@ -173,7 +173,30 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Clear legacy demo/sample financial and emergency data
+          return parsed.map((emp) => {
+            const isDemoBank = emp.bankName === 'ICICI Bank' || emp.bankName === 'HDFC Bank' || emp.bankName === 'Axis Bank' || emp.bankName === 'Chase Manhattan Bank';
+            const isDemoAcc = emp.accountNumber === '****-****-1234' || (typeof emp.accountNumber === 'string' && emp.accountNumber.startsWith('••••••••'));
+            const isDemoTax = emp.taxId === 'US-TAX-10293' || (typeof emp.taxId === 'string' && emp.taxId.startsWith('PAN-100'));
+            const isDemoSalary = emp.baseSalary === 6500 || emp.baseSalary === 72000 || emp.baseSalary === 65000 || emp.baseSalary === 58000;
+            const isDemoContact = emp.emergencyContactName === 'Karthik S' || emp.emergencyContactName === 'Murugan M' || emp.emergencyContactName === 'Kavitha R' || emp.emergencyContactName === 'Primary Relative';
+            const isDemoAddress = emp.address === '15 Silicon Valley Avenue' || emp.address === '42 IT Corridor, Tech Park' || emp.address === '88 Green Meadows Layout' || emp.address === '100 Market Street';
+            const isDemoEmergPhone = typeof emp.emergencyContactPhone === 'string' && (emp.emergencyContactPhone.startsWith('+91 98765 0000') || emp.emergencyContactPhone === '+1 (555) 111-2222');
+
+            return {
+              ...emp,
+              baseSalary: isDemoSalary ? undefined : emp.baseSalary,
+              bankName: isDemoBank ? '' : (emp.bankName || ''),
+              accountNumber: isDemoAcc ? '' : (emp.accountNumber || ''),
+              taxId: isDemoTax ? '' : (emp.taxId || ''),
+              emergencyContactName: isDemoContact ? '' : (emp.emergencyContactName || ''),
+              emergencyContactRelation: isDemoContact ? '' : (emp.emergencyContactRelation || ''),
+              emergencyContactPhone: isDemoEmergPhone ? '' : (emp.emergencyContactPhone || ''),
+              address: isDemoAddress ? '' : (emp.address || ''),
+            };
+          });
+        }
       } catch {
         // fallback
       }
