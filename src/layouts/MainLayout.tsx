@@ -14,10 +14,6 @@ const SWITCHABLE_ACCOUNTS = [
   'admin@velmora1.com',
   'admin@velmora2.com',
   'admin@velmora3.com',
-  'dhesan.m@company.com',
-  'dinesh.k@company.com',
-  'priya.k@company.com',
-  'unlinked.employee@company.com',
 ];
 
 export const MainLayout = () => {
