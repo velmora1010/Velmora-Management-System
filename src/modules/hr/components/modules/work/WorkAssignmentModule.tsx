@@ -30,6 +30,7 @@ import { WorkTask, TaskStatus } from '../../../types/workAssignment';
 import { AssignWorkModal } from './AssignWorkModal';
 import { TaskDetailsModal } from './TaskDetailsModal';
 import { EmployeeAssignedWorkModal } from './EmployeeAssignedWorkModal';
+import { ViewAssignedWorkSection } from './ViewAssignedWorkSection';
 import { Avatar } from '../../common/Avatar';
 import { doesAssignmentBelongToEmployee } from '../../../utils/employeeIdentity';
 
@@ -43,6 +44,9 @@ export const WorkAssignmentModule: React.FC = () => {
   const [assignModalEmployee, setAssignModalEmployee] = useState<Employee | null>(null);
   const [isAssignToAll, setIsAssignToAll] = useState(false);
   const [selectedTaskForDetails, setSelectedTaskForDetails] = useState<WorkTask | null>(null);
+
+  // Redesigned View Assigned Work Section state
+  const [selectedEmployeeForView, setSelectedEmployeeForView] = useState<Employee | null>(null);
 
   // Employee Assigned Work Modal state
   const [assignedWorkModalEmployee, setAssignedWorkModalEmployee] = useState<Employee | null>(null);
@@ -85,9 +89,9 @@ export const WorkAssignmentModule: React.FC = () => {
     setIsAssignModalOpen(true);
   };
 
-  // Open Employee Assigned Work Popup
+  // Open Employee Assigned Work Section / Popup
   const handleOpenAssignedWorkModal = (employee: Employee) => {
-    setAssignedWorkModalEmployee(employee);
+    setSelectedEmployeeForView(employee);
   };
 
   // Check if current user is an employee viewing their own tasks
@@ -119,6 +123,16 @@ export const WorkAssignmentModule: React.FC = () => {
 
   if (!canManageEmployees) {
     return null;
+  }
+
+  // If an employee is selected for viewing assigned work, render the redesigned ViewAssignedWorkSection
+  if (selectedEmployeeForView) {
+    return (
+      <ViewAssignedWorkSection
+        employee={selectedEmployeeForView}
+        onBack={() => setSelectedEmployeeForView(null)}
+      />
+    );
   }
 
   return (
@@ -518,9 +532,9 @@ export const WorkAssignmentModule: React.FC = () => {
 
                       <button
                         onClick={() => handleOpenAssignedWorkModal(emp)}
-                        className="py-2.5 px-3 bg-white hover:bg-slate-50 text-slate-700 hover:text-[#206DA6] border border-slate-300 hover:border-[#206DA6] text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                        className="py-2.5 px-3 bg-[#1E293B] hover:bg-[#334155] text-white hover:text-white border border-[#334155] hover:border-[#206DA6] text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
                       >
-                        <Eye className="w-3.5 h-3.5" />
+                        <Eye className="w-3.5 h-3.5 text-[#94A3B8]" />
                         <span>View Assigned Work</span>
                       </button>
                     </div>
