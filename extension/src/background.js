@@ -802,28 +802,10 @@ async function scrollUntilEnoughReels(igTabId, sender, payload) {
       stableRounds = 0; // Reset plateau on observable DOM progress
     } else if (uniqueReelCount === 0) {
       zeroRounds++;
-      if (zeroRounds <= 2) {
-        try {
-          await injectScript(igTabId, (targetUser) => {
-            const userLower = targetUser.toLowerCase();
-            const tablist = document.querySelector('main div[role="tablist"], div[role="tablist"]');
-            const reelsTab =
-              (tablist && (tablist.querySelector('a[href*="/reels/"]') || tablist.querySelector('a[role="tab"][href*="/reels/"]'))) ||
-              Array.from(document.querySelectorAll('main a[href*="/reels/"]')).find(a => {
-                const h = (a.getAttribute('href') || '').toLowerCase();
-                return (h.includes(`/${userLower}/reels`) || h.endsWith('/reels/')) &&
-                       !h.endsWith('.com/reels/') && h !== '/reels/' && h !== '/reels' && !h.startsWith('/reels?');
-              });
-            if (reelsTab) {
-              reelsTab.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-              reelsTab.click();
-            }
-            window.dispatchEvent(new Event('resize'));
-            window.dispatchEvent(new Event('scroll'));
-          }, [normalizedUser]);
-        } catch (e) {}
+      if (zeroRounds >= 5) {
+        console.log(`[scrollUntilEnoughReels] 0 reels remaining after ${zeroRounds} attempts for @${normalizedUser}.`);
+        break; // If 0 reels remain after 5 attempts, stop scrolling empty page
       }
-      if (zeroRounds >= 4) break; // If 0 reels remain after 4 attempts, stop scrolling empty page
     }
 
     // Real browser scroll operation with adaptive triggers
@@ -1113,7 +1095,7 @@ async function waitForReelsPage(igTabId, normalizedUser, timeoutMs = 15000) {
       }
 
       // ONLY return success if page is ACTUALLY on target user's reels page!
-      if (pageInfo && pageInfo.ready) {
+      if (pageInfo && pageInfo.ready && pageInfo.isReels) {
         if (pageInfo.reelCount > 0) {
           console.log(`[waitForReelsPage] Reels grid rendered for @${normalizedUser} with ${pageInfo.reelCount} reel anchors after ${elapsed}ms.`);
           return { ...pageInfo, elapsed, timedOut: false };
@@ -1125,13 +1107,15 @@ async function waitForReelsPage(igTabId, normalizedUser, timeoutMs = 15000) {
         }
       }
 
-      // SAFE IN-PAGE ACTIVATION:
-      // In Instagram SPA, activate the Reels tab if rendered.
-      // Even if aria-selected is true, clicking the Reels tab re-triggers React's virtual grid mount.
-      if (elapsed >= 1500 && pageInfo && pageInfo.reelCount === 0 && !pageInfo.noReelsConfirmed) {
+      // SAFE IN-PAGE ACTIVATION (ONE-SHOT ONLY):
+      // In Instagram SPA, if after 4000ms undisturbed wait no reels have appeared and not confirmed empty,
+      // routeToggleTriggered ensures this is strictly attempted ONCE and NEVER spams clicks or aborts in-flight GraphQL queries.
+      if (!routeToggleTriggered && elapsed >= 4000 && pageInfo && pageInfo.reelCount === 0 && !pageInfo.noReelsConfirmed) {
+        routeToggleTriggered = true;
         try {
           await injectScript(igTabId, (targetUser) => {
             const userLower = targetUser.toLowerCase();
+            const urlLower = window.location.href.toLowerCase();
             const tablist = document.querySelector('main div[role="tablist"], div[role="tablist"]');
             const profileReelsTab =
               (tablist && (tablist.querySelector('a[href*="/reels/"]') || tablist.querySelector('a[role="tab"][href*="/reels/"]'))) ||
@@ -1146,7 +1130,8 @@ async function waitForReelsPage(igTabId, normalizedUser, timeoutMs = 15000) {
                        !href.endsWith('.com/reels/') && href !== '/reels/' && href !== '/reels' && !href.startsWith('/reels?');
               });
 
-            if (profileReelsTab) {
+            // If not currently on reels route or tab is unselected, activate tab once
+            if (profileReelsTab && (!urlLower.includes(`/${userLower}/reels`) || profileReelsTab.getAttribute('aria-selected') !== 'true')) {
               profileReelsTab.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
               profileReelsTab.click();
             }
@@ -1160,11 +1145,11 @@ async function waitForReelsPage(igTabId, normalizedUser, timeoutMs = 15000) {
         }
       }
 
-      // Trigger gentle scroll after 2500ms to awaken virtualized grid/intersection observers
-      if (elapsed >= 2500 && elapsed % 2000 === 0 && pageInfo && pageInfo.reelCount === 0) {
+      // Trigger gentle micro-scroll after 3000ms to awaken virtualized grid/intersection observers
+      if (elapsed >= 3000 && elapsed % 2500 === 0 && pageInfo && pageInfo.reelCount === 0) {
         try {
           await injectScript(igTabId, () => {
-            window.scrollBy(0, 300);
+            window.scrollBy(0, 150);
             window.dispatchEvent(new Event('scroll', { bubbles: true }));
           });
         } catch (e) {
