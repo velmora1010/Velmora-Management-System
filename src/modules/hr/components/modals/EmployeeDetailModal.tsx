@@ -210,7 +210,13 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
 
   if (!employee) return null;
 
+  // Strict Access Control: Employees can strictly ONLY view their own profile
+  if (!canManageEmployees && !isOwnEmployeeProfile) {
+    return null;
+  }
+
   const canViewPrivatePersonalInfo = canManageEmployees || isOwnEmployeeProfile;
+  const canViewSalary = canViewPayroll || isOwnEmployeeProfile;
 
   // Assigned Shift
   const assignedShift = resolveEmployeeShift(employee, shiftTemplates);
@@ -346,7 +352,7 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
           }`}
         >
           <CreditCard className="w-3.5 h-3.5" />
-          Salary & Bank {!canViewPayroll && <ShieldLock className="w-3.5 h-3.5 text-slate-400" />}
+          Salary & Bank {!canViewSalary && <ShieldLock className="w-3.5 h-3.5 text-slate-400" />}
         </button>
       </div>
 
@@ -921,7 +927,7 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
 
         {activeTab === 'payroll' && (
           <div>
-            {!canViewPayroll ? (
+            {!canViewSalary ? (
               <div className="p-8 text-center bg-slate-50 border border-slate-200 rounded-2xl">
                 <ShieldLock className="w-10 h-10 text-slate-400 mx-auto mb-3" />
                 <h4 className="font-bold text-sm text-[#172B4D]">Confidential Financial Record</h4>

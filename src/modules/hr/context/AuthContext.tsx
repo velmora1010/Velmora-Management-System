@@ -6,6 +6,7 @@ import { useAuth as useVelmoraAuth } from '../../../hooks/useAuth';
 import { useRBAC as useVelmoraRBAC } from '../../../hooks/useRBAC';
 import { ROLES } from '../../../types/rbac';
 import { findLinkedEmployee } from '../utils/employeeIdentity';
+import { employeeSupabase } from '../utils/employeeSupabase';
 
 function getStoredEmployees(): Employee[] {
   const saved = safeGetItem('hrms_employees_v3');
@@ -90,14 +91,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [allUsers, setAllUsers] = useState<UserProfile[]>(() => buildSyncedUsers());
 
-  // HR-specific Employee Session state (stored in session storage to persist across refresh)
+  // HR-specific Employee Session state (stored in local and session storage to persist across refresh)
   const [employeeSession, setEmployeeSessionState] = useState<{
     email: string;
     token: string;
     user: any;
   } | null>(() => {
     try {
-      const stored = sessionStorage.getItem('hr_employee_session_v1');
+      const stored =
+        localStorage.getItem('hr_employee_session_v2') ||
+        sessionStorage.getItem('hr_employee_session_v1');
       return stored ? JSON.parse(stored) : null;
     } catch {
       return null;
@@ -107,6 +110,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const setEmployeeSession = useCallback((session: { email: string; token: string; user: any }) => {
     setEmployeeSessionState(session);
     try {
+      localStorage.setItem('hr_employee_session_v2', JSON.stringify(session));
       sessionStorage.setItem('hr_employee_session_v1', JSON.stringify(session));
     } catch (e) {
       console.warn('Failed saving employee session:', e);
@@ -116,7 +120,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const clearEmployeeSession = useCallback(() => {
     setEmployeeSessionState(null);
     try {
+      localStorage.removeItem('hr_employee_session_v2');
       sessionStorage.removeItem('hr_employee_session_v1');
+      employeeSupabase.auth.signOut().catch(() => {});
     } catch (e) {
       console.warn('Failed removing employee session:', e);
     }
