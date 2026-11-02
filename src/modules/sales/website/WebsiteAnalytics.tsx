@@ -34,6 +34,7 @@ import { AnalyticsSegmentedControl, SegmentOption } from './components/Analytics
 import { AnalyticsDonutChart } from './components/AnalyticsDonutChart';
 import { CardMatchingOrdersList } from './components/CardMatchingOrdersList';
 import { CustomerProductAnalyticsSection } from './components/CustomerProductAnalyticsSection';
+import { CustomerRepeatAnalyticsDashboard } from '../../../components/analytics/CustomerRepeatAnalyticsDashboard';
 import { AnalyticsFullPageDataView, CustomerPurchaseProfile, OperationalOrderRecord } from './components/AnalyticsFullPageDataView';
 import { OrderDetailsModal } from './components/OrderDetailsModal';
 import { AnalyticsFilterDrawer } from './components/AnalyticsFilterDrawer';
@@ -116,7 +117,8 @@ const ANALYTICS_VIEW_OPTIONS = [
   { id: 'analytics-order-value', label: 'Order Value Distribution' },
   { id: 'analytics-order-composition', label: 'Order Composition' },
   { id: 'analytics-cod-receivable', label: 'COD Receivable Overview' },
-  { id: 'analytics-customer-product', label: 'Customer Product Analytics' }
+  { id: 'analytics-customer-product', label: 'Customer Product Analytics' },
+  { id: 'analytics-customer-repeat', label: 'Customer Repeat & Geographic' }
 ];
 
 const REVENUE_MIX_SEGMENTS: SegmentOption<'Payment Mode' | 'State' | 'Product' | 'Offer' | 'Order Value Range'>[] = [
@@ -1936,6 +1938,11 @@ export const WebsiteAnalytics: React.FC = () => {
             onViewAllCustomers={handleOpenCustomersFullPage}
             highlighted={highlightedSectionId === 'analytics-customer-product'}
           />
+
+          {/* 10. CUSTOMER REPEAT & GEOGRAPHIC ANALYTICS */}
+          <div id="analytics-customer-repeat" className="scroll-mt-6">
+            <CustomerRepeatAnalyticsDashboard sourceChannel="WEBSITE" />
+          </div>
         </>
       )}
 

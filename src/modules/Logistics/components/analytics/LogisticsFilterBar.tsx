@@ -12,7 +12,8 @@ import {
   IndianRupee, 
   Clock, 
   PieChart, 
-  CheckCircle2, 
+  CheckCircle2,
+  Users, 
   Search,
   ChevronDown,
   X
@@ -30,6 +31,7 @@ export type AnalyticsSectionKey =
   | 'sla_delays'
   | 'cod_reconciliation'
   | 'geographic'
+  | 'customer_repeat'
   | 'tracking_exceptions';
 
 interface LogisticsFilterBarProps {
@@ -82,6 +84,7 @@ export const LogisticsFilterBar: React.FC<LogisticsFilterBarProps> = ({
     { key: 'sla_delays', label: 'SLA & Delays', icon: <Clock size={13} /> },
     { key: 'cod_reconciliation', label: 'COD Reconciliation', icon: <IndianRupee size={13} /> },
     { key: 'geographic', label: 'Geographic Logistics', icon: <MapPin size={13} /> },
+    { key: 'customer_repeat', label: 'Customer Repeat & Geo', icon: <Users size={13} /> },
     { key: 'tracking_exceptions', label: 'Exceptions & Actions', icon: <ShieldAlert size={13} /> }
   ];
 
