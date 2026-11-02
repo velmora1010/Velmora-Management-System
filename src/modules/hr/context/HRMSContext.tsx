@@ -169,33 +169,12 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // 1. Employees State
   const [employees, setEmployees] = useState<Employee[]>(() => {
-    const saved = localStorage.getItem(LOCAL_STORAGE_KEYS.EMPLOYEES);
+    const saved = safeGetItem(LOCAL_STORAGE_KEYS.EMPLOYEES);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Clear legacy demo/sample financial and emergency data
-          return parsed.map((emp) => {
-            const isDemoBank = emp.bankName === 'ICICI Bank' || emp.bankName === 'HDFC Bank' || emp.bankName === 'Axis Bank' || emp.bankName === 'Chase Manhattan Bank';
-            const isDemoAcc = emp.accountNumber === '****-****-1234' || (typeof emp.accountNumber === 'string' && emp.accountNumber.startsWith('••••••••'));
-            const isDemoTax = emp.taxId === 'US-TAX-10293' || (typeof emp.taxId === 'string' && emp.taxId.startsWith('PAN-100'));
-            const isDemoSalary = emp.baseSalary === 6500 || emp.baseSalary === 72000 || emp.baseSalary === 65000 || emp.baseSalary === 58000;
-            const isDemoContact = emp.emergencyContactName === 'Karthik S' || emp.emergencyContactName === 'Murugan M' || emp.emergencyContactName === 'Kavitha R' || emp.emergencyContactName === 'Primary Relative';
-            const isDemoAddress = emp.address === '15 Silicon Valley Avenue' || emp.address === '42 IT Corridor, Tech Park' || emp.address === '88 Green Meadows Layout' || emp.address === '100 Market Street';
-            const isDemoEmergPhone = typeof emp.emergencyContactPhone === 'string' && (emp.emergencyContactPhone.startsWith('+91 98765 0000') || emp.emergencyContactPhone === '+1 (555) 111-2222');
-
-            return {
-              ...emp,
-              baseSalary: isDemoSalary ? undefined : emp.baseSalary,
-              bankName: isDemoBank ? '' : (emp.bankName || ''),
-              accountNumber: isDemoAcc ? '' : (emp.accountNumber || ''),
-              taxId: isDemoTax ? '' : (emp.taxId || ''),
-              emergencyContactName: isDemoContact ? '' : (emp.emergencyContactName || ''),
-              emergencyContactRelation: isDemoContact ? '' : (emp.emergencyContactRelation || ''),
-              emergencyContactPhone: isDemoEmergPhone ? '' : (emp.emergencyContactPhone || ''),
-              address: isDemoAddress ? '' : (emp.address || ''),
-            };
-          });
+          return parsed;
         }
       } catch {
         // fallback
@@ -525,7 +504,11 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       employeeCode,
     };
 
-    setEmployees((prev) => [newEmployee, ...prev]);
+    setEmployees((prev) => {
+      const nextEmployees = [newEmployee, ...prev];
+      safeSetItem(LOCAL_STORAGE_KEYS.EMPLOYEES, JSON.stringify(nextEmployees));
+      return nextEmployees;
+    });
     logActivity('onboarded new employee', `${newEmployee.fullName} (${newEmployee.designation})`, 'employee', '#18A999');
     showToast('Employee profile created successfully!', 'success', 'Employee Created');
     return newEmployee;
@@ -536,36 +519,59 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       showToast('Only HR/Admin users are authorized to update employee records.', 'error');
       return;
     }
-    setEmployees((prev) =>
-      prev.map((emp) => {
-        if (emp.id === id) {
-          const fullName = updates.fullName || (updates.firstName || updates.lastName ? `${updates.firstName ?? emp.firstName} ${updates.lastName ?? emp.lastName}`.trim() : emp.fullName);
-          const avatar = updates.avatar !== undefined
-            ? (updates.avatar && updates.avatar.trim() ? updates.avatar : getInitialsAvatar(fullName))
-            : emp.avatar;
-          const updated = { ...emp, ...updates, fullName, avatar };
+    let updatedFullName = '';
+    setEmployees((prev) => {
+      const updatedList = prev.map((emp) => {
+        if (emp.id === id || emp.employeeCode?.toUpperCase() === id.toUpperCase()) {
+          const fullName =
+            updates.fullName ||
+            (updates.firstName || updates.lastName
+              ? `${updates.firstName ?? emp.firstName} ${updates.lastName ?? emp.lastName}`.trim()
+              : emp.fullName);
+          updatedFullName = fullName;
+          const avatar =
+            updates.avatar !== undefined
+              ? (updates.avatar && updates.avatar.trim() ? updates.avatar : emp.avatar || getInitialsAvatar(fullName))
+              : emp.avatar;
+
+          const updated: Employee = {
+            ...emp,
+            ...updates,
+            id: emp.id, // Strictly preserve unique ID
+            employeeCode: emp.employeeCode, // Strictly preserve employee Code
+            fullName,
+            avatar,
+          };
           return updated;
         }
         return emp;
-      })
-    );
+      });
+
+      safeSetItem(LOCAL_STORAGE_KEYS.EMPLOYEES, JSON.stringify(updatedList));
+      return updatedList;
+    });
+
     // Also sync department name or shift name in attendance if changed
     if (updates.departmentId || updates.shiftId) {
-      setAttendanceRecords((prev) =>
-        prev.map((att) => {
+      setAttendanceRecords((prev) => {
+        const updatedAttendance = prev.map((att) => {
           if (att.employeeId === id) {
             return {
               ...att,
               departmentId: updates.departmentId || att.departmentId,
               departmentName: updates.departmentName || att.departmentName,
+              shiftId: updates.shiftId || att.shiftId,
             };
           }
           return att;
-        })
-      );
+        });
+        safeSetItem(LOCAL_STORAGE_KEYS.ATTENDANCE, JSON.stringify(updatedAttendance));
+        return updatedAttendance;
+      });
     }
-    logActivity('updated employee details for', updates.fullName || id, 'employee');
-    showToast('Employee profile updated successfully.', 'success');
+
+    logActivity('updated employee details for', updatedFullName || id, 'employee', '#206DA6');
+    showToast('Employee profile updated successfully.', 'success', 'Saved');
   };
 
   const deleteEmployee = (id: string) => {

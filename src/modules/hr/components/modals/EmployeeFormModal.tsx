@@ -62,13 +62,29 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     updateEmployee,
     addDepartment,
     designations,
+    employees,
   } = useHRMS();
+
+  const activeEmployee = useMemo(() => {
+    if (!employeeToEdit) return null;
+    return employees.find((e) => e.id === employeeToEdit.id) || employeeToEdit;
+  }, [employeeToEdit, employees]);
 
   // Navigation State
   const [activeTab, setActiveTab] = useState<FormTab>('personal');
   const [completedTabs, setCompletedTabs] = useState<Set<FormTab>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [touchedFields, setTouchedFields] = useState<Set<string>>(new Set());
+
+  const markTouched = (field: string) => {
+    setTouchedFields((prev) => {
+      if (prev.has(field)) return prev;
+      const next = new Set(prev);
+      next.add(field);
+      return next;
+    });
+  };
 
   // Step 1: Personal Info
   const [firstName, setFirstName] = useState('');
@@ -136,62 +152,46 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     setDesignationSearch('');
 
     if (employeeToEdit) {
-      setFirstName(employeeToEdit.firstName || '');
-      setLastName(employeeToEdit.lastName || '');
-      setEmail(employeeToEdit.email || '');
-      setPhone(employeeToEdit.phone || '');
-      setAvatar(employeeToEdit.avatar || '');
-      setAvatarFileName(employeeToEdit.avatar ? 'Current Profile Photo' : '');
+      const source = employees.find((e) => e.id === employeeToEdit.id) || employeeToEdit;
+      setFirstName(source.firstName || '');
+      setLastName(source.lastName || '');
+      setEmail(source.email || '');
+      setPhone(source.phone || '');
+      setAvatar(source.avatar || '');
+      setAvatarFileName(source.avatar ? 'Current Profile Photo' : '');
       setUploadError('');
-      setGender(employeeToEdit.gender || '');
-      setDateOfBirth(employeeToEdit.dateOfBirth || '');
-      setJoiningDate(employeeToEdit.joiningDate || '');
-      setDepartmentId(employeeToEdit.departmentId || '');
-      setDesignation(employeeToEdit.designation || '');
-      setDesignationId(employeeToEdit.designationId || '');
-      setDesignationCategory(employeeToEdit.designationCategory || '');
-      setStatus(employeeToEdit.status || 'active');
-      setEmploymentType(employeeToEdit.employmentType || '');
-      setShiftId(employeeToEdit.shiftId || '');
-      setWorkLocation(employeeToEdit.workLocation || '');
+      setGender(source.gender || '');
+      setDateOfBirth(source.dateOfBirth || '');
+      setJoiningDate(source.joiningDate || '');
+      setDepartmentId(source.departmentId || '');
+      setDesignation(source.designation || '');
+      setDesignationId(source.designationId || '');
+      setDesignationCategory(source.designationCategory || '');
+      setStatus(source.status || 'active');
+      setEmploymentType(source.employmentType || '');
+      setShiftId(source.shiftId || '');
+      setWorkLocation(source.workLocation || '');
 
-      // Load actual saved values only; purge hardcoded sample defaults
-      const rawBank = (employeeToEdit.bankName || '').trim();
-      const isDemoBank = rawBank === 'Chase Manhattan Bank' || rawBank === 'ICICI Bank' || rawBank === 'HDFC Bank' || rawBank === 'Axis Bank';
-      setBankName(isDemoBank ? '' : rawBank);
+      // Load actual saved values directly and preserve them
+      setBankName(source.bankName || '');
+      setAccountNumber(source.accountNumber || '');
+      setTaxId(source.taxId || '');
+      setBaseSalary(
+        source.baseSalary !== undefined && source.baseSalary !== null
+          ? source.baseSalary
+          : ''
+      );
 
-      const rawAcc = (employeeToEdit.accountNumber || '').trim();
-      const isDemoAcc = rawAcc === '****-****-1234' || rawAcc.startsWith('••••••••');
-      setAccountNumber(isDemoAcc ? '' : rawAcc);
+      setEmergencyContactName(source.emergencyContactName || '');
+      setEmergencyContactRelation(source.emergencyContactRelation || '');
+      setEmergencyContactPhone(source.emergencyContactPhone || '');
+      setAddress(source.address || '');
 
-      const rawTax = (employeeToEdit.taxId || '').trim();
-      const isDemoTax = rawTax === 'US-TAX-10293' || rawTax.startsWith('PAN-100');
-      setTaxId(isDemoTax ? '' : rawTax);
-
-      const rawSalary = employeeToEdit.baseSalary;
-      const isDemoSalary = rawSalary === 6500 || rawSalary === 72000 || rawSalary === 65000 || rawSalary === 58000;
-      setBaseSalary(isDemoSalary || rawSalary === undefined || rawSalary === null ? '' : rawSalary);
-
-      const rawContact = (employeeToEdit.emergencyContactName || '').trim();
-      const isDemoContact = rawContact === 'Karthik S' || rawContact === 'Murugan M' || rawContact === 'Kavitha R' || rawContact === 'Primary Relative';
-      setEmergencyContactName(isDemoContact ? '' : rawContact);
-
-      const rawRelation = (employeeToEdit.emergencyContactRelation || '').trim();
-      const isDemoRelation = isDemoContact || rawRelation === 'Spouse';
-      setEmergencyContactRelation(isDemoRelation ? '' : rawRelation);
-
-      const rawEmergPhone = (employeeToEdit.emergencyContactPhone || '').trim();
-      const isDemoEmergPhone = rawEmergPhone.startsWith('+91 98765 0000') || rawEmergPhone === '+1 (555) 111-2222';
-      setEmergencyContactPhone(isDemoEmergPhone ? '' : rawEmergPhone);
-
-      const rawAddress = (employeeToEdit.address || '').trim();
-      const isDemoAddress = rawAddress === '15 Silicon Valley Avenue' || rawAddress === '42 IT Corridor, Tech Park' || rawAddress === '88 Green Meadows Layout' || rawAddress === '100 Market Street';
-      setAddress(isDemoAddress ? '' : rawAddress);
-
-      setCity(employeeToEdit.city || '');
-      setCountry(employeeToEdit.country || '');
-      setBio(employeeToEdit.bio || '');
+      setCity(source.city || '');
+      setCountry(source.country || '');
+      setBio(source.bio || '');
       setCompletedTabs(new Set(['personal', 'job', 'financial', 'emergency']));
+      setTouchedFields(new Set());
     } else {
       // New employee: check draft if available, otherwise start completely empty
       let draft: any = null;
@@ -206,18 +206,13 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
         setFirstName(draft.firstName || '');
         setLastName(draft.lastName || '');
         setEmail(draft.email || '');
-        const draftPhone =
-          draft.phone === '+1 (555) 000-0000' || draft.phone === '+1 (555) 234-5678'
-            ? ''
-            : (draft.phone || '');
-        setPhone(draftPhone);
+        setPhone(draft.phone || '');
         setAvatar(draft.avatar || '');
         setAvatarFileName(draft.avatar ? 'Draft Profile Photo' : '');
         setUploadError('');
         setGender(draft.gender || '');
-        setDateOfBirth(draft.dateOfBirth === '1994-05-15' ? '' : (draft.dateOfBirth || ''));
-        const draftCity = draft.city === 'San Francisco, CA' ? '' : (draft.city || '');
-        setCity(draftCity);
+        setDateOfBirth(draft.dateOfBirth || '');
+        setCity(draft.city || '');
         setDesignation(draft.designation || '');
         setDesignationId(draft.designationId || '');
         setDesignationCategory(draft.designationCategory || '');
@@ -226,34 +221,20 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
         setEmploymentType(draft.employmentType || '');
         setWorkLocation(draft.workLocation || '');
         setShiftId(draft.shiftId || '');
-        setJoiningDate(draft.joiningDate === '2026-10-01' ? '' : (draft.joiningDate || ''));
+        setJoiningDate(draft.joiningDate || '');
 
-        const draftSalary = draft.baseSalary === 6500 ? '' : (draft.baseSalary || '');
-        setBaseSalary(draftSalary);
-        const draftBank = draft.bankName === 'Chase Manhattan Bank' ? '' : (draft.bankName || '');
-        setBankName(draftBank);
-        const draftAcc = draft.accountNumber === '****-****-1234' ? '' : (draft.accountNumber || '');
-        setAccountNumber(draftAcc);
-        const draftTax = draft.taxId === 'US-TAX-10293' ? '' : (draft.taxId || '');
-        setTaxId(draftTax);
-        const draftContact = draft.emergencyContactName === 'Primary Relative' ? '' : (draft.emergencyContactName || '');
-        setEmergencyContactName(draftContact);
-        const draftRelation = draft.emergencyContactRelation === 'Spouse' ? '' : (draft.emergencyContactRelation || '');
-        setEmergencyContactRelation(draftRelation);
-        const draftEmergPhone =
-          draft.emergencyContactPhone === '+1 (555) 111-2222' || draft.emergencyContactPhone === '+1 (555) 998-1122'
-            ? ''
-            : (draft.emergencyContactPhone || '');
-        setEmergencyContactPhone(draftEmergPhone);
-        const draftAddress =
-          draft.address === '100 Market Street' || draft.address === '428 Willow Creek Lane, Apt 2B'
-            ? ''
-            : (draft.address || '');
-        setAddress(draftAddress);
-        const draftCountry = draft.country === 'United States' ? '' : (draft.country || '');
-        setCountry(draftCountry);
+        setBaseSalary(draft.baseSalary || '');
+        setBankName(draft.bankName || '');
+        setAccountNumber(draft.accountNumber || '');
+        setTaxId(draft.taxId || '');
+        setEmergencyContactName(draft.emergencyContactName || '');
+        setEmergencyContactRelation(draft.emergencyContactRelation || '');
+        setEmergencyContactPhone(draft.emergencyContactPhone || '');
+        setAddress(draft.address || '');
+        setCountry(draft.country || '');
         setBio(draft.bio || '');
         setCompletedTabs(new Set(draft.completedTabs || []));
+        setTouchedFields(new Set());
       } else {
         // Completely empty new employee form
         setFirstName('');
@@ -288,7 +269,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
         setCompletedTabs(new Set());
       }
     }
-  }, [employeeToEdit, departments, shiftTemplates, isOpen]);
+  }, [employeeToEdit?.id, isOpen]);
 
   // Group designations by category and apply search query
   const groupedDesignations = useMemo(() => {
@@ -317,6 +298,9 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     setDesignation(selectedName);
     setDesignationId(id);
     setDesignationCategory(category);
+    markTouched('designation');
+    markTouched('designationId');
+    markTouched('designationCategory');
     setIsDesignationOpen(false);
     setDesignationSearch('');
 
@@ -341,6 +325,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
 
     if (matchingDept) {
       setDepartmentId(matchingDept.id);
+      markTouched('departmentId');
       if (errors.departmentId) {
         setErrors((prev) => {
           const copy = { ...prev };
@@ -351,6 +336,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     } else {
       // Clear invalid department selection if target department isn't in database yet
       setDepartmentId('');
+      markTouched('departmentId');
     }
   };
 
@@ -475,6 +461,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
       const optimizedUrl = await processProfileImage(file);
       setAvatar(optimizedUrl);
       setAvatarFileName(file.name);
+      markTouched('avatar');
       setUploadError('');
     } catch {
       setUploadError('Failed to process image file. Please try another image.');
@@ -502,6 +489,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     setAvatar('');
     setAvatarFileName('');
     setUploadError('');
+    markTouched('avatar');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -586,11 +574,80 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     };
   };
 
+  // Construct update payload preserving unedited database values
+  const getPayloadForEmployee = (): Partial<Employee> => {
+    const current = activeEmployee;
+    const dept = departments.find((d) => d.id === departmentId);
+    const shift = shiftTemplates.find((s) => s.id === shiftId);
+
+    const fName = touchedFields.has('firstName') ? firstName.trim() : (current?.firstName ?? firstName.trim());
+    const lName = touchedFields.has('lastName') ? lastName.trim() : (current?.lastName ?? lastName.trim());
+    const full = `${fName} ${lName}`.trim();
+
+    const finalAvatar = avatar || (current?.avatar ? current.avatar : getInitialsAvatar(full || 'Employee'));
+
+    let salaryVal: number | undefined;
+    if (touchedFields.has('baseSalary')) {
+      salaryVal = baseSalary !== '' && !isNaN(Number(baseSalary)) ? Number(baseSalary) : undefined;
+    } else {
+      salaryVal = current?.baseSalary !== undefined ? current.baseSalary : (baseSalary !== '' && !isNaN(Number(baseSalary)) ? Number(baseSalary) : undefined);
+    }
+
+    const payload: Partial<Employee> = {
+      firstName: fName,
+      lastName: lName,
+      fullName: full,
+      email: touchedFields.has('email') ? email.trim() : (current?.email ?? email.trim()),
+      phone: touchedFields.has('phone') ? phone.trim() : (current?.phone ?? phone.trim()),
+      avatar: finalAvatar,
+      gender: touchedFields.has('gender') ? gender : (current?.gender ?? gender),
+      dateOfBirth: touchedFields.has('dateOfBirth') ? dateOfBirth : (current?.dateOfBirth ?? dateOfBirth),
+      city: touchedFields.has('city') ? city.trim() : (current?.city ?? city.trim()),
+
+      designation: touchedFields.has('designation') ? designation.trim() : (current?.designation ?? designation.trim()),
+      designationId: touchedFields.has('designationId') ? designationId : (current?.designationId ?? designationId),
+      designationCategory: touchedFields.has('designationCategory') ? designationCategory : (current?.designationCategory ?? designationCategory),
+      departmentId: touchedFields.has('departmentId') ? departmentId : (current?.departmentId ?? departmentId),
+      departmentName: dept?.name || expectedDepartmentName || current?.departmentName || 'Software Development',
+      status: touchedFields.has('status') ? status : (current?.status ?? status),
+      employmentType: touchedFields.has('employmentType') ? employmentType : (current?.employmentType ?? employmentType),
+      workLocation: touchedFields.has('workLocation') ? workLocation : (current?.workLocation ?? workLocation),
+      shiftId: touchedFields.has('shiftId') ? shiftId : (current?.shiftId ?? shiftId),
+      shiftName: shift?.name || current?.shiftName || 'Morning Shift',
+      joiningDate: touchedFields.has('joiningDate') ? joiningDate : (current?.joiningDate ?? joiningDate),
+
+      baseSalary: salaryVal,
+      currency: 'INR',
+      bankName: touchedFields.has('bankName') ? bankName.trim() : (current?.bankName ?? bankName.trim()),
+      accountNumber: touchedFields.has('accountNumber') ? accountNumber.trim() : (current?.accountNumber ?? accountNumber.trim()),
+      taxId: touchedFields.has('taxId') ? taxId.trim() : (current?.taxId ?? taxId.trim()),
+
+      emergencyContactName: touchedFields.has('emergencyContactName') ? emergencyContactName.trim() : (current?.emergencyContactName ?? emergencyContactName.trim()),
+      emergencyContactRelation: touchedFields.has('emergencyContactRelation') ? emergencyContactRelation.trim() : (current?.emergencyContactRelation ?? emergencyContactRelation.trim()),
+      emergencyContactPhone: touchedFields.has('emergencyContactPhone') ? emergencyContactPhone.trim() : (current?.emergencyContactPhone ?? emergencyContactPhone.trim()),
+      address: touchedFields.has('address') ? address.trim() : (current?.address ?? address.trim()),
+      country: touchedFields.has('country') ? country.trim() : (current?.country ?? country.trim() ?? 'India'),
+      bio: touchedFields.has('bio') ? bio.trim() : (current?.bio ?? bio.trim()),
+    };
+
+    return payload;
+  };
+
   // Tab Header Click Navigation
   const handleTabClick = (targetTab: FormTab) => {
     const stepOrder: FormTab[] = ['personal', 'job', 'financial', 'emergency'];
     const currentIndex = stepOrder.indexOf(activeTab);
     const targetIndex = stepOrder.indexOf(targetTab);
+
+    // If editing employee, auto-save valid changes from current tab
+    if (employeeToEdit && validateStep(activeTab)) {
+      try {
+        const payload = getPayloadForEmployee();
+        updateEmployee(employeeToEdit.id, payload);
+      } catch (err) {
+        console.error('Auto-save on tab click failed:', err);
+      }
+    }
 
     // Navigating backwards is always permitted without revalidating
     if (targetIndex <= currentIndex) {
@@ -605,7 +662,9 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
 
     // Mark current step as completed
     setCompletedTabs((prev) => new Set([...prev, activeTab]));
-    saveDraft();
+    if (!employeeToEdit) {
+      saveDraft();
+    }
 
     // Check intermediate steps if jumping ahead
     for (let i = currentIndex; i < targetIndex; i++) {
@@ -621,15 +680,33 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
   };
 
   // Step Forward & Back
-  const handleNext = (currentTab: FormTab, nextTab: FormTab) => {
+  const handleNext = async (currentTab: FormTab, nextTab: FormTab) => {
     if (!validateStep(currentTab)) return;
     setCompletedTabs((prev) => new Set([...prev, currentTab]));
-    saveDraft();
+
+    if (employeeToEdit) {
+      try {
+        setIsSubmitting(true);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const payload = getPayloadForEmployee();
+        updateEmployee(employeeToEdit.id, payload);
+      } catch (err: any) {
+        console.error('Failed to save tab updates:', err);
+        return;
+      } finally {
+        setIsSubmitting(false);
+      }
+    } else {
+      saveDraft();
+    }
+
     setActiveTab(nextTab);
   };
 
   const handleBack = (prevTab: FormTab) => {
-    saveDraft();
+    if (!employeeToEdit) {
+      saveDraft();
+    }
     setActiveTab(prevTab);
   };
 
@@ -648,52 +725,14 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     setIsSubmitting(true);
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 450));
+      await new Promise((resolve) => setTimeout(resolve, 350));
 
-      const dept = departments.find((d) => d.id === departmentId);
-      const shift = shiftTemplates.find((s) => s.id === shiftId);
-
-      const fullName = `${firstName} ${lastName}`.trim();
-      const finalAvatar = avatar || getInitialsAvatar(fullName || 'Employee');
-
-      const empData = {
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        fullName,
-        email: email.trim(),
-        phone: phone.trim(),
-        avatar: finalAvatar,
-        gender,
-        dateOfBirth,
-        joiningDate,
-        departmentId,
-        departmentName: dept?.name || expectedDepartmentName || 'Software Development',
-        designation: designation.trim(),
-        designationId,
-        designationCategory,
-        status,
-        employmentType,
-        shiftId,
-        shiftName: shift?.name || 'Morning Shift',
-        workLocation,
-        baseSalary: Number(baseSalary),
-        currency: 'INR',
-        bankName: bankName.trim(),
-        accountNumber: accountNumber.trim(),
-        taxId: taxId.trim(),
-        emergencyContactName: emergencyContactName.trim(),
-        emergencyContactRelation: emergencyContactRelation.trim(),
-        emergencyContactPhone: emergencyContactPhone.trim(),
-        address: address.trim(),
-        city: city.trim(),
-        country: country.trim(),
-        bio: bio.trim(),
-      };
+      const payload = getPayloadForEmployee();
 
       if (employeeToEdit) {
-        updateEmployee(employeeToEdit.id, empData);
+        updateEmployee(employeeToEdit.id, payload);
       } else {
-        addEmployee(empData);
+        addEmployee(payload as any);
       }
 
       // Clear draft on successful creation
@@ -704,6 +743,8 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
       }
 
       onClose();
+    } catch (err: any) {
+      console.error('Final submit failed:', err);
     } finally {
       setIsSubmitting(false);
     }
@@ -876,6 +917,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   value={firstName}
                   onChange={(e) => {
                     setFirstName(e.target.value);
+                    markTouched('firstName');
                     if (errors.firstName) {
                       setErrors((prev) => {
                         const copy = { ...prev };
@@ -901,6 +943,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   value={lastName}
                   onChange={(e) => {
                     setLastName(e.target.value);
+                    markTouched('lastName');
                     if (errors.lastName) {
                       setErrors((prev) => {
                         const copy = { ...prev };
@@ -928,6 +971,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   value={email}
                   onChange={(e) => {
                     setEmail(e.target.value);
+                    markTouched('email');
                     if (errors.email) {
                       setErrors((prev) => {
                         const copy = { ...prev };
@@ -949,7 +993,10 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                 <input
                   type="text"
                   value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
+                  onChange={(e) => {
+                    setPhone(e.target.value);
+                    markTouched('phone');
+                  }}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
                   placeholder="e.g. +1 (555) 000-0000"
                   autoComplete="off"
@@ -962,7 +1009,10 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                 <label className="block text-xs font-semibold text-white uppercase mb-1">Gender</label>
                 <select
                   value={gender}
-                  onChange={(e) => setGender(e.target.value as any)}
+                  onChange={(e) => {
+                    setGender(e.target.value as any);
+                    markTouched('gender');
+                  }}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl"
                 >
                   <option value="">Select Gender...</option>
@@ -977,7 +1027,10 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                 <input
                   type="date"
                   value={dateOfBirth}
-                  onChange={(e) => setDateOfBirth(e.target.value)}
+                  onChange={(e) => {
+                    setDateOfBirth(e.target.value);
+                    markTouched('dateOfBirth');
+                  }}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl"
                 />
               </div>
@@ -987,7 +1040,10 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                 <input
                   type="text"
                   value={city}
-                  onChange={(e) => setCity(e.target.value)}
+                  onChange={(e) => {
+                    setCity(e.target.value);
+                    markTouched('city');
+                  }}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
                   placeholder="e.g. San Francisco, CA"
                   autoComplete="off"
@@ -1103,6 +1159,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   value={departmentId}
                   onChange={(e) => {
                     setDepartmentId(e.target.value);
+                    markTouched('departmentId');
                     if (errors.departmentId) {
                       setErrors((prev) => {
                         const copy = { ...prev };
@@ -1150,7 +1207,10 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                 <label className="block text-xs font-semibold text-white uppercase mb-1">Status</label>
                 <select
                   value={status}
-                  onChange={(e) => setStatus(e.target.value as any)}
+                  onChange={(e) => {
+                    setStatus(e.target.value as any);
+                    markTouched('status');
+                  }}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl"
                 >
                   <option value="active">Active</option>
@@ -1164,7 +1224,10 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                 <label className="block text-xs font-semibold text-white uppercase mb-1">Employment Type</label>
                 <select
                   value={employmentType}
-                  onChange={(e) => setEmploymentType(e.target.value as any)}
+                  onChange={(e) => {
+                    setEmploymentType(e.target.value as any);
+                    markTouched('employmentType');
+                  }}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl"
                 >
                   <option value="">Select Employment Type...</option>
@@ -1179,7 +1242,10 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                 <label className="block text-xs font-semibold text-white uppercase mb-1">Work Location</label>
                 <select
                   value={workLocation}
-                  onChange={(e) => setWorkLocation(e.target.value as any)}
+                  onChange={(e) => {
+                    setWorkLocation(e.target.value as any);
+                    markTouched('workLocation');
+                  }}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl"
                 >
                   <option value="">Select Work Location...</option>
@@ -1200,6 +1266,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   value={shiftId}
                   onChange={(e) => {
                     setShiftId(e.target.value);
+                    markTouched('shiftId');
                     if (errors.shiftId) {
                       setErrors((prev) => {
                         const copy = { ...prev };
@@ -1229,7 +1296,10 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                 <input
                   type="date"
                   value={joiningDate}
-                  onChange={(e) => setJoiningDate(e.target.value)}
+                  onChange={(e) => {
+                    setJoiningDate(e.target.value);
+                    markTouched('joiningDate');
+                  }}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl"
                 />
               </div>
@@ -1258,6 +1328,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   onChange={(e) => {
                     const val = e.target.value === '' ? '' : Number(e.target.value);
                     setBaseSalary(val);
+                    markTouched('baseSalary');
                     if (errors.baseSalary) {
                       setErrors((prev) => {
                         const copy = { ...prev };
@@ -1279,7 +1350,10 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                 <input
                   type="text"
                   value={bankName}
-                  onChange={(e) => setBankName(e.target.value)}
+                  onChange={(e) => {
+                    setBankName(e.target.value);
+                    markTouched('bankName');
+                  }}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl"
                   placeholder="e.g. Silicon Valley Bank / Chase"
                 />
@@ -1292,7 +1366,10 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                 <input
                   type="text"
                   value={accountNumber}
-                  onChange={(e) => setAccountNumber(e.target.value)}
+                  onChange={(e) => {
+                    setAccountNumber(e.target.value);
+                    markTouched('accountNumber');
+                  }}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl font-mono"
                   placeholder="e.g. 1234567890"
                 />
@@ -1303,7 +1380,10 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                 <input
                   type="text"
                   value={taxId}
-                  onChange={(e) => setTaxId(e.target.value)}
+                  onChange={(e) => {
+                    setTaxId(e.target.value);
+                    markTouched('taxId');
+                  }}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl font-mono"
                   placeholder="e.g. US-TAX-98211"
                 />
@@ -1321,7 +1401,10 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                 <input
                   type="text"
                   value={emergencyContactName}
-                  onChange={(e) => setEmergencyContactName(e.target.value)}
+                  onChange={(e) => {
+                    setEmergencyContactName(e.target.value);
+                    markTouched('emergencyContactName');
+                  }}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl"
                   placeholder="e.g. Robert Vance"
                 />
@@ -1332,7 +1415,10 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                 <input
                   type="text"
                   value={emergencyContactRelation}
-                  onChange={(e) => setEmergencyContactRelation(e.target.value)}
+                  onChange={(e) => {
+                    setEmergencyContactRelation(e.target.value);
+                    markTouched('emergencyContactRelation');
+                  }}
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl"
                   placeholder="e.g. Spouse / Parent / Sibling"
                 />
@@ -1344,7 +1430,10 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               <input
                 type="text"
                 value={emergencyContactPhone}
-                onChange={(e) => setEmergencyContactPhone(e.target.value)}
+                onChange={(e) => {
+                  setEmergencyContactPhone(e.target.value);
+                  markTouched('emergencyContactPhone');
+                }}
                 className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
                 placeholder="e.g. +1 (555) 000-0000"
                 autoComplete="off"
@@ -1356,7 +1445,10 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               <input
                 type="text"
                 value={address}
-                onChange={(e) => setAddress(e.target.value)}
+                onChange={(e) => {
+                  setAddress(e.target.value);
+                  markTouched('address');
+                }}
                 className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
                 placeholder="e.g. 123 Main Street, Suite 400"
                 autoComplete="off"
@@ -1379,10 +1471,20 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               <button
                 type="button"
                 onClick={() => handleNext('personal', 'job')}
-                className="px-5 py-2 text-xs font-bold text-white bg-[#206DA6] hover:bg-[#1A5987] rounded-xl shadow-md shadow-[#206DA6]/20 transition-all flex items-center gap-1.5 cursor-pointer"
+                disabled={isSubmitting}
+                className="px-5 py-2 text-xs font-bold text-white bg-[#206DA6] hover:bg-[#1A5987] rounded-xl shadow-md shadow-[#206DA6]/20 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                <span>Save & Next</span>
-                <ArrowRight className="w-3.5 h-3.5" />
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Save & Next</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </>
+                )}
               </button>
             </>
           )}
@@ -1400,10 +1502,20 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               <button
                 type="button"
                 onClick={() => handleNext('job', 'financial')}
-                className="px-5 py-2 text-xs font-bold text-white bg-[#206DA6] hover:bg-[#1A5987] rounded-xl shadow-md shadow-[#206DA6]/20 transition-all flex items-center gap-1.5 cursor-pointer"
+                disabled={isSubmitting}
+                className="px-5 py-2 text-xs font-bold text-white bg-[#206DA6] hover:bg-[#1A5987] rounded-xl shadow-md shadow-[#206DA6]/20 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                <span>Save & Next</span>
-                <ArrowRight className="w-3.5 h-3.5" />
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Save & Next</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </>
+                )}
               </button>
             </>
           )}
@@ -1421,10 +1533,20 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               <button
                 type="button"
                 onClick={() => handleNext('financial', 'emergency')}
-                className="px-5 py-2 text-xs font-bold text-white bg-[#206DA6] hover:bg-[#1A5987] rounded-xl shadow-md shadow-[#206DA6]/20 transition-all flex items-center gap-1.5 cursor-pointer"
+                disabled={isSubmitting}
+                className="px-5 py-2 text-xs font-bold text-white bg-[#206DA6] hover:bg-[#1A5987] rounded-xl shadow-md shadow-[#206DA6]/20 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                <span>Save & Next</span>
-                <ArrowRight className="w-3.5 h-3.5" />
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Save & Next</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </>
+                )}
               </button>
             </>
           )}

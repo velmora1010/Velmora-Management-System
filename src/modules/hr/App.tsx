@@ -357,7 +357,7 @@ const HRMSAppContent: React.FC = () => {
 
       {/* Employee Details Modal (tabbed with attendance, leaves, RBAC-protected compensation) */}
       <EmployeeDetailModal
-        employee={selectedEmployee}
+        employee={selectedEmployee ? (employees.find((e) => e.id === selectedEmployee.id) || selectedEmployee) : null}
         isOpen={!!selectedEmployee}
         onClose={() => {
           setSelectedEmployee(null);
@@ -375,8 +375,11 @@ const HRMSAppContent: React.FC = () => {
       {/* Employee Add/Edit Form Modal */}
       <EmployeeFormModal
         isOpen={isEmployeeFormOpen}
-        onClose={() => setIsEmployeeFormOpen(false)}
-        employeeToEdit={employeeToEdit}
+        onClose={() => {
+          setIsEmployeeFormOpen(false);
+          setEmployeeToEdit(null);
+        }}
+        employeeToEdit={employeeToEdit ? (employees.find((e) => e.id === employeeToEdit.id) || employeeToEdit) : null}
       />
 
       {/* Department Detail Modal (shows info & list of employees) */}
