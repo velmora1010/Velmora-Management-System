@@ -17,6 +17,7 @@ import {
   Eye,
   EyeOff,
   ChevronDown,
+  ChevronUp,
   ArrowUpDown,
   CheckCircle2,
   Package,
@@ -26,7 +27,9 @@ import {
   Percent,
   Clock,
   ArrowRight,
-  X
+  X,
+  Award,
+  Crown
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -89,7 +92,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // 2. Filter States
+  // 2. Global Filter States
   const [datePreset, setDatePreset] = useState<string>('all');
   const [customStartDate, setCustomStartDate] = useState<string>(defaultDateRange?.startDate || '');
   const [customEndDate, setCustomEndDate] = useState<string>(defaultDateRange?.endDate || '');
@@ -99,21 +102,31 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
   const [selectedFrequency, setSelectedFrequency] = useState<AnalyticsFilterParams['frequencyRange']>('all');
   const [showFiltersDrawer, setShowFiltersDrawer] = useState<boolean>(false);
 
-  // 3. Top Customers Table Controls
-  const [customerLimit, setCustomerLimit] = useState<number>(100);
-  const [customerSortField, setCustomerSortField] = useState<'totalValue' | 'totalOrders' | 'lastOrderDate'>('totalValue');
-  const [customerSortAsc, setCustomerSortAsc] = useState<boolean>(false);
-  const [customerSearch, setCustomerSearch] = useState<string>('');
+  // Shared Phone Masking State
   const [showMaskedPhone, setShowMaskedPhone] = useState<boolean>(true);
   const [selectedCustomerForModal, setSelectedCustomerForModal] = useState<TopCustomerItem | null>(null);
 
-  // 4. Geographic Controls
+  // 3. Top Customers by Customer Value Controls
+  const [valueLimit, setValueLimit] = useState<number>(100);
+  const [valueSortField, setValueSortField] = useState<'totalValue' | 'totalOrders' | 'lastOrderDate'>('totalValue');
+  const [valueSortAsc, setValueSortAsc] = useState<boolean>(false);
+  const [valueSearch, setValueSearch] = useState<string>('');
+  const [visibleCountValue, setVisibleCountValue] = useState<number>(15);
+
+  // 4. Top 100 Repeat Customers Controls
+  const [repeatLimit, setRepeatLimit] = useState<number>(100);
+  const [repeatSortField, setRepeatSortField] = useState<'totalOrders' | 'totalValue' | 'lastOrderDate'>('totalOrders');
+  const [repeatSortAsc, setRepeatSortAsc] = useState<boolean>(false);
+  const [repeatSearch, setRepeatSearch] = useState<string>('');
+  const [visibleCountRepeat, setVisibleCountRepeat] = useState<number>(15);
+
+  // 5. Geographic Controls
   const [geoTab, setGeoTab] = useState<'states' | 'cities'>('states');
   const [geoLimit, setGeoLimit] = useState<number>(100);
   const [geoSearch, setGeoSearch] = useState<string>('');
   const [drillDownState, setDrillDownState] = useState<string | null>(null);
 
-  // 5. Product Insights Table Controls
+  // 6. Product Insights Table Controls
   const [productSortField, setProductSortField] = useState<'repeatSalesValue' | 'repeatQuantity' | 'repeatCustomerCount'>('repeatSalesValue');
   const [productSortAsc, setProductSortAsc] = useState<boolean>(false);
   const [productSearch, setProductSearch] = useState<string>('');
@@ -131,7 +144,6 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
       }
       setError(null);
 
-      // Compute effective dates
       let effectiveStart = customStartDate;
       let effectiveEnd = customEndDate;
 
@@ -159,9 +171,6 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
           effectiveStart = formatDate(startLast);
           effectiveEnd = formatDate(endLast);
         }
-      } else if (datePreset === 'all') {
-        effectiveStart = '';
-        effectiveEnd = '';
       }
 
       const params: AnalyticsFilterParams = {
@@ -200,10 +209,15 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
     loadAnalytics();
   }, [loadAnalytics]);
 
-  // Handle State selection change -> reset city filter if state changes
-  const handleStateChange = (st: string) => {
-    setSelectedState(st);
-    setSelectedCity('ALL');
+  // Reset pagination when search or limit changes
+  const handleValueLimitChange = (lim: number) => {
+    setValueLimit(lim);
+    setVisibleCountValue(15);
+  };
+
+  const handleRepeatLimitChange = (lim: number) => {
+    setRepeatLimit(lim);
+    setVisibleCountRepeat(15);
   };
 
   // State Drilldown Handler
@@ -221,15 +235,16 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
   };
 
   // -------------------------------------------------------------
-  // Filtered & Sorted Customer Table Data
+  // Filtered & Sorted: Top Customers by Customer Value
   // -------------------------------------------------------------
-  const processedCustomers = useMemo(() => {
+  const processedValueCustomers = useMemo(() => {
     if (!data) return [];
-    let list = [...data.topCustomers];
+    const sourceList = data.topCustomersByValue || data.topCustomers || [];
+    let list = [...sourceList];
 
-    if (customerSearch.trim()) {
-      const q = customerSearch.toLowerCase().trim();
-      list = list.filter(c => 
+    if (valueSearch.trim()) {
+      const q = valueSearch.toLowerCase().trim();
+      list = list.filter(c =>
         c.customerName.toLowerCase().includes(q) ||
         c.phone.includes(q) ||
         c.city.toLowerCase().includes(q) ||
@@ -240,18 +255,72 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
 
     list.sort((a, b) => {
       let comparison = 0;
-      if (customerSortField === 'totalValue') {
+      if (valueSortField === 'totalValue') {
         comparison = a.totalValue - b.totalValue;
-      } else if (customerSortField === 'totalOrders') {
+        if (comparison === 0) comparison = a.totalOrders - b.totalOrders;
+      } else if (valueSortField === 'totalOrders') {
         comparison = a.totalOrders - b.totalOrders;
-      } else if (customerSortField === 'lastOrderDate') {
-        comparison = a.lastOrderDate.localeCompare(b.lastOrderDate);
+        if (comparison === 0) comparison = a.totalValue - b.totalValue;
+      } else if (valueSortField === 'lastOrderDate') {
+        comparison = (a.lastOrderDate || '').localeCompare(b.lastOrderDate || '');
       }
-      return customerSortAsc ? comparison : -comparison;
+      return valueSortAsc ? comparison : -comparison;
     });
 
-    return list.slice(0, customerLimit);
-  }, [data, customerSearch, customerSortField, customerSortAsc, customerLimit]);
+    return list.slice(0, valueLimit).map((c, idx) => ({
+      ...c,
+      rank: idx + 1
+    }));
+  }, [data, valueSearch, valueSortField, valueSortAsc, valueLimit]);
+
+  // -------------------------------------------------------------
+  // Filtered & Sorted: Top 100 Repeat Customers (2+ orders)
+  // -------------------------------------------------------------
+  const processedRepeatCustomers = useMemo(() => {
+    if (!data) return [];
+    // Only customers with 2+ valid orders
+    const sourceList = data.topCustomersByRepeat || [];
+    let list = [...sourceList];
+
+    if (repeatSearch.trim()) {
+      const q = repeatSearch.toLowerCase().trim();
+      list = list.filter(c =>
+        c.customerName.toLowerCase().includes(q) ||
+        c.phone.includes(q) ||
+        c.city.toLowerCase().includes(q) ||
+        c.state.toLowerCase().includes(q) ||
+        c.mostPurchasedProduct.toLowerCase().includes(q)
+      );
+    }
+
+    list.sort((a, b) => {
+      let comparison = 0;
+      if (repeatSortField === 'totalOrders') {
+        comparison = a.totalOrders - b.totalOrders;
+        if (comparison === 0) comparison = a.totalValue - b.totalValue;
+      } else if (repeatSortField === 'totalValue') {
+        comparison = a.totalValue - b.totalValue;
+        if (comparison === 0) comparison = a.totalOrders - b.totalOrders;
+      } else if (repeatSortField === 'lastOrderDate') {
+        comparison = (a.lastOrderDate || '').localeCompare(b.lastOrderDate || '');
+      }
+      return repeatSortAsc ? comparison : -comparison;
+    });
+
+    return list.slice(0, repeatLimit).map((c, idx) => ({
+      ...c,
+      rank: idx + 1
+    }));
+  }, [data, repeatSearch, repeatSortField, repeatSortAsc, repeatLimit]);
+
+  // Visible rows for pagination
+  const visibleValueCustomers = useMemo(() => {
+    return processedValueCustomers.slice(0, visibleCountValue);
+  }, [processedValueCustomers, visibleCountValue]);
+
+  const visibleRepeatCustomers = useMemo(() => {
+    return processedRepeatCustomers.slice(0, visibleCountRepeat);
+  }, [processedRepeatCustomers, visibleCountRepeat]);
 
   // -------------------------------------------------------------
   // Filtered & Sorted Geographic Data
@@ -260,14 +329,13 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
     if (!data) return [];
     let list = geoTab === 'states' ? [...data.topStates] : [...data.topCities];
 
-    // If drilled down to a specific state in cities view
     if (geoTab === 'cities' && drillDownState) {
       list = list.filter(item => item.state === drillDownState);
     }
 
     if (geoSearch.trim()) {
       const q = geoSearch.toLowerCase().trim();
-      list = list.filter(item => 
+      list = list.filter(item =>
         item.name.toLowerCase().includes(q) ||
         (item.state && item.state.toLowerCase().includes(q))
       );
@@ -303,225 +371,231 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
     return list;
   }, [data, productSearch, productSortField, productSortAsc]);
 
-  // -------------------------------------------------------------
-  // Export CSV Handler
-  // -------------------------------------------------------------
-  const handleExportCustomersCSV = () => {
-    if (!processedCustomers.length) {
-      toast.error('No customer records to export');
+  // CSV Export Helpers
+  const handleExportValueCustomersCSV = () => {
+    if (processedValueCustomers.length === 0) {
+      toast.error('No customers to export');
       return;
     }
-
-    const headers = [
-      'Rank',
-      'Customer Name',
-      'Phone Number',
-      'City',
-      'State',
-      'Total Orders',
-      'Repeat Purchase Count',
-      'Total Value (INR)',
-      'AOV (INR)',
-      'Most Purchased Product',
-      'Last Order Date',
-      'First Order Date'
-    ];
-
-    const rows = processedCustomers.map(c => [
+    const headers = ['Rank', 'Customer Name', 'Phone', 'City', 'State', 'Valid Orders', 'Repeat Count', 'Total Net Spend (INR)', 'AOV (INR)', 'Top Product', 'Last Purchase Date'];
+    const rows = processedValueCustomers.map(c => [
       c.rank,
       `"${c.customerName.replace(/"/g, '""')}"`,
-      `"${c.phone}"`,
-      `"${c.city}"`,
-      `"${c.state}"`,
+      c.phone,
+      `"${c.city.replace(/"/g, '""')}"`,
+      `"${c.state.replace(/"/g, '""')}"`,
       c.totalOrders,
       c.repeatPurchaseCount,
-      c.totalValue,
+      c.totalValue.toFixed(2),
       c.averageOrderValue,
       `"${c.mostPurchasedProduct.replace(/"/g, '""')}"`,
-      `"${c.lastOrderDate}"`,
-      `"${c.firstOrderDate}"`
+      c.lastOrderDate
     ]);
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    downloadBlob(csvContent, `top_customers_by_value_${new Date().toISOString().slice(0, 10)}.csv`);
+    toast.success('Top Customers by Value exported to CSV');
+  };
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `velmora_top_${customerLimit}_customers_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    toast.success('Customer data exported successfully!');
+  const handleExportRepeatCustomersCSV = () => {
+    if (processedRepeatCustomers.length === 0) {
+      toast.error('No repeat customers to export');
+      return;
+    }
+    const headers = ['Rank', 'Customer Name', 'Phone', 'City', 'State', 'Valid Orders', 'Repeat Purchase Count', 'Total Net Spend (INR)', 'AOV (INR)', 'Top Product', 'Last Purchase Date'];
+    const rows = processedRepeatCustomers.map(c => [
+      c.rank,
+      `"${c.customerName.replace(/"/g, '""')}"`,
+      c.phone,
+      `"${c.city.replace(/"/g, '""')}"`,
+      `"${c.state.replace(/"/g, '""')}"`,
+      c.totalOrders,
+      c.repeatPurchaseCount,
+      c.totalValue.toFixed(2),
+      c.averageOrderValue,
+      `"${c.mostPurchasedProduct.replace(/"/g, '""')}"`,
+      c.lastOrderDate
+    ]);
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    downloadBlob(csvContent, `top_repeat_customers_${new Date().toISOString().slice(0, 10)}.csv`);
+    toast.success('Top Repeat Customers exported to CSV');
   };
 
   const handleExportGeoCSV = () => {
-    if (!processedGeoData.length) return;
-    const headers = ['Rank', 'Location', 'State', 'Total Orders', 'Unique Customers', 'Repeat Customers', 'Repeat Rate (%)', 'Sales Value (INR)'];
-    const rows = processedGeoData.map(item => [
-      item.rank,
-      `"${item.name.replace(/"/g, '""')}"`,
-      item.state ? `"${item.state.replace(/"/g, '""')}"` : '""',
-      item.totalOrders,
-      item.uniqueCustomers,
-      item.repeatCustomers,
-      item.repeatRate.toFixed(2),
-      item.salesValue
+    if (processedGeoData.length === 0) {
+      toast.error('No geographic data to export');
+      return;
+    }
+    const headers = ['Rank', 'Location', 'State', 'Total Orders', 'Unique Customers', 'Repeat Buyers', 'Repeat Rate (%)', 'Net Sales (INR)'];
+    const rows = processedGeoData.map(g => [
+      g.rank,
+      `"${g.name.replace(/"/g, '""')}"`,
+      `"${(g.state || g.name).replace(/"/g, '""')}"`,
+      g.totalOrders,
+      g.uniqueCustomers,
+      g.repeatCustomers,
+      g.repeatRate.toFixed(2),
+      g.salesValue.toFixed(2)
     ]);
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    downloadBlob(csvContent, `top_${geoTab}_${new Date().toISOString().slice(0, 10)}.csv`);
+    toast.success(`Top ${geoTab} exported to CSV`);
+  };
+
+  const downloadBlob = (content: string, filename: string) => {
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', encodeURI(csvContent));
-    link.setAttribute('download', `velmora_top_${geoTab}_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    toast.success(`Geographic ${geoTab} exported!`);
+    URL.revokeObjectURL(url);
   };
 
+  const kpis = data?.kpis;
+
   // -------------------------------------------------------------
-  // Render Loading State
+  // Render Loading & Error States
   // -------------------------------------------------------------
   if (loading && !data) {
     return (
-      <div className="w-full min-h-[450px] flex flex-col items-center justify-center p-8 bg-[#0b1220] rounded-2xl border border-slate-800 text-slate-400 gap-3">
-        <div className="w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-        <p className="text-sm font-medium text-slate-300">Computing Customer Repeat & Geographic Analytics...</p>
-        <p className="text-xs text-slate-500">Aggregating canonical purchase histories and distinct order frequency</p>
+      <div className="p-8 rounded-2xl bg-[#0b1220] border border-slate-800 text-center space-y-4 my-4">
+        <div className="w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto" />
+        <h3 className="text-sm font-bold text-white tracking-wide">Computing Customer Analytics...</h3>
+        <p className="text-xs text-slate-400 max-w-md mx-auto">
+          Aggregating customer purchase profiles, repeat orders, frequencies, and geographic distribution across verified sales.
+        </p>
       </div>
     );
   }
 
-  // -------------------------------------------------------------
-  // Render Error State
-  // -------------------------------------------------------------
   if (error && !data) {
     return (
-      <div className="w-full p-8 bg-rose-950/30 rounded-2xl border border-rose-800 text-slate-300 flex flex-col items-center justify-center gap-3">
-        <X size={32} className="text-rose-400" />
-        <h3 className="text-lg font-bold text-rose-200">Failed to Load Customer Analytics</h3>
-        <p className="text-xs text-slate-400">{error}</p>
+      <div className="p-6 rounded-2xl bg-rose-950/20 border border-rose-800/40 text-center space-y-3 my-4">
+        <div className="w-8 h-8 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto font-bold">!</div>
+        <h3 className="text-sm font-bold text-rose-200">Unable to load customer analytics</h3>
+        <p className="text-xs text-rose-400">{error}</p>
         <button
           onClick={() => loadAnalytics(true)}
-          className="mt-2 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-semibold cursor-pointer transition-all flex items-center gap-2"
+          className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white cursor-pointer"
         >
-          <RotateCcw size={14} /> Try Again
+          Retry Loading
         </button>
       </div>
     );
   }
 
-  const kpis = data?.kpis;
-
   return (
-    <div className={`space-y-6 text-slate-200 ${className}`}>
+    <div className={`space-y-6 w-full text-slate-200 ${className}`}>
       
       {/* =========================================================================
-          TOOLBAR: GLOBAL FILTER CONTROLS & LAST UPDATED STATUS
+          TOOLBAR: DATE PRESETS, FILTERS, SEARCH, REFRESH
          ========================================================================= */}
-      <div className="p-4 rounded-2xl bg-[#0b1220] border border-slate-800 shadow-xl space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="p-3.5 sm:p-4 rounded-2xl bg-[#0b1220] border border-slate-800 shadow-xl space-y-3">
+        
+        {/* ROW 1: TITLE, PERIOD, PRESETS, REFRESH */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           
-          {/* Left Title & Status */}
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-gradient-to-br from-indigo-500/20 to-purple-500/20 border border-indigo-500/30 text-indigo-400 shadow-inner">
-              <Repeat size={20} />
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600/30 to-purple-600/30 border border-indigo-500/40 text-indigo-400 flex items-center justify-center shrink-0">
+              <Repeat size={18} />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base sm:text-lg font-extrabold text-white tracking-tight">
+                <h2 className="text-sm sm:text-base font-bold text-white tracking-tight">
                   Customer Repeat Purchase Analysis
                 </h2>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
                   Canonical Sync
                 </span>
               </div>
-              <p className="text-xs text-slate-400 flex items-center gap-2">
-                <span>Range: <strong className="text-slate-300">{data?.dateRangeDisplay}</strong></span>
-                <span className="text-slate-600">•</span>
-                <span className="flex items-center gap-1 text-[11px] text-slate-500">
-                  <Clock size={11} /> Updated: {data?.lastUpdated}
-                </span>
+              <p className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-2">
+                <span>Range: <strong className="text-slate-300 font-mono">{data?.dateRangeDisplay || 'All Time'}</strong></span>
+                <span>•</span>
+                <span>Updated: <span className="font-mono text-slate-400">{data?.lastUpdated}</span></span>
               </p>
             </div>
           </div>
 
-          {/* Right Action Controls: Quick Date Preset, Filters Toggle & Refresh */}
-          <div className="flex flex-wrap items-center gap-2">
-            
-            {/* Date Preset Selector */}
-            <select
-              value={datePreset}
-              onChange={e => setDatePreset(e.target.value)}
-              className="h-9 px-3 bg-slate-900 border border-slate-700/80 rounded-xl text-xs font-semibold text-slate-200 hover:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-all cursor-pointer"
-            >
-              <option value="all">All Canonical Time</option>
-              <option value="today">Today</option>
-              <option value="7d">Last 7 Days</option>
-              <option value="30d">Last 30 Days</option>
-              <option value="this_month">This Month</option>
-              <option value="last_month">Last Month</option>
-              <option value="custom">Custom Range</option>
-            </select>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {/* Presets */}
+            <div className="flex items-center gap-1 bg-slate-900/90 border border-slate-800 p-1 rounded-xl">
+              <select
+                value={datePreset}
+                onChange={(e) => setDatePreset(e.target.value)}
+                className="bg-transparent text-xs font-semibold text-slate-200 focus:outline-none cursor-pointer px-2 py-1"
+              >
+                <option value="all" className="bg-[#0b1220]">All Canonical Time</option>
+                <option value="today" className="bg-[#0b1220]">Today</option>
+                <option value="7d" className="bg-[#0b1220]">Last 7 Days</option>
+                <option value="30d" className="bg-[#0b1220]">Last 30 Days</option>
+                <option value="this_month" className="bg-[#0b1220]">This Month</option>
+                <option value="last_month" className="bg-[#0b1220]">Last Month</option>
+                <option value="custom" className="bg-[#0b1220]">Custom Date Range</option>
+              </select>
+            </div>
 
-            {/* Custom Date Inputs if selected */}
+            {/* Custom Date Inputs if preset is custom */}
             {datePreset === 'custom' && (
-              <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700/80 rounded-xl px-2 h-9">
+              <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-xl text-xs">
                 <input
                   type="date"
                   value={customStartDate}
                   onChange={e => setCustomStartDate(e.target.value)}
-                  className="bg-transparent text-xs text-slate-200 focus:outline-none"
-                  title="Start Date"
+                  className="bg-transparent text-slate-200 text-xs focus:outline-none font-mono"
                 />
-                <span className="text-slate-500 text-xs">to</span>
+                <span className="text-slate-500">to</span>
                 <input
                   type="date"
                   value={customEndDate}
                   onChange={e => setCustomEndDate(e.target.value)}
-                  className="bg-transparent text-xs text-slate-200 focus:outline-none"
-                  title="End Date"
+                  className="bg-transparent text-slate-200 text-xs focus:outline-none font-mono"
                 />
               </div>
             )}
 
-            {/* Filters Toggle Button */}
+            {/* Toggle Filters Drawer */}
             <button
               onClick={() => setShowFiltersDrawer(prev => !prev)}
-              className={`h-9 px-3 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition-all cursor-pointer ${
+              className={`h-8 px-3 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer border ${
                 showFiltersDrawer || selectedState !== 'ALL' || selectedCity !== 'ALL' || selectedProduct !== 'ALL' || selectedFrequency !== 'all'
-                  ? 'bg-indigo-600/20 text-indigo-200 border-indigo-500/50 shadow-sm'
-                  : 'bg-slate-900 border-slate-700/80 text-slate-300 hover:text-white'
+                  ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/50'
+                  : 'bg-slate-900 text-slate-300 hover:text-white border-slate-800 hover:border-slate-700'
               }`}
             >
               <Filter size={13} />
               <span>Filters</span>
               {(selectedState !== 'ALL' || selectedCity !== 'ALL' || selectedProduct !== 'ALL' || selectedFrequency !== 'all') && (
-                <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
+                <span className="w-2 h-2 rounded-full bg-indigo-400" />
               )}
             </button>
 
             {/* Refresh Button */}
             <button
               onClick={() => loadAnalytics(true)}
-              disabled={isRefreshing}
-              className="h-9 w-9 rounded-xl bg-slate-900 border border-slate-700/80 text-slate-300 hover:text-white hover:border-slate-600 transition-all flex items-center justify-center cursor-pointer disabled:opacity-50"
+              disabled={isRefreshing || loading}
+              className="h-8 w-8 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:border-slate-700 flex items-center justify-center transition-all cursor-pointer disabled:opacity-50"
               title="Refresh Analytics"
             >
-              <RotateCcw size={14} className={isRefreshing ? 'animate-spin text-indigo-400' : ''} />
+              <RotateCcw size={13} className={isRefreshing ? 'animate-spin text-indigo-400' : ''} />
             </button>
 
           </div>
+
         </div>
 
-        {/* Collapsible Advanced Filters Drawer */}
+        {/* ROW 2: FILTERS DRAWER (State, City, Product, Frequency) */}
         {showFiltersDrawer && (
-          <div className="pt-3 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 animate-in fade-in duration-150">
+          <div className="pt-3 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
             
-            {/* 1. State Filter */}
+            {/* State Filter */}
             <div className="space-y-1">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">State</label>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Filter by State</label>
               <select
                 value={selectedState}
                 onChange={e => handleStateChange(e.target.value)}
-                className="w-full h-8 px-2.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                className="w-full h-8 px-2.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
               >
                 <option value="ALL">All States ({data?.availableStates.length || 0})</option>
                 {data?.availableStates.map(st => (
@@ -530,13 +604,13 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
               </select>
             </div>
 
-            {/* 2. City Filter */}
+            {/* City Filter */}
             <div className="space-y-1">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">City</label>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Filter by City</label>
               <select
                 value={selectedCity}
                 onChange={e => setSelectedCity(e.target.value)}
-                className="w-full h-8 px-2.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                className="w-full h-8 px-2.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
               >
                 <option value="ALL">All Cities ({data?.availableCities.length || 0})</option>
                 {data?.availableCities.map(ct => (
@@ -545,13 +619,13 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
               </select>
             </div>
 
-            {/* 3. Product Filter */}
+            {/* Product Filter */}
             <div className="space-y-1">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Product</label>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Filter by Product</label>
               <select
                 value={selectedProduct}
                 onChange={e => setSelectedProduct(e.target.value)}
-                className="w-full h-8 px-2.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                className="w-full h-8 px-2.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
               >
                 <option value="ALL">All Products ({data?.availableProducts.length || 0})</option>
                 {data?.availableProducts.map(p => (
@@ -560,16 +634,16 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
               </select>
             </div>
 
-            {/* 4. Purchase Frequency Filter */}
+            {/* Frequency Filter */}
             <div className="space-y-1">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Frequency Group</label>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Purchase Frequency</label>
               <select
                 value={selectedFrequency}
                 onChange={e => setSelectedFrequency(e.target.value as any)}
-                className="w-full h-8 px-2.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                className="w-full h-8 px-2.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
               >
-                <option value="all">All Frequency Groups</option>
-                <option value="1">1-Time Only</option>
+                <option value="all">All Customer Frequencies</option>
+                <option value="1">1 Time Only</option>
                 <option value="2+">Repeat Buyers (2+)</option>
                 <option value="3+">3+ Purchases</option>
                 <option value="5+">5+ Purchases</option>
@@ -587,136 +661,137 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
       </div>
 
       {/* =========================================================================
-          SECTION 1: CUSTOMER REPEAT PURCHASE ANALYSIS (KPI CARDS GRID)
+          SECTION 1: CUSTOMER REPEAT KPI SUMMARY CARDS (COMPACT SLEEK LAYOUT)
          ========================================================================= */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
+      <div className="space-y-2.5">
+        <div className="flex items-center justify-between px-1">
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+            <h3 className="text-xs sm:text-sm font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
               <span>Customer Repeat KPI Metrics</span>
             </h3>
-            <span className="text-xs text-slate-500">| Valid distinct order calculations</span>
+            <span className="text-[11px] text-slate-500">| Valid distinct order calculations</span>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+        {/* 10 Compact Cards in Responsive Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2.5 sm:gap-3">
           
           {/* Card 1: Total Unique Customers */}
-          <div className="p-4 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-md flex flex-col justify-between">
+          <div className="p-3 sm:p-3.5 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-sm flex flex-col justify-between">
             <div className="flex items-center justify-between text-slate-400">
-              <span className="text-[11px] font-bold uppercase tracking-wider">Unique Customers</span>
-              <Users size={16} className="text-indigo-400" />
+              <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider">Unique Customers</span>
+              <Users size={14} className="text-indigo-400" />
             </div>
-            <div className="mt-2">
-              <div className="text-2xl font-extrabold text-white font-mono">
+            <div className="mt-1.5">
+              <div className="text-lg sm:text-xl font-extrabold text-white font-mono">
                 {kpis?.totalUniqueCustomers.toLocaleString('en-IN') || 0}
               </div>
-              <p className="text-[11px] text-slate-500 mt-0.5">Distinct verified buyers</p>
+              <p className="text-[10px] text-slate-500 mt-0.5">Distinct verified buyers</p>
             </div>
           </div>
 
           {/* Card 2: 1-Time Customers */}
-          <div className="p-4 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-md flex flex-col justify-between">
+          <div className="p-3 sm:p-3.5 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-sm flex flex-col justify-between">
             <div className="flex items-center justify-between text-slate-400">
-              <span className="text-[11px] font-bold uppercase tracking-wider">1-Time Buyers</span>
-              <UserPlus size={16} className="text-cyan-400" />
+              <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider">1-Time Buyers</span>
+              <UserPlus size={14} className="text-cyan-400" />
             </div>
-            <div className="mt-2">
-              <div className="text-2xl font-extrabold text-cyan-300 font-mono">
+            <div className="mt-1.5">
+              <div className="text-lg sm:text-xl font-extrabold text-cyan-300 font-mono">
                 {kpis?.oneTimeBuyers.toLocaleString('en-IN') || 0}
               </div>
-              <p className="text-[11px] text-slate-500 mt-0.5">
+              <p className="text-[10px] text-slate-500 mt-0.5">
                 {kpis?.totalUniqueCustomers ? ((kpis.oneTimeBuyers / kpis.totalUniqueCustomers) * 100).toFixed(1) : 0}% of customer base
               </p>
             </div>
           </div>
 
           {/* Card 3: Repeat Customers (2+ orders) */}
-          <div className="p-4 rounded-xl bg-gradient-to-br from-indigo-950/40 to-purple-950/40 border border-indigo-700/50 shadow-md flex flex-col justify-between">
+          <div className="p-3 sm:p-3.5 rounded-xl bg-gradient-to-br from-indigo-950/40 to-purple-950/40 border border-indigo-700/50 shadow-sm flex flex-col justify-between">
             <div className="flex items-center justify-between text-slate-300">
-              <span className="text-[11px] font-bold uppercase tracking-wider">Repeat Customers (2+)</span>
-              <Repeat size={16} className="text-indigo-400" />
+              <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider">Repeat Customers (2+)</span>
+              <Repeat size={14} className="text-indigo-400" />
             </div>
-            <div className="mt-2">
-              <div className="text-2xl font-extrabold text-indigo-300 font-mono">
+            <div className="mt-1.5">
+              <div className="text-lg sm:text-xl font-extrabold text-indigo-300 font-mono">
                 {kpis?.repeatBuyers.toLocaleString('en-IN') || 0}
               </div>
-              <p className="text-[11px] text-indigo-300/80 mt-0.5 font-semibold">
+              <p className="text-[10px] text-indigo-300/80 mt-0.5 font-semibold">
                 Repeat Rate: {kpis?.repeatPercentage.toFixed(2)}%
               </p>
             </div>
           </div>
 
           {/* Card 4: Total Revenue from Repeat Customers */}
-          <div className="p-4 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-md flex flex-col justify-between">
+          <div className="p-3 sm:p-3.5 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-sm flex flex-col justify-between">
             <div className="flex items-center justify-between text-slate-400">
-              <span className="text-[11px] font-bold uppercase tracking-wider">Repeat Sales Value</span>
-              <DollarSign size={16} className="text-emerald-400" />
+              <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider">Repeat Sales Value</span>
+              <DollarSign size={14} className="text-emerald-400" />
             </div>
-            <div className="mt-2">
-              <div className="text-2xl font-extrabold text-emerald-400 font-mono">
+            <div className="mt-1.5">
+              <div className="text-lg sm:text-xl font-extrabold text-emerald-400 font-mono">
                 ₹{kpis?.totalRepeatRevenue ? Math.round(kpis.totalRepeatRevenue).toLocaleString('en-IN') : 0}
               </div>
-              <p className="text-[11px] text-slate-500 mt-0.5">
+              <p className="text-[10px] text-slate-500 mt-0.5">
                 {kpis?.netSalesValue ? ((kpis.totalRepeatRevenue / kpis.netSalesValue) * 100).toFixed(1) : 0}% of Net Sales
               </p>
             </div>
           </div>
 
           {/* Card 5: Repeat Customer AOV */}
-          <div className="p-4 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-md flex flex-col justify-between">
+          <div className="p-3 sm:p-3.5 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-sm flex flex-col justify-between">
             <div className="flex items-center justify-between text-slate-400">
-              <span className="text-[11px] font-bold uppercase tracking-wider">Repeat AOV</span>
-              <ShoppingBag size={16} className="text-purple-400" />
+              <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider">Repeat AOV</span>
+              <ShoppingBag size={14} className="text-purple-400" />
             </div>
-            <div className="mt-2">
-              <div className="text-2xl font-extrabold text-purple-300 font-mono">
+            <div className="mt-1.5">
+              <div className="text-lg sm:text-xl font-extrabold text-purple-300 font-mono">
                 ₹{Math.round(kpis?.repeatAOV || 0).toLocaleString('en-IN')}
               </div>
-              <p className="text-[11px] text-slate-500 mt-0.5">Average order value</p>
+              <p className="text-[10px] text-slate-500 mt-0.5">Average order value</p>
             </div>
           </div>
 
           {/* Card 6: Exactly 3 Purchases */}
-          <div className="p-3.5 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-sm flex flex-col justify-between">
+          <div className="p-3 sm:p-3.5 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-sm flex flex-col justify-between">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">3 Purchases</span>
-            <div className="text-xl font-bold text-slate-200 font-mono mt-1">
+            <div className="text-lg font-bold text-slate-200 font-mono mt-1">
               {kpis?.customersWith3.toLocaleString('en-IN') || 0}
             </div>
             <span className="text-[10px] text-slate-500">Tri-purchasers</span>
           </div>
 
           {/* Card 7: Exactly 5 Purchases */}
-          <div className="p-3.5 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-sm flex flex-col justify-between">
+          <div className="p-3 sm:p-3.5 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-sm flex flex-col justify-between">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">5 Purchases</span>
-            <div className="text-xl font-bold text-slate-200 font-mono mt-1">
+            <div className="text-lg font-bold text-slate-200 font-mono mt-1">
               {kpis?.customersWith5.toLocaleString('en-IN') || 0}
             </div>
             <span className="text-[10px] text-slate-500">Power buyers</span>
           </div>
 
           {/* Card 8: Exactly 10 Purchases */}
-          <div className="p-3.5 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-sm flex flex-col justify-between">
+          <div className="p-3 sm:p-3.5 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-sm flex flex-col justify-between">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">10 Purchases</span>
-            <div className="text-xl font-bold text-slate-200 font-mono mt-1">
+            <div className="text-lg font-bold text-slate-200 font-mono mt-1">
               {kpis?.customersWith10.toLocaleString('en-IN') || 0}
             </div>
             <span className="text-[10px] text-slate-500">VIP buyers</span>
           </div>
 
           {/* Card 9: Exactly 15 Purchases */}
-          <div className="p-3.5 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-sm flex flex-col justify-between">
+          <div className="p-3 sm:p-3.5 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-sm flex flex-col justify-between">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">15 Purchases</span>
-            <div className="text-xl font-bold text-slate-200 font-mono mt-1">
+            <div className="text-lg font-bold text-slate-200 font-mono mt-1">
               {kpis?.customersWith15.toLocaleString('en-IN') || 0}
             </div>
             <span className="text-[10px] text-slate-500">Super champions</span>
           </div>
 
           {/* Card 10: Net Sales vs Exclusions */}
-          <div className="p-3.5 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-sm flex flex-col justify-between">
+          <div className="p-3 sm:p-3.5 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-sm flex flex-col justify-between">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Net Sales</span>
-            <div className="text-xl font-bold text-emerald-300 font-mono mt-1">
+            <div className="text-lg font-bold text-emerald-300 font-mono mt-1">
               ₹{kpis?.netSalesValue ? Math.round(kpis.netSalesValue).toLocaleString('en-IN') : 0}
             </div>
             <span className="text-[10px] text-slate-500">Excludes {kpis?.cancelledOrders} cancelled</span>
@@ -726,15 +801,15 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
       </div>
 
       {/* =========================================================================
-          SECTION 1.1: CHARTS — PURCHASE FREQUENCY (1 to 15+) & TRENDS OVER TIME
+          SECTION 2: CHARTS — PURCHASE FREQUENCY (1 to 15+) & TRENDS OVER TIME
          ========================================================================= */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         
         {/* Frequency Distribution Bar Chart */}
         <div className="p-4 rounded-2xl bg-[#0b1220] border border-slate-800 shadow-xl space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <BarChart3 size={16} className="text-indigo-400" />
+              <BarChart3 size={15} className="text-indigo-400" />
               <h3 className="text-xs sm:text-sm font-bold text-white tracking-tight">
                 Purchase Frequency Distribution (1 to 15+ Orders)
               </h3>
@@ -744,7 +819,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
             </span>
           </div>
 
-          <div className="h-[280px] w-full pt-2">
+          <div className="h-[260px] w-full pt-1">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={data?.frequencyDistribution || []}
@@ -759,25 +834,21 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
                   interval={0}
                   angle={-45}
                   textAnchor="end"
+                  height={45}
                 />
-                <YAxis
-                  stroke="#64748b"
-                  fontSize={11}
-                  tickLine={false}
-                  allowDecimals={false}
-                />
+                <YAxis stroke="#64748b" fontSize={10} tickLine={false} />
                 <Tooltip
                   content={({ active, payload }) => {
                     if (active && payload && payload.length) {
-                      const item = payload[0].payload as any;
+                      const item = payload[0].payload;
                       return (
-                        <div className="p-3 rounded-xl bg-slate-900 border border-slate-700 shadow-xl text-xs space-y-1">
+                        <div className="bg-slate-900 border border-slate-700 p-2.5 rounded-xl shadow-xl text-xs space-y-1">
                           <p className="font-bold text-white">{item.bucket}</p>
-                          <p className="text-indigo-300 font-mono">
-                            Customers: <span className="font-bold">{item.customerCount.toLocaleString('en-IN')}</span> ({item.percentage.toFixed(2)}%)
+                          <p className="text-indigo-300">
+                            Customers: <span className="font-mono font-bold text-white">{item.customerCount.toLocaleString('en-IN')}</span> ({item.percentage.toFixed(2)}%)
                           </p>
-                          <p className="text-emerald-300 font-mono">
-                            Revenue: ₹{Math.round(item.totalRevenue).toLocaleString('en-IN')}
+                          <p className="text-emerald-400">
+                            Revenue: <span className="font-mono font-bold">₹{Math.round(item.totalRevenue).toLocaleString('en-IN')}</span>
                           </p>
                         </div>
                       );
@@ -787,10 +858,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
                 />
                 <Bar dataKey="customerCount" radius={[4, 4, 0, 0]}>
                   {(data?.frequencyDistribution || []).map((entry, index) => (
-                    <Cell
-                      key={`freq-${index}`}
-                      fill={FREQUENCY_COLORS[index % FREQUENCY_COLORS.length]}
-                    />
+                    <Cell key={`cell-${index}`} fill={FREQUENCY_COLORS[index % FREQUENCY_COLORS.length]} />
                   ))}
                 </Bar>
               </BarChart>
@@ -798,84 +866,81 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
           </div>
         </div>
 
-        {/* Repeat Trends Line Chart */}
+        {/* Repeat Purchase Trends Over Time */}
         <div className="p-4 rounded-2xl bg-[#0b1220] border border-slate-800 shadow-xl space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <TrendingUp size={16} className="text-emerald-400" />
+              <TrendingUp size={15} className="text-emerald-400" />
               <h3 className="text-xs sm:text-sm font-bold text-white tracking-tight">
                 Repeat Purchase Trends Over Time
               </h3>
             </div>
-            <span className="text-[11px] text-slate-400 font-mono">
+            <span className="text-[11px] text-slate-400">
               Monthly Timeline
             </span>
           </div>
 
-          <div className="h-[280px] w-full pt-2">
+          <div className="h-[260px] w-full pt-1">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart
                 data={data?.repeatTrends || []}
-                margin={{ top: 10, right: 15, left: -15, bottom: 25 }}
+                margin={{ top: 10, right: 10, left: -20, bottom: 25 }}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                 <XAxis
                   dataKey="displayDate"
                   stroke="#64748b"
-                  fontSize={11}
+                  fontSize={10}
                   tickLine={false}
+                  interval={0}
                   angle={-30}
                   textAnchor="end"
+                  height={40}
                 />
-                <YAxis
-                  stroke="#64748b"
-                  fontSize={11}
-                  tickLine={false}
-                  allowDecimals={false}
-                />
+                <YAxis stroke="#64748b" fontSize={10} tickLine={false} />
                 <Tooltip
-                  content={({ active, payload }) => {
+                  content={({ active, payload, label }) => {
                     if (active && payload && payload.length) {
-                      const item = payload[0].payload as any;
+                      const item = payload[0].payload;
                       return (
-                        <div className="p-3 rounded-xl bg-slate-900 border border-slate-700 shadow-xl text-xs space-y-1.5">
-                          <p className="font-bold text-white">{item.displayDate}</p>
-                          <div className="flex items-center justify-between gap-4 text-indigo-300">
-                            <span>Repeat Orders:</span>
-                            <span className="font-bold font-mono">{item.repeatOrders}</span>
-                          </div>
-                          <div className="flex items-center justify-between gap-4 text-emerald-300">
-                            <span>Repeat Sales:</span>
-                            <span className="font-bold font-mono">₹{Math.round(item.repeatRevenue).toLocaleString('en-IN')}</span>
-                          </div>
-                          <div className="flex items-center justify-between gap-4 text-cyan-300">
-                            <span>1-Time Orders:</span>
-                            <span className="font-bold font-mono">{item.firstTimeOrders}</span>
-                          </div>
+                        <div className="bg-slate-900 border border-slate-700 p-2.5 rounded-xl shadow-xl text-xs space-y-1">
+                          <p className="font-bold text-white">{label}</p>
+                          <p className="text-cyan-400">
+                            1-Time Orders: <span className="font-mono font-bold">{item.firstTimeOrders.toLocaleString('en-IN')}</span>
+                          </p>
+                          <p className="text-indigo-400">
+                            Repeat Orders: <span className="font-mono font-bold">{item.repeatOrders.toLocaleString('en-IN')}</span>
+                          </p>
+                          <p className="text-emerald-400">
+                            Repeat Revenue: <span className="font-mono font-bold">₹{Math.round(item.repeatRevenue).toLocaleString('en-IN')}</span>
+                          </p>
                         </div>
                       );
                     }
                     return null;
                   }}
                 />
-                <Legend verticalAlign="top" height={25} wrapperStyle={{ fontSize: '11px' }} />
+                <Legend
+                  verticalAlign="top"
+                  align="right"
+                  wrapperStyle={{ paddingBottom: '10px', fontSize: '11px' }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="firstTimeOrders"
+                  name="1-Time Orders"
+                  stroke="#06b6d4"
+                  strokeWidth={2}
+                  strokeDasharray="4 4"
+                  dot={{ r: 3, fill: '#06b6d4' }}
+                />
                 <Line
                   type="monotone"
                   dataKey="repeatOrders"
                   name="Repeat Orders"
                   stroke="#818cf8"
                   strokeWidth={2.5}
-                  dot={{ r: 3, fill: '#818cf8' }}
-                  activeDot={{ r: 6 }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="firstTimeOrders"
-                  name="1-Time Orders"
-                  stroke="#38bdf8"
-                  strokeWidth={1.5}
-                  strokeDasharray="4 4"
-                  dot={{ r: 2, fill: '#38bdf8' }}
+                  dot={{ r: 4, fill: '#818cf8' }}
                 />
               </LineChart>
             </ResponsiveContainer>
@@ -885,27 +950,28 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
       </div>
 
       {/* =========================================================================
-          SECTION 2: TOP 100 CUSTOMERS BY CUSTOMER VALUE
+          SECTION 3: TOP 100 CUSTOMERS BY CUSTOMER VALUE
          ========================================================================= */}
-      <div className="p-4 sm:p-5 rounded-2xl bg-[#0b1220] border border-slate-800 shadow-xl space-y-4">
+      <div className="p-4 sm:p-5 rounded-2xl bg-[#0b1220] border border-slate-800 shadow-xl space-y-3.5">
         
         {/* Table Header & Controls Bar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
-                <span>Top {customerLimit} Customers by Customer Value</span>
-                <span className="px-2 py-0.5 rounded-md text-[11px] font-mono bg-indigo-950/80 text-indigo-300 border border-indigo-700/50">
-                  {processedCustomers.length} Listed
+              <DollarSign size={16} className="text-emerald-400" />
+              <h3 className="text-sm sm:text-base font-bold text-white tracking-tight flex items-center gap-2">
+                <span>Top {valueLimit} Customers by Customer Value</span>
+                <span className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-emerald-950/80 text-emerald-300 border border-emerald-700/50">
+                  Value Ranked
                 </span>
               </h3>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Ranked by net verified sales value across valid orders within the selected filter range
+              Ranked by total net purchase value, highest to lowest. Displays high-value purchasers across valid orders.
             </p>
           </div>
 
-          {/* Controls: Limit, Sort, Mask Phone, CSV Export */}
+          {/* Controls: Search, Limit (15/25/50/100), Sort, Mask, CSV Export */}
           <div className="flex flex-wrap items-center gap-2">
             
             {/* Search Input */}
@@ -913,20 +979,23 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
-                value={customerSearch}
-                onChange={e => setCustomerSearch(e.target.value)}
+                value={valueSearch}
+                onChange={e => {
+                  setValueSearch(e.target.value);
+                  setVisibleCountValue(15);
+                }}
                 placeholder="Search name, phone, city..."
-                className="h-8 pl-8 pr-2.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 w-44 sm:w-56"
+                className="h-8 pl-8 pr-2.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 w-40 sm:w-52"
               />
             </div>
 
-            {/* Limit Selector (Top 10 / 25 / 50 / 100) */}
+            {/* Limit Selector: Top 15 / 25 / 50 / 100 */}
             <select
-              value={customerLimit}
-              onChange={e => setCustomerLimit(Number(e.target.value))}
+              value={valueLimit}
+              onChange={e => handleValueLimitChange(Number(e.target.value))}
               className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer"
             >
-              <option value={10}>Top 10</option>
+              <option value={15}>Top 15</option>
               <option value={25}>Top 25</option>
               <option value={50}>Top 50</option>
               <option value={100}>Top 100</option>
@@ -934,8 +1003,8 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
 
             {/* Sort Field Selector */}
             <select
-              value={customerSortField}
-              onChange={e => setCustomerSortField(e.target.value as any)}
+              value={valueSortField}
+              onChange={e => setValueSortField(e.target.value as any)}
               className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer"
             >
               <option value="totalValue">Sort: Spend</option>
@@ -955,9 +1024,9 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
 
             {/* Export CSV Button */}
             <button
-              onClick={handleExportCustomersCSV}
+              onClick={handleExportValueCustomersCSV}
               className="h-8 px-3 rounded-lg bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-600/30 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
-              title="Export Top Customers to CSV"
+              title="Export Top Customers by Value to CSV"
             >
               <Download size={13} />
               <span>Export CSV</span>
@@ -966,7 +1035,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
           </div>
         </div>
 
-        {/* Top 100 Customers Table */}
+        {/* Top Customers by Value Table (Clean, responsive, NO inner scrollbar) */}
         <div className="overflow-x-auto rounded-xl border border-slate-800">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
@@ -978,8 +1047,8 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
                 <th 
                   className="py-2.5 px-3 text-center cursor-pointer hover:text-white"
                   onClick={() => {
-                    if (customerSortField === 'totalOrders') setCustomerSortAsc(!customerSortAsc);
-                    else { setCustomerSortField('totalOrders'); setCustomerSortAsc(false); }
+                    if (valueSortField === 'totalOrders') setValueSortAsc(!valueSortAsc);
+                    else { setValueSortField('totalOrders'); setValueSortAsc(false); }
                   }}
                 >
                   <div className="flex items-center justify-center gap-1">
@@ -991,8 +1060,8 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
                 <th 
                   className="py-2.5 px-3 text-right cursor-pointer hover:text-white"
                   onClick={() => {
-                    if (customerSortField === 'totalValue') setCustomerSortAsc(!customerSortAsc);
-                    else { setCustomerSortField('totalValue'); setCustomerSortAsc(false); }
+                    if (valueSortField === 'totalValue') setValueSortAsc(!valueSortAsc);
+                    else { setValueSortField('totalValue'); setValueSortAsc(false); }
                   }}
                 >
                   <div className="flex items-center justify-end gap-1">
@@ -1006,14 +1075,14 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 bg-slate-950/40">
-              {processedCustomers.length === 0 ? (
+              {visibleValueCustomers.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="py-8 text-center text-slate-500">
                     No customers match the active filters or search criteria.
                   </td>
                 </tr>
               ) : (
-                processedCustomers.map((c) => {
+                visibleValueCustomers.map((c) => {
                   const isPowerBuyer = c.totalOrders >= 5;
                   const isRepeat = c.totalOrders >= 2;
 
@@ -1024,7 +1093,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
                       className="hover:bg-slate-900/60 transition-colors cursor-pointer group"
                     >
                       {/* Rank */}
-                      <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-400 group-hover:text-indigo-400">
+                      <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-400 group-hover:text-emerald-400">
                         {c.rank}
                       </td>
 
@@ -1069,7 +1138,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
                       {/* Repeat Purchase Count */}
                       <td className="py-2.5 px-3 text-center font-mono text-slate-400">
                         {c.repeatPurchaseCount > 0 ? (
-                          <span className="text-indigo-300 font-semibold">+{c.repeatPurchaseCount}</span>
+                          <span className="text-emerald-400 font-semibold">+{c.repeatPurchaseCount}</span>
                         ) : (
                           <span className="text-slate-600">0</span>
                         )}
@@ -1104,19 +1173,304 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
           </table>
         </div>
 
+        {/* Pagination & Expansion Footer: Showing 1–15 of N, View More / Show Less */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+          <div className="text-xs text-slate-400 font-medium">
+            Showing <span className="font-mono font-bold text-white">1–{Math.min(visibleCountValue, processedValueCustomers.length)}</span> of{' '}
+            <span className="font-mono font-bold text-white">{processedValueCustomers.length}</span> customers
+          </div>
+
+          <div className="flex items-center gap-2">
+            {visibleCountValue < processedValueCustomers.length && (
+              <button
+                type="button"
+                onClick={() => setVisibleCountValue(prev => Math.min(prev + 15, processedValueCustomers.length))}
+                className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 text-slate-200 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+              >
+                <span>View More (+{Math.min(15, processedValueCustomers.length - visibleCountValue)})</span>
+                <ChevronDown size={14} className="text-emerald-400" />
+              </button>
+            )}
+
+            {visibleCountValue > 15 && (
+              <button
+                type="button"
+                onClick={() => setVisibleCountValue(15)}
+                className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+              >
+                <span>Show Less</span>
+                <ChevronUp size={14} className="text-slate-400" />
+              </button>
+            )}
+          </div>
+        </div>
+
       </div>
 
       {/* =========================================================================
-          SECTION 3: GEOGRAPHIC CUSTOMER ANALYTICS (TOP 100 STATES & CITIES)
+          SECTION 4: TOP 100 REPEAT CUSTOMERS (RANKED BY VALID ORDER COUNT)
          ========================================================================= */}
-      <div className="p-4 sm:p-5 rounded-2xl bg-[#0b1220] border border-slate-800 shadow-xl space-y-4">
+      <div className="p-4 sm:p-5 rounded-2xl bg-[#0b1220] border border-slate-800 shadow-xl space-y-3.5">
         
-        {/* Geo Section Header & Tab Controls */}
+        {/* Table Header & Controls Bar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
           <div>
             <div className="flex items-center gap-2">
-              <MapPin size={18} className="text-indigo-400" />
-              <h3 className="text-base font-bold text-white tracking-tight">
+              <Repeat size={16} className="text-indigo-400" />
+              <h3 className="text-sm sm:text-base font-bold text-white tracking-tight flex items-center gap-2">
+                <span>Top {repeatLimit} Repeat Customers</span>
+                <span className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-indigo-950/80 text-indigo-300 border border-indigo-700/50">
+                  Frequency Ranked (2+ Orders)
+                </span>
+              </h3>
+            </div>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Ranked by the number of distinct valid orders (2+ orders). Secondary sort by customer net spend when tied.
+            </p>
+          </div>
+
+          {/* Controls: Search, Limit (15/25/50/100), Sort, Mask, CSV Export */}
+          <div className="flex flex-wrap items-center gap-2">
+            
+            {/* Search Input */}
+            <div className="relative">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={repeatSearch}
+                onChange={e => {
+                  setRepeatSearch(e.target.value);
+                  setVisibleCountRepeat(15);
+                }}
+                placeholder="Search name, phone, city..."
+                className="h-8 pl-8 pr-2.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 w-40 sm:w-52"
+              />
+            </div>
+
+            {/* Limit Selector: Top 15 / 25 / 50 / 100 */}
+            <select
+              value={repeatLimit}
+              onChange={e => handleRepeatLimitChange(Number(e.target.value))}
+              className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer"
+            >
+              <option value={15}>Top 15</option>
+              <option value={25}>Top 25</option>
+              <option value={50}>Top 50</option>
+              <option value={100}>Top 100</option>
+            </select>
+
+            {/* Sort Field Selector */}
+            <select
+              value={repeatSortField}
+              onChange={e => setRepeatSortField(e.target.value as any)}
+              className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer"
+            >
+              <option value="totalOrders">Sort: Orders (Repeat Count)</option>
+              <option value="totalValue">Sort: Spend</option>
+              <option value="lastOrderDate">Sort: Recent</option>
+            </select>
+
+            {/* Mask/Unmask Toggle */}
+            <button
+              onClick={() => setShowMaskedPhone(prev => !prev)}
+              className="h-8 px-2.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-300 hover:text-white flex items-center gap-1.5 cursor-pointer transition-colors"
+              title={showMaskedPhone ? 'Click to show unmasked phone numbers' : 'Click to mask phone numbers'}
+            >
+              {showMaskedPhone ? <Eye size={12} /> : <EyeOff size={12} />}
+              <span className="hidden sm:inline">{showMaskedPhone ? 'Unmask' : 'Mask'}</span>
+            </button>
+
+            {/* Export CSV Button */}
+            <button
+              onClick={handleExportRepeatCustomersCSV}
+              className="h-8 px-3 rounded-lg bg-indigo-600/20 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-600/30 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
+              title="Export Top Repeat Customers to CSV"
+            >
+              <Download size={13} />
+              <span>Export CSV</span>
+            </button>
+
+          </div>
+        </div>
+
+        {/* Top Repeat Customers Table (Clean, responsive, NO inner scrollbar) */}
+        <div className="overflow-x-auto rounded-xl border border-slate-800">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="bg-slate-900/90 text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800">
+                <th className="py-2.5 px-3 text-center w-12">#</th>
+                <th className="py-2.5 px-3">Customer</th>
+                <th className="py-2.5 px-3">Phone</th>
+                <th className="py-2.5 px-3">Location</th>
+                <th 
+                  className="py-2.5 px-3 text-center cursor-pointer hover:text-white"
+                  onClick={() => {
+                    if (repeatSortField === 'totalOrders') setRepeatSortAsc(!repeatSortAsc);
+                    else { setRepeatSortField('totalOrders'); setRepeatSortAsc(false); }
+                  }}
+                >
+                  <div className="flex items-center justify-center gap-1">
+                    <span>Valid Orders</span>
+                    <ArrowUpDown size={11} />
+                  </div>
+                </th>
+                <th className="py-2.5 px-3 text-center">Repeat Purchase Count</th>
+                <th 
+                  className="py-2.5 px-3 text-right cursor-pointer hover:text-white"
+                  onClick={() => {
+                    if (repeatSortField === 'totalValue') setRepeatSortAsc(!repeatSortAsc);
+                    else { setRepeatSortField('totalValue'); setRepeatSortAsc(false); }
+                  }}
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    <span>Total Value</span>
+                    <ArrowUpDown size={11} />
+                  </div>
+                </th>
+                <th className="py-2.5 px-3 text-right">AOV</th>
+                <th className="py-2.5 px-3">Top Product</th>
+                <th className="py-2.5 px-3 text-right">Last Purchase</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/60 bg-slate-950/40">
+              {visibleRepeatCustomers.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="py-8 text-center text-slate-500">
+                    No repeat customers match the active filters or search criteria.
+                  </td>
+                </tr>
+              ) : (
+                visibleRepeatCustomers.map((c) => {
+                  const isPowerBuyer = c.totalOrders >= 5;
+
+                  return (
+                    <tr
+                      key={c.customerKey}
+                      onClick={() => setSelectedCustomerForModal(c)}
+                      className="hover:bg-slate-900/60 transition-colors cursor-pointer group"
+                    >
+                      {/* Rank */}
+                      <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-400 group-hover:text-indigo-400">
+                        {c.rank}
+                      </td>
+
+                      {/* Customer Name */}
+                      <td className="py-2.5 px-3 font-semibold text-white">
+                        <div className="flex items-center gap-1.5">
+                          <span className="truncate max-w-[140px] sm:max-w-[180px]">{c.customerName}</span>
+                          {isPowerBuyer && (
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                              VIP
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Phone */}
+                      <td className="py-2.5 px-3 font-mono text-slate-300">
+                        {showMaskedPhone ? c.maskedPhone : c.phone}
+                      </td>
+
+                      {/* Location */}
+                      <td className="py-2.5 px-3 text-slate-300">
+                        <div className="flex flex-col">
+                          <span className="font-medium text-slate-200">{c.city}</span>
+                          <span className="text-[10px] text-slate-500">{c.state}</span>
+                        </div>
+                      </td>
+
+                      {/* Valid Orders */}
+                      <td className="py-2.5 px-3 text-center">
+                        <span className={`inline-block px-2.5 py-0.5 rounded-full font-mono font-bold text-[11px] ${
+                          isPowerBuyer
+                            ? 'bg-purple-950 text-purple-300 border border-purple-700/60'
+                            : 'bg-indigo-950 text-indigo-300 border border-indigo-700/60'
+                        }`}>
+                          {c.totalOrders}
+                        </span>
+                      </td>
+
+                      {/* Repeat Purchase Count */}
+                      <td className="py-2.5 px-3 text-center font-mono">
+                        <span className="text-indigo-300 font-bold bg-indigo-950/60 px-2 py-0.5 rounded-md border border-indigo-800/40 text-[11px]">
+                          +{c.repeatPurchaseCount}
+                        </span>
+                      </td>
+
+                      {/* Total Value */}
+                      <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-400">
+                        ₹{c.totalValue.toLocaleString('en-IN')}
+                      </td>
+
+                      {/* AOV */}
+                      <td className="py-2.5 px-3 text-right font-mono text-slate-300">
+                        ₹{c.averageOrderValue.toLocaleString('en-IN')}
+                      </td>
+
+                      {/* Top Product */}
+                      <td className="py-2.5 px-3 text-slate-300">
+                        <span className="truncate max-w-[150px] inline-block" title={c.mostPurchasedProduct}>
+                          {c.mostPurchasedProduct}
+                        </span>
+                      </td>
+
+                      {/* Last Order Date */}
+                      <td className="py-2.5 px-3 text-right font-mono text-[11px] text-slate-400 whitespace-nowrap">
+                        {c.lastOrderDate}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination & Expansion Footer: Showing 1–15 of N, View More / Show Less */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+          <div className="text-xs text-slate-400 font-medium">
+            Showing <span className="font-mono font-bold text-white">1–{Math.min(visibleCountRepeat, processedRepeatCustomers.length)}</span> of{' '}
+            <span className="font-mono font-bold text-white">{processedRepeatCustomers.length}</span> repeat customers
+          </div>
+
+          <div className="flex items-center gap-2">
+            {visibleCountRepeat < processedRepeatCustomers.length && (
+              <button
+                type="button"
+                onClick={() => setVisibleCountRepeat(prev => Math.min(prev + 15, processedRepeatCustomers.length))}
+                className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 text-slate-200 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+              >
+                <span>View More (+{Math.min(15, processedRepeatCustomers.length - visibleCountRepeat)})</span>
+                <ChevronDown size={14} className="text-indigo-400" />
+              </button>
+            )}
+
+            {visibleCountRepeat > 15 && (
+              <button
+                type="button"
+                onClick={() => setVisibleCountRepeat(15)}
+                className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+              >
+                <span>Show Less</span>
+                <ChevronUp size={14} className="text-slate-400" />
+              </button>
+            )}
+          </div>
+        </div>
+
+      </div>
+
+      {/* =========================================================================
+          SECTION 5: GEOGRAPHIC CUSTOMER ANALYTICS (TOP 100 STATES & CITIES)
+         ========================================================================= */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-[#0b1220] border border-slate-800 shadow-xl space-y-4">
+        
+        {/* Section Header with Tabs & Controls */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+          <div>
+            <div className="flex items-center gap-2">
+              <MapPin size={16} className="text-indigo-400" />
+              <h3 className="text-sm sm:text-base font-bold text-white tracking-tight">
                 Geographic Customer Analytics (Top {geoLimit})
               </h3>
             </div>
@@ -1127,23 +1481,28 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
 
           <div className="flex flex-wrap items-center gap-2">
             
-            {/* States vs Cities Tab Toggle */}
-            <div className="flex rounded-lg bg-slate-900 p-0.5 border border-slate-800">
+            {/* Tabs: Top States vs Top Cities */}
+            <div className="flex items-center bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs font-semibold">
               <button
-                onClick={() => { setGeoTab('states'); setDrillDownState(null); }}
-                className={`px-3 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                type="button"
+                onClick={() => {
+                  setGeoTab('states');
+                  setDrillDownState(null);
+                }}
+                className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
                   geoTab === 'states'
-                    ? 'bg-indigo-600 text-white shadow-sm'
+                    ? 'bg-indigo-600 text-white font-bold shadow-sm'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
                 Top States
               </button>
               <button
+                type="button"
                 onClick={() => setGeoTab('cities')}
-                className={`px-3 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
                   geoTab === 'cities'
-                    ? 'bg-indigo-600 text-white shadow-sm'
+                    ? 'bg-indigo-600 text-white font-bold shadow-sm'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
@@ -1151,21 +1510,17 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
               </button>
             </div>
 
-            {/* Drilldown Active Filter Badge */}
+            {/* Drilldown Chip if active */}
             {drillDownState && (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-950/80 border border-purple-700/60 text-purple-200 text-xs">
-                <span>State: {drillDownState}</span>
-                <button
-                  onClick={clearStateDrilldown}
-                  className="hover:text-white cursor-pointer ml-0.5"
-                  title="Clear State Filter"
-                >
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-xs font-medium">
+                <span>Drill-down: <strong>{drillDownState}</strong></span>
+                <button onClick={clearStateDrilldown} className="text-slate-400 hover:text-white">
                   <X size={12} />
                 </button>
-              </span>
+              </div>
             )}
 
-            {/* Search Input */}
+            {/* Search */}
             <div className="relative">
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
@@ -1177,13 +1532,13 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
               />
             </div>
 
-            {/* Limit Selector */}
+            {/* Limit Selector: Top 15 / 25 / 50 / 100 */}
             <select
               value={geoLimit}
               onChange={e => setGeoLimit(Number(e.target.value))}
               className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer"
             >
-              <option value={10}>Top 10</option>
+              <option value={15}>Top 15</option>
               <option value={25}>Top 25</option>
               <option value={50}>Top 50</option>
               <option value={100}>Top 100</option>
@@ -1192,20 +1547,20 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
             {/* Export CSV */}
             <button
               onClick={handleExportGeoCSV}
-              className="h-8 px-2.5 rounded-lg bg-slate-900 border border-slate-700/80 text-slate-300 hover:text-white text-xs font-medium flex items-center gap-1 cursor-pointer"
+              className="h-8 px-3 rounded-lg bg-slate-900 border border-slate-700/80 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all"
               title={`Export Top ${geoTab} CSV`}
             >
-              <Download size={12} />
-              <span className="hidden sm:inline">CSV</span>
+              <Download size={13} />
+              <span>CSV</span>
             </button>
 
           </div>
         </div>
 
         {/* Horizontal Bar Chart for Top 10 Locations */}
-        <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2">
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-bold text-slate-300">
+        <div className="p-3.5 rounded-xl bg-slate-950/40 border border-slate-800/80 space-y-2">
+          <div className="flex items-center justify-between text-xs text-slate-400">
+            <span className="font-semibold text-slate-300">
               Top 10 {geoTab === 'states' ? 'States' : 'Cities'} by Customer Volume
             </span>
             <span className="text-[11px] text-slate-500">
@@ -1213,41 +1568,50 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
             </span>
           </div>
 
-          <div className="h-[240px] w-full pt-1">
+          <div className="h-[220px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 layout="vertical"
                 data={processedGeoData.slice(0, 10)}
-                margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
+                margin={{ top: 5, right: 30, left: 60, bottom: 5 }}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" horizontal={false} />
                 <XAxis type="number" stroke="#64748b" fontSize={10} tickLine={false} />
                 <YAxis
                   type="category"
                   dataKey="name"
-                  stroke="#cbd5e1"
-                  fontSize={11}
+                  stroke="#94a3b8"
+                  fontSize={10}
                   tickLine={false}
-                  width={100}
+                  width={90}
                 />
                 <Tooltip
                   content={({ active, payload }) => {
                     if (active && payload && payload.length) {
-                      const item = payload[0].payload as any;
+                      const item = payload[0].payload;
                       return (
-                        <div className="p-3 rounded-xl bg-slate-900 border border-slate-700 shadow-xl text-xs space-y-1">
-                          <p className="font-bold text-white">{item.name} {item.state ? `(${item.state})` : ''}</p>
-                          <p className="text-indigo-300 font-mono">Customers: <strong>{item.uniqueCustomers.toLocaleString('en-IN')}</strong></p>
-                          <p className="text-purple-300 font-mono">Repeat Buyers: <strong>{item.repeatCustomers}</strong> ({item.repeatRate.toFixed(1)}%)</p>
-                          <p className="text-emerald-300 font-mono">Total Sales: ₹{Math.round(item.salesValue).toLocaleString('en-IN')}</p>
+                        <div className="bg-slate-900 border border-slate-700 p-2.5 rounded-xl shadow-xl text-xs space-y-1">
+                          <p className="font-bold text-white">{item.name}</p>
+                          <p className="text-cyan-400">
+                            Customers: <span className="font-mono font-bold">{item.uniqueCustomers.toLocaleString('en-IN')}</span>
+                          </p>
+                          <p className="text-indigo-400">
+                            Repeat Buyers: <span className="font-mono font-bold">{item.repeatCustomers.toLocaleString('en-IN')}</span> ({item.repeatRate.toFixed(1)}%)
+                          </p>
+                          <p className="text-emerald-400">
+                            Total Sales: <span className="font-mono font-bold">₹{Math.round(item.salesValue).toLocaleString('en-IN')}</span>
+                          </p>
                         </div>
                       );
                     }
                     return null;
                   }}
                 />
-                <Bar dataKey="uniqueCustomers" fill="#6366f1" radius={[0, 4, 4, 0]} name="Unique Customers" />
-                <Bar dataKey="repeatCustomers" fill="#a855f7" radius={[0, 4, 4, 0]} name="Repeat Buyers" />
+                <Bar dataKey="uniqueCustomers" fill="#818cf8" radius={[0, 4, 4, 0]}>
+                  {processedGeoData.slice(0, 10).map((entry, index) => (
+                    <Cell key={`geo-cell-${index}`} fill={index % 2 === 0 ? '#818cf8' : '#a78bfa'} />
+                  ))}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -1272,16 +1636,13 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
             <tbody className="divide-y divide-slate-800/60 bg-slate-950/40">
               {processedGeoData.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-8 text-center text-slate-500">
-                    No geographic records match the active criteria.
+                  <td colSpan={geoTab === 'states' ? 8 : 7} className="py-8 text-center text-slate-500">
+                    No location records match the current filters.
                   </td>
                 </tr>
               ) : (
                 processedGeoData.map((item) => (
-                  <tr
-                    key={`${item.name}__${item.state || ''}`}
-                    className="hover:bg-slate-900/60 transition-colors"
-                  >
+                  <tr key={item.name} className="hover:bg-slate-900/60 transition-colors">
                     <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-400">
                       {item.rank}
                     </td>
@@ -1289,27 +1650,21 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
                       {item.name}
                     </td>
                     {geoTab === 'cities' && (
-                      <td className="py-2.5 px-3 text-slate-400 font-medium">
+                      <td className="py-2.5 px-3 text-slate-400 text-[11px]">
                         {item.state}
                       </td>
                     )}
                     <td className="py-2.5 px-3 text-center font-mono text-slate-300">
                       {item.totalOrders.toLocaleString('en-IN')}
                     </td>
-                    <td className="py-2.5 px-3 text-center font-mono font-bold text-indigo-300">
+                    <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-200">
                       {item.uniqueCustomers.toLocaleString('en-IN')}
                     </td>
-                    <td className="py-2.5 px-3 text-center font-mono text-purple-300">
+                    <td className="py-2.5 px-3 text-center font-mono text-indigo-300">
                       {item.repeatCustomers.toLocaleString('en-IN')}
                     </td>
                     <td className="py-2.5 px-3 text-center font-mono">
-                      <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
-                        item.repeatRate >= 15
-                          ? 'bg-emerald-950 text-emerald-300 border border-emerald-800/60'
-                          : item.repeatRate >= 10
-                          ? 'bg-indigo-950 text-indigo-300 border border-indigo-800/60'
-                          : 'bg-slate-900 text-slate-400 border border-slate-800'
-                      }`}>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-950/60 text-indigo-300 border border-indigo-700/50">
                         {item.repeatRate.toFixed(1)}%
                       </span>
                     </td>
@@ -1319,8 +1674,9 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
                     {geoTab === 'states' && (
                       <td className="py-2.5 px-3 text-center">
                         <button
+                          type="button"
                           onClick={() => handleStateDrillDown(item.name)}
-                          className="px-2 py-1 rounded-md bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600/30 border border-indigo-500/40 text-[10px] font-semibold cursor-pointer transition-all"
+                          className="px-2 py-0.5 rounded-md bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-[11px] font-semibold cursor-pointer transition-all border border-indigo-500/30"
                         >
                           View Cities →
                         </button>
@@ -1336,15 +1692,16 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
       </div>
 
       {/* =========================================================================
-          SECTION 4: PRODUCT-LEVEL REPEAT PURCHASE INSIGHTS
+          SECTION 6: PRODUCT-LEVEL REPEAT PURCHASE INSIGHTS
          ========================================================================= */}
       <div className="p-4 sm:p-5 rounded-2xl bg-[#0b1220] border border-slate-800 shadow-xl space-y-4">
         
+        {/* Section Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
           <div>
             <div className="flex items-center gap-2">
-              <Package size={18} className="text-purple-400" />
-              <h3 className="text-base font-bold text-white tracking-tight">
+              <Package size={16} className="text-purple-400" />
+              <h3 className="text-sm sm:text-base font-bold text-white tracking-tight">
                 Product-Level Repeat Purchase Insights
               </h3>
             </div>
@@ -1353,26 +1710,24 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                value={productSearch}
-                onChange={e => setProductSearch(e.target.value)}
-                placeholder="Search products..."
-                className="h-8 pl-8 pr-2.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 w-44 sm:w-56"
-              />
-            </div>
+          <div className="relative">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={productSearch}
+              onChange={e => setProductSearch(e.target.value)}
+              placeholder="Search products..."
+              className="h-8 pl-8 pr-2.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 w-44 sm:w-60"
+            />
           </div>
         </div>
 
-        {/* Product Bar Chart */}
-        <div className="h-[250px] w-full pt-1">
+        {/* Bar Chart: Top Products by Repeat Sales Value */}
+        <div className="h-[220px] w-full pt-1">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
               data={processedProducts.slice(0, 8)}
-              margin={{ top: 10, right: 10, left: -10, bottom: 35 }}
+              margin={{ top: 10, right: 10, left: 10, bottom: 25 }}
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
               <XAxis
@@ -1381,28 +1736,37 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
                 fontSize={10}
                 tickLine={false}
                 interval={0}
-                angle={-30}
+                angle={-25}
                 textAnchor="end"
+                height={40}
               />
-              <YAxis stroke="#64748b" fontSize={11} tickLine={false} />
+              <YAxis stroke="#64748b" fontSize={10} tickLine={false} />
               <Tooltip
                 content={({ active, payload }) => {
                   if (active && payload && payload.length) {
-                    const item = payload[0].payload as ProductRepeatInsightItem;
+                    const item = payload[0].payload;
                     return (
-                      <div className="p-3 rounded-xl bg-slate-900 border border-slate-700 shadow-xl text-xs space-y-1">
+                      <div className="bg-slate-900 border border-slate-700 p-2.5 rounded-xl shadow-xl text-xs space-y-1">
                         <p className="font-bold text-white">{item.productName}</p>
-                        <p className="text-purple-300 font-mono">Repeat Buyers: <strong>{item.repeatCustomerCount}</strong></p>
-                        <p className="text-cyan-300 font-mono">Repeat Quantity: <strong>{item.repeatQuantity} units</strong></p>
-                        <p className="text-emerald-300 font-mono">Repeat Sales: ₹{item.repeatSalesValue.toLocaleString('en-IN')}</p>
-                        <p className="text-slate-400 font-mono text-[10px]">Avg Price: ₹{item.averageUnitPrice}</p>
+                        <p className="text-indigo-300">
+                          Repeat Buyers: <span className="font-mono font-bold text-white">{item.repeatCustomerCount.toLocaleString('en-IN')}</span>
+                        </p>
+                        <p className="text-cyan-300">
+                          Repeat Quantity: <span className="font-mono font-bold text-white">{item.repeatQuantity.toLocaleString('en-IN')} units</span>
+                        </p>
+                        <p className="text-emerald-400">
+                          Repeat Sales: <span className="font-mono font-bold">₹{Math.round(item.repeatSalesValue).toLocaleString('en-IN')}</span>
+                        </p>
+                        <p className="text-slate-400 text-[10px]">
+                          Avg Price: ₹{item.averageUnitPrice}
+                        </p>
                       </div>
                     );
                   }
                   return null;
                 }}
               />
-              <Bar dataKey="repeatSalesValue" fill="#a855f7" radius={[4, 4, 0, 0]} name="Repeat Sales Value (₹)" />
+              <Bar dataKey="repeatSalesValue" fill="#a855f7" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -1456,7 +1820,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
               {processedProducts.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="py-8 text-center text-slate-500">
-                    No repeat product insights available for current filters.
+                    No products match the search query.
                   </td>
                 </tr>
               ) : (
@@ -1465,17 +1829,17 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
                     <td className="py-2.5 px-3 font-semibold text-white">
                       {p.productName}
                     </td>
-                    <td className="py-2.5 px-3 text-center font-mono font-bold text-purple-300">
+                    <td className="py-2.5 px-3 text-center font-mono font-bold text-indigo-300">
                       {p.repeatCustomerCount.toLocaleString('en-IN')}
                     </td>
                     <td className="py-2.5 px-3 text-center font-mono text-cyan-300">
                       {p.repeatQuantity.toLocaleString('en-IN')} units
                     </td>
                     <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-400">
-                      ₹{p.repeatSalesValue.toLocaleString('en-IN')}
+                      ₹{Math.round(p.repeatSalesValue).toLocaleString('en-IN')}
                     </td>
                     <td className="py-2.5 px-3 text-right font-mono text-slate-400">
-                      ₹{p.averageUnitPrice.toLocaleString('en-IN')}
+                      ₹{p.averageUnitPrice}
                     </td>
                   </tr>
                 ))
@@ -1487,66 +1851,124 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
       </div>
 
       {/* =========================================================================
-          MODAL: CUSTOMER ORDER HISTORY INSPECTION
+          CUSTOMER PROFILE / ORDER HISTORY MODAL
          ========================================================================= */}
       {selectedCustomerForModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-2xl bg-[#0b1220] border border-slate-700 rounded-2xl shadow-2xl p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-[#0b1220] border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+            
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-800 flex items-start justify-between bg-slate-900/50">
               <div>
-                <h4 className="text-lg font-bold text-white">{selectedCustomerForModal.customerName}</h4>
-                <p className="text-xs text-slate-400">
-                  {showMaskedPhone ? selectedCustomerForModal.maskedPhone : selectedCustomerForModal.phone} • {selectedCustomerForModal.city}, {selectedCustomerForModal.state}
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-white">{selectedCustomerForModal.customerName}</h3>
+                  {selectedCustomerForModal.totalOrders >= 5 && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                      VIP Buyer
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-400 mt-1 flex items-center gap-2">
+                  <span className="font-mono text-slate-300">
+                    {showMaskedPhone ? selectedCustomerForModal.maskedPhone : selectedCustomerForModal.phone}
+                  </span>
+                  <span>•</span>
+                  <span>{selectedCustomerForModal.city}, {selectedCustomerForModal.state}</span>
                 </p>
               </div>
+
               <button
                 onClick={() => setSelectedCustomerForModal(null)}
-                className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400 hover:text-white cursor-pointer"
+                className="w-8 h-8 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
               >
-                <X size={16} />
+                <X size={15} />
               </button>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
-              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+            {/* Modal Metrics Grid */}
+            <div className="p-4 sm:p-5 grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-950/40 border-b border-slate-800/60">
+              <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Orders</span>
-                <p className="text-xl font-bold font-mono text-white mt-0.5">{selectedCustomerForModal.totalOrders}</p>
+                <div className="text-xl font-mono font-bold text-white mt-1">
+                  {selectedCustomerForModal.totalOrders}
+                </div>
+                <span className="text-[10px] text-indigo-400">+{selectedCustomerForModal.repeatPurchaseCount} repeat</span>
               </div>
-              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+
+              <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Spend</span>
-                <p className="text-xl font-bold font-mono text-emerald-400 mt-0.5">₹{selectedCustomerForModal.totalValue.toLocaleString('en-IN')}</p>
+                <div className="text-xl font-mono font-bold text-emerald-400 mt-1">
+                  ₹{selectedCustomerForModal.totalValue.toLocaleString('en-IN')}
+                </div>
+                <span className="text-[10px] text-slate-500">Net purchases</span>
               </div>
-              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Average Order Value</span>
-                <p className="text-xl font-bold font-mono text-purple-300 mt-0.5">₹{selectedCustomerForModal.averageOrderValue.toLocaleString('en-IN')}</p>
+
+              <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">AOV</span>
+                <div className="text-xl font-mono font-bold text-purple-300 mt-1">
+                  ₹{selectedCustomerForModal.averageOrderValue.toLocaleString('en-IN')}
+                </div>
+                <span className="text-[10px] text-slate-500">Per order avg</span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Top Product</span>
+                <div className="text-xs font-semibold text-slate-200 mt-1 truncate" title={selectedCustomerForModal.mostPurchasedProduct}>
+                  {selectedCustomerForModal.mostPurchasedProduct}
+                </div>
+                <span className="text-[10px] text-slate-500">Most purchased</span>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <span className="text-xs font-bold text-slate-300">Order IDs associated with this customer:</span>
-              <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto p-1 custom-scrollbar">
-                {selectedCustomerForModal.orderIds.map(oid => (
-                  <span
-                    key={oid}
-                    onClick={() => {
-                      if (onNavigateToOrder) onNavigateToOrder(oid);
-                    }}
-                    className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-mono text-indigo-300 hover:border-indigo-500 cursor-pointer transition-all"
+            {/* Order IDs & Dates List */}
+            <div className="p-4 sm:p-5 overflow-y-auto space-y-3 flex-1 custom-scrollbar">
+              <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                Order History ({selectedCustomerForModal.orderIds.length} Valid Orders)
+              </h4>
+
+              <div className="divide-y divide-slate-800/80 rounded-xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+                {selectedCustomerForModal.orderIds.map((ordId, idx) => (
+                  <div
+                    key={ordId}
+                    className="p-3 flex items-center justify-between text-xs hover:bg-slate-850/60 transition-colors"
                   >
-                    #{oid}
-                  </span>
+                    <div className="flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center text-[10px] font-mono">
+                        {idx + 1}
+                      </span>
+                      <span className="font-mono font-bold text-white">{ordId}</span>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <span className="text-slate-400 font-mono text-[11px]">
+                        {idx === 0 ? `Last: ${selectedCustomerForModal.lastOrderDate}` : idx === selectedCustomerForModal.orderIds.length - 1 ? `First: ${selectedCustomerForModal.firstOrderDate}` : ''}
+                      </span>
+                      {onNavigateToOrder && (
+                        <button
+                          type="button"
+                          onClick={() => onNavigateToOrder(ordId)}
+                          className="px-2 py-1 rounded bg-indigo-600/30 text-indigo-300 hover:text-white hover:bg-indigo-600 text-[11px] font-semibold transition-all cursor-pointer"
+                        >
+                          View Order →
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
 
-            <div className="flex justify-end pt-2 border-t border-slate-800">
+            {/* Modal Footer */}
+            <div className="p-3.5 border-t border-slate-800 bg-slate-900/50 flex justify-end">
               <button
+                type="button"
                 onClick={() => setSelectedCustomerForModal(null)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold cursor-pointer"
+                className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold cursor-pointer transition-colors"
               >
                 Close
               </button>
             </div>
+
           </div>
         </div>
       )}

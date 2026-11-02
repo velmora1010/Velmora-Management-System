@@ -89,6 +89,8 @@ export interface ComprehensiveRepeatAnalyticsData {
   frequencyDistribution: FrequencyDistributionItem[];
   repeatTrends: RepeatTrendPoint[];
   topCustomers: TopCustomerItem[];
+  topCustomersByValue: TopCustomerItem[];
+  topCustomersByRepeat: TopCustomerItem[];
   topStates: GeographicLocationItem[];
   topCities: GeographicLocationItem[];
   productInsights: ProductRepeatInsightItem[];
@@ -527,8 +529,8 @@ class CustomerRepeatAnalyticsService {
         };
       });
 
-    // 7. Top 100 Customers Ranked by Total Purchase Value
-    const topCustomers: TopCustomerItem[] = targetCustomers.map(c => {
+    // 7. Base customer profiles for ranking
+    const allCustomerProfiles: TopCustomerItem[] = targetCustomers.map(c => {
       const sortedOrders = [...c.orders].sort((a, b) => (b.order_date || '').localeCompare(a.order_date || ''));
       const totalValue = sortedOrders.reduce((sum, ord) => sum + (Number(ord.order_total) || 0), 0);
       const totalOrders = sortedOrders.length;
@@ -577,10 +579,36 @@ class CustomerRepeatAnalyticsService {
         firstOrderDate,
         orderIds: sortedOrders.map(o => o.order_id)
       };
-    })
-    .sort((a, b) => b.totalValue - a.totalValue)
-    .slice(0, 100)
-    .map((item, index) => ({ ...item, rank: index + 1 }));
+    });
+
+    // 7A. Top 100 Customers Ranked by Total Purchase Value (highest to lowest)
+    const topCustomersByValue: TopCustomerItem[] = [...allCustomerProfiles]
+      .sort((a, b) => {
+        // Primary: totalValue desc
+        if (b.totalValue !== a.totalValue) return b.totalValue - a.totalValue;
+        // Secondary: totalOrders desc
+        if (b.totalOrders !== a.totalOrders) return b.totalOrders - a.totalOrders;
+        // Tertiary: lastOrderDate desc
+        return (b.lastOrderDate || '').localeCompare(a.lastOrderDate || '');
+      })
+      .slice(0, 100)
+      .map((item, index) => ({ ...item, rank: index + 1 }));
+
+    // 7B. Top 100 Repeat Customers (2+ distinct valid orders, highest to lowest)
+    const repeatCustomerProfiles = allCustomerProfiles.filter(c => c.totalOrders >= 2);
+    const topCustomersByRepeat: TopCustomerItem[] = [...repeatCustomerProfiles]
+      .sort((a, b) => {
+        // Primary: totalOrders desc
+        if (b.totalOrders !== a.totalOrders) return b.totalOrders - a.totalOrders;
+        // Secondary: totalValue desc
+        if (b.totalValue !== a.totalValue) return b.totalValue - a.totalValue;
+        // Tertiary: lastOrderDate desc
+        return (b.lastOrderDate || '').localeCompare(a.lastOrderDate || '');
+      })
+      .slice(0, 100)
+      .map((item, index) => ({ ...item, rank: index + 1 }));
+
+    const topCustomers = topCustomersByValue; // alias for backwards compatibility
 
     // 8. Geographic Analytics: Top 100 States & Cities
     const stateAgg = new Map<string, { totalOrders: number; customers: Set<string>; repeatCustomers: Set<string>; salesValue: number }>();
@@ -713,6 +741,8 @@ class CustomerRepeatAnalyticsService {
       frequencyDistribution,
       repeatTrends,
       topCustomers,
+      topCustomersByValue,
+      topCustomersByRepeat,
       topStates,
       topCities,
       productInsights,
