@@ -1067,9 +1067,37 @@ export const syncSalesUploadToLogistics = async (
  * browser refresh, sign-in, or multi-device access.
  * Safely excludes deleted orders and synchronizes deletions to Dexie.
  */
-export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncResult> => {
-  try {
-    let allSalesOrders: any[] = [];
+let isSyncInProgress = false;
+let syncPromise: Promise<SalesLogisticsSyncResult> | null = null;
+let lastSyncTimestamp = 0;
+const MIN_SYNC_INTERVAL_MS = 60 * 1000; // 60s minimum interval between automatic syncs
+
+export const syncSalesOrdersFromSupabase = async (options?: { force?: boolean }): Promise<SalesLogisticsSyncResult> => {
+  const force = options?.force ?? false;
+  const now = Date.now();
+
+  // Concurrency lock: return existing in-flight sync promise
+  if (isSyncInProgress && syncPromise) {
+    return syncPromise;
+  }
+
+  // Cooldown check unless explicitly forced by user refresh
+  if (!force && lastSyncTimestamp > 0 && now - lastSyncTimestamp < MIN_SYNC_INTERVAL_MS) {
+    return {
+      insertedCount: 0,
+      updatedCount: 0,
+      activeCount: 0,
+      fulfilledCount: 0,
+      pendingCount: 0,
+      preservedWorkflowCount: 0,
+      skippedDeletedCount: 0
+    };
+  }
+
+  isSyncInProgress = true;
+  syncPromise = (async () => {
+    try {
+      let allSalesOrders: any[] = [];
     let page = 0;
     const pageSize = 1000;
     let hasMore = true;
@@ -1096,7 +1124,7 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
     while (sHasMore) {
       const { data: sData, error: sErr } = await supabase
         .from('customer_tracking_shipments')
-        .select('*')
+        .select('order_id, display_order_id, status, address, awb_number, courier, dispatch_date')
         .neq('status', 'Order Deleted')
         .neq('raw_status', 'DELETED')
         .range(sPage * sPageSize, (sPage + 1) * sPageSize - 1);
@@ -1163,6 +1191,7 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
     // or that matches a deleted/stale ID must be trashed/removed!
     // Also, reconcile fulfillment states: if Sales has marked an order Fulfilled, promote Dexie record.
     const dexieAll = await db.logistics_orders.toArray();
+    const dexieUpdates: LogisticsOrder[] = [];
     for (const rec of dexieAll) {
       if (!rec.id) continue;
       const cId = cleanOrderId(rec.orderId).toLowerCase();
@@ -1175,7 +1204,8 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
       // If active/unfulfilled in Dexie but not in Supabase sales_orders, or is known stale/deleted:
       if (isKnownStale || isDeletedVariant || !isValidSalesOrder) {
         if (rec.stage !== 'trash' || rec.status !== 'Deleted') {
-          await db.logistics_orders.update(rec.id, {
+          dexieUpdates.push({
+            ...rec,
             stage: 'trash',
             status: 'Deleted',
             deletedAt: new Date().toISOString(),
@@ -1185,7 +1215,8 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
       } else {
         const salesInfo = salesOrderFulfillmentMap.get(cId) || (bId ? salesOrderFulfillmentMap.get(bId) : undefined);
         if (salesInfo?.isFulfilled && (rec.stage === 'active' || (rec.status || '').toLowerCase() === 'unfulfilled')) {
-          await db.logistics_orders.update(rec.id, {
+          dexieUpdates.push({
+            ...rec,
             stage: 'fulfilled',
             status: 'Fulfilled',
             fulfillmentStatus: 'Fulfilled',
@@ -1193,6 +1224,13 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
             fulfilledDate: rec.fulfilledDate || rec.orderDateDisplay || rec.orderDate
           });
         }
+      }
+    }
+
+    if (dexieUpdates.length > 0) {
+      const CHUNK_SIZE = 500;
+      for (let i = 0; i < dexieUpdates.length; i += CHUNK_SIZE) {
+        await db.logistics_orders.bulkPut(dexieUpdates.slice(i, i + CHUNK_SIZE));
       }
     }
 
@@ -1294,18 +1332,25 @@ export const syncSalesOrdersFromSupabase = async (): Promise<SalesLogisticsSyncR
     const transformed = transformedSales;
 
     return await syncSalesUploadToLogistics(transformed);
-  } catch (err) {
-    console.warn('syncSalesOrdersFromSupabase warning:', err);
-    return {
-      insertedCount: 0,
-      updatedCount: 0,
-      activeCount: 0,
-      fulfilledCount: 0,
-      pendingCount: 0,
-      preservedWorkflowCount: 0,
-      skippedDeletedCount: 0
-    };
-  }
+    } catch (err) {
+      console.warn('syncSalesOrdersFromSupabase warning:', err);
+      return {
+        insertedCount: 0,
+        updatedCount: 0,
+        activeCount: 0,
+        fulfilledCount: 0,
+        pendingCount: 0,
+        preservedWorkflowCount: 0,
+        skippedDeletedCount: 0
+      };
+    } finally {
+      isSyncInProgress = false;
+      syncPromise = null;
+      lastSyncTimestamp = Date.now();
+    }
+  })();
+
+  return syncPromise;
 };
 
 /**

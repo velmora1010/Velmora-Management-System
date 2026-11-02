@@ -199,13 +199,22 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
   // Sanitize legacy serial dates, normalize states, and enrich missing details on mount
   useEffect(() => {
+    let isCancelled = false;
+
     const sanitizeDexieRecords = async () => {
       try {
-        // Automatically sync canonical Sales orders from Supabase into Dexie
+        // Automatically sync canonical Sales orders from Supabase into Dexie (guarded by cooldown)
         await syncSalesOrdersFromSupabase();
+        if (isCancelled) return;
 
         const records = await db.logistics_orders.toArray();
-        if (records.length === 0) return;
+        if (records.length === 0 || isCancelled) return;
+
+        const patchMap = new Map<number, Partial<LogisticsOrder>>();
+        const queuePatch = (id: number, patch: Partial<LogisticsOrder>) => {
+          const prev = patchMap.get(id) || {};
+          patchMap.set(id, { ...prev, ...patch });
+        };
 
         // Pass 0: Purge / tombstone any records marked deleted or known orphaned orders
         const knownOrphanedBases = new Set([
@@ -222,7 +231,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
           if (isDeletedStatus || isKnownOrphaned) {
             if (rec.stage !== 'trash' || rec.status !== 'Deleted') {
-              await db.logistics_orders.update(rec.id, {
+              queuePatch(rec.id, {
                 stage: 'trash',
                 status: 'Deleted',
                 deletedAt: new Date().toISOString(),
@@ -283,7 +292,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
           }
 
           if (needsUpdate) {
-            await db.logistics_orders.update(rec.id, patch);
+            queuePatch(rec.id, patch);
           }
         }
 
@@ -294,7 +303,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                (!r.state || r.state.toLowerCase() === 'india' || r.state.trim() === '')
         );
 
-        if (needsEnrichment.length > 0) {
+        if (needsEnrichment.length > 0 && !isCancelled) {
           const rawIds = needsEnrichment.map(r => cleanOrderId(r.orderId)).filter(Boolean);
           if (rawIds.length > 0) {
             // Batch fetch matching orders from Supabase
@@ -303,7 +312,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
               .select('order_id, customer_name, phone, state, city, pincode, order_total, payment_mode')
               .in('order_id', rawIds);
 
-            if (sbOrders && sbOrders.length > 0) {
+            if (sbOrders && sbOrders.length > 0 && !isCancelled) {
               const sbMap = new Map<string, typeof sbOrders[0]>();
               sbOrders.forEach(so => sbMap.set(cleanOrderId(so.order_id).toLowerCase(), so));
 
@@ -325,11 +334,28 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                     patch.city = so.city;
                   }
                   if (Object.keys(patch).length > 0) {
-                    await db.logistics_orders.update(rec.id, patch);
+                    queuePatch(rec.id, patch);
                   }
                 }
               }
             }
+          }
+        }
+
+        // Apply all accumulated updates in a single chunked bulkPut to avoid IndexedDB live query storm
+        if (patchMap.size > 0 && !isCancelled) {
+          const recMap = new Map<number, LogisticsOrder>();
+          records.forEach(r => { if (r.id) recMap.set(r.id, r); });
+          const toPut: LogisticsOrder[] = [];
+          for (const [id, patch] of patchMap.entries()) {
+            const original = recMap.get(id);
+            if (original) {
+              toPut.push({ ...original, ...patch });
+            }
+          }
+          const CHUNK_SIZE = 500;
+          for (let i = 0; i < toPut.length; i += CHUNK_SIZE) {
+            await db.logistics_orders.bulkPut(toPut.slice(i, i + CHUNK_SIZE));
           }
         }
       } catch (e) {
@@ -338,11 +364,8 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
     };
     sanitizeDexieRecords();
 
-    // Listen for real-time sales order sync and deletion events from Sales department
-    const handleSalesSynced = () => {
-      syncSalesOrdersFromSupabase().catch(err => console.warn('Background sync on sales upload error:', err));
-    };
-
+    // Listen for deletion and archive events (NOTE: Dexie useLiveQuery automatically reflects sync updates;
+    // listening to sync events and re-triggering sync was causing an infinite loop OOM crash)
     const handleSalesOrderDeleted = (e: any) => {
       const orderId = e.detail?.orderId;
       if (orderId) {
@@ -362,14 +385,13 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
       setSelectedOrderIds(new Set());
     };
 
-    window.addEventListener('velmora:sales_orders_synced', handleSalesSynced);
     window.addEventListener('velmora:sales_order_deleted', handleSalesOrderDeleted);
     window.addEventListener('velmora:sales_batch_deleted', handleSalesBatchDeleted);
     window.addEventListener('velmora:logistics_archived', handleLogisticsArchivedOrRestored);
     window.addEventListener('velmora:logistics_restored', handleLogisticsArchivedOrRestored);
 
     return () => {
-      window.removeEventListener('velmora:sales_orders_synced', handleSalesSynced);
+      isCancelled = true;
       window.removeEventListener('velmora:sales_order_deleted', handleSalesOrderDeleted);
       window.removeEventListener('velmora:sales_batch_deleted', handleSalesBatchDeleted);
       window.removeEventListener('velmora:logistics_archived', handleLogisticsArchivedOrRestored);
@@ -699,7 +721,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      const res = await syncSalesOrdersFromSupabase();
+      const res = await syncSalesOrdersFromSupabase({ force: true });
       const total = res.insertedCount + res.updatedCount;
       toast.success(
         `Logistics synchronized from Sales: ${res.activeCount} Active, ${res.pendingCount} Pending, ${res.fulfilledCount} Fulfilled`,
