@@ -4,9 +4,8 @@ import {
   X,
   Check,
   CheckCircle2,
-  XCircle,
   MoreHorizontal,
-  ArrowLeft,
+  ChevronDown,
   Loader2,
   Calendar,
   Clock,
@@ -32,9 +31,9 @@ export const NOT_MARKED_CONFIG: StatusConfig = {
   label: 'Not Marked',
   description: 'Attendance not yet recorded for this date',
   dotColor: 'bg-slate-400',
-  badgeBg: 'bg-slate-100',
-  badgeBorder: 'border-slate-300',
-  badgeText: 'text-slate-700',
+  badgeBg: 'bg-slate-800/80',
+  badgeBorder: 'border-slate-700',
+  badgeText: 'text-slate-300',
 };
 
 export const MAIN_STATUS_CARDS: StatusConfig[] = [
@@ -43,102 +42,102 @@ export const MAIN_STATUS_CARDS: StatusConfig[] = [
     label: 'Present',
     description: 'Employee attended work',
     dotColor: 'bg-emerald-500',
-    badgeBg: 'bg-emerald-50',
-    badgeBorder: 'border-emerald-200',
-    badgeText: 'text-emerald-700',
+    badgeBg: 'bg-emerald-500/15',
+    badgeBorder: 'border-emerald-500/30',
+    badgeText: 'text-emerald-400',
   },
   {
     value: 'absent',
     label: 'Absent',
     description: 'Employee did not attend work',
     dotColor: 'bg-rose-500',
-    badgeBg: 'bg-rose-50',
-    badgeBorder: 'border-rose-200',
-    badgeText: 'text-rose-700',
+    badgeBg: 'bg-rose-500/15',
+    badgeBorder: 'border-rose-500/30',
+    badgeText: 'text-rose-400',
   },
 ];
 
 export const MORE_STATUS_ITEMS: StatusConfig[] = [
   {
+    value: 'half_day',
+    label: 'Half Day',
+    description: 'Worked half shift duration',
+    dotColor: 'bg-amber-400',
+    badgeBg: 'bg-amber-500/15',
+    badgeBorder: 'border-amber-500/30',
+    badgeText: 'text-amber-300',
+  },
+  {
     value: 'late',
     label: 'Late',
     description: 'Arrived after shift grace period',
     dotColor: 'bg-amber-500',
-    badgeBg: 'bg-amber-50',
-    badgeBorder: 'border-amber-200',
-    badgeText: 'text-amber-700',
-  },
-  {
-    value: 'half_day',
-    label: 'Half-Day',
-    description: 'Worked half shift duration',
-    dotColor: 'bg-amber-400',
-    badgeBg: 'bg-amber-50',
-    badgeBorder: 'border-amber-300',
-    badgeText: 'text-amber-800',
+    badgeBg: 'bg-amber-500/15',
+    badgeBorder: 'border-amber-500/30',
+    badgeText: 'text-amber-400',
   },
   {
     value: 'on_leave',
     label: 'On Leave',
     description: 'Authorized company leave',
     dotColor: 'bg-purple-500',
-    badgeBg: 'bg-purple-50',
-    badgeBorder: 'border-purple-200',
-    badgeText: 'text-purple-700',
-  },
-  {
-    value: 'permission',
-    label: 'Permission',
-    description: 'Short authorized absence',
-    dotColor: 'bg-blue-500',
-    badgeBg: 'bg-blue-50',
-    badgeBorder: 'border-blue-200',
-    badgeText: 'text-blue-700',
+    badgeBg: 'bg-purple-500/15',
+    badgeBorder: 'border-purple-500/30',
+    badgeText: 'text-purple-400',
   },
   {
     value: 'wfh',
     label: 'Work From Home',
     description: 'Remote / off-site work',
-    dotColor: 'bg-teal-500',
-    badgeBg: 'bg-teal-50',
-    badgeBorder: 'border-teal-200',
-    badgeText: 'text-teal-700',
+    dotColor: 'bg-teal-400',
+    badgeBg: 'bg-teal-500/15',
+    badgeBorder: 'border-teal-500/30',
+    badgeText: 'text-teal-300',
+  },
+  {
+    value: 'holiday',
+    label: 'Holiday',
+    description: 'Official company or gazetted holiday',
+    dotColor: 'bg-indigo-400',
+    badgeBg: 'bg-indigo-500/15',
+    badgeBorder: 'border-indigo-500/30',
+    badgeText: 'text-indigo-300',
   },
   {
     value: 'weekly_off',
     label: 'Weekly Off',
     description: 'Scheduled non-working day',
     dotColor: 'bg-slate-400',
-    badgeBg: 'bg-slate-100',
-    badgeBorder: 'border-slate-200',
-    badgeText: 'text-slate-600',
+    badgeBg: 'bg-slate-800/80',
+    badgeBorder: 'border-slate-700',
+    badgeText: 'text-slate-300',
   },
   {
-    value: 'holiday',
-    label: 'Holiday',
-    description: 'Official company or gazetted holiday',
-    dotColor: 'bg-indigo-500',
-    badgeBg: 'bg-indigo-50',
-    badgeBorder: 'border-indigo-200',
-    badgeText: 'text-indigo-700',
+    value: 'permission',
+    label: 'Permission',
+    description: 'Short authorized absence',
+    dotColor: 'bg-blue-400',
+    badgeBg: 'bg-blue-500/15',
+    badgeBorder: 'border-blue-500/30',
+    badgeText: 'text-blue-300',
   },
   {
     value: 'missing_punch',
     label: 'Missing Punch',
     description: 'Punch correction needed',
     dotColor: 'bg-orange-500',
-    badgeBg: 'bg-orange-50',
-    badgeBorder: 'border-orange-200',
-    badgeText: 'text-orange-700',
+    badgeBg: 'bg-orange-500/15',
+    badgeBorder: 'border-orange-500/30',
+    badgeText: 'text-orange-400',
   },
   {
     value: 'pending',
     label: 'Pending',
     description: 'Awaiting timesheet regularisation',
-    dotColor: 'bg-sky-500',
-    badgeBg: 'bg-blue-50/70',
-    badgeBorder: 'border-blue-200',
-    badgeText: 'text-blue-700',
+    dotColor: 'bg-sky-400',
+    badgeBg: 'bg-sky-500/15',
+    badgeBorder: 'border-sky-500/30',
+    badgeText: 'text-sky-300',
   },
 ];
 
@@ -157,9 +156,9 @@ export function getStatusConfig(status: AttendanceStatus): StatusConfig {
     label: getAttendanceStatusLabel(status),
     description: '',
     dotColor: 'bg-slate-400',
-    badgeBg: 'bg-slate-100',
-    badgeBorder: 'border-slate-200',
-    badgeText: 'text-slate-700',
+    badgeBg: 'bg-slate-800/80',
+    badgeBorder: 'border-slate-700',
+    badgeText: 'text-slate-300',
   };
 }
 
@@ -185,7 +184,7 @@ export const AttendanceStatusModal: React.FC<AttendanceStatusModalProps> = ({
   onSave,
 }) => {
   const [selectedStatus, setSelectedStatus] = useState<AttendanceStatus>(currentStatus);
-  const [currentView, setCurrentView] = useState<'main' | 'more'>('main');
+  const [isMoreExpanded, setIsMoreExpanded] = useState<boolean>(false);
   const [notes, setNotes] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -194,9 +193,8 @@ export const AttendanceStatusModal: React.FC<AttendanceStatusModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setSelectedStatus(currentStatus);
-      // If current status is one of the more options, open directly in more options view or start at main
       const isInMore = MORE_STATUS_ITEMS.some((item) => item.value === currentStatus);
-      setCurrentView(isInMore ? 'more' : 'main');
+      setIsMoreExpanded(isInMore);
       setNotes(record?.notes && record?.notes !== 'Not Marked' ? record.notes : '');
       setErrorMessage(null);
       setIsSaving(false);
@@ -250,9 +248,7 @@ export const AttendanceStatusModal: React.FC<AttendanceStatusModalProps> = ({
 
   const handleCancel = () => {
     if (isSaving) return;
-    // Discard any unsaved changes
     setSelectedStatus(currentStatus);
-    setCurrentView('main');
     setErrorMessage(null);
     onClose();
   };
@@ -276,74 +272,73 @@ export const AttendanceStatusModal: React.FC<AttendanceStatusModalProps> = ({
 
   const modalContent = (
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 overflow-y-auto animate-fade-in"
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fade-in"
       role="dialog"
       aria-modal="true"
       aria-labelledby="attendance-modal-title"
     >
-      {/* Backdrop overlay: rgba(15, 23, 42, 0.55) */}
+      {/* Backdrop overlay: dark with subtle blur */}
       <div
-        className="fixed inset-0 transition-opacity"
-        style={{ backgroundColor: 'rgba(15, 23, 42, 0.55)', backdropFilter: 'blur(3px)' }}
+        className="fixed inset-0 bg-black/75 backdrop-blur-sm transition-opacity"
         onClick={handleCancel}
       />
 
-      {/* Centered Modal Card: 440px - 500px width, rounded-2xl (16px), shadow-2xl */}
+      {/* Centered Modal Card: Velmora Dark Theme */}
       <div
-        className="relative w-full max-w-[480px] bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden my-auto transform transition-all text-left z-10 animate-fade-in"
+        className="relative w-full max-w-[500px] bg-[#1E293B] border border-[#334155] rounded-2xl shadow-2xl shadow-black/60 overflow-hidden my-auto transform transition-all text-left z-10 animate-fade-in flex flex-col max-h-[92vh]"
         onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 'min(480px, 95vw)', borderRadius: '16px' }}
       >
-        {/* Header: Title, Subtitle, Close Icon */}
-        <div className="flex items-start justify-between px-6 pt-5 pb-4 border-b border-slate-100 bg-slate-50/50">
+        {/* Modal Header: Title, Subtitle, Close Icon */}
+        <div className="flex items-start justify-between px-6 py-4 border-b border-[#334155] bg-[#151D2B] flex-shrink-0">
           <div>
-            <h3 id="attendance-modal-title" className="text-base sm:text-lg font-bold text-[#172B4D] tracking-tight">
+            <h3 id="attendance-modal-title" className="text-base sm:text-lg font-bold text-white tracking-tight">
               Update Attendance Status
             </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Select the attendance status for this employee.
+            <p className="text-xs text-[#94A3B8] mt-0.5 font-normal">
+              Select the attendance status for this employee
             </p>
           </div>
           <button
             type="button"
             onClick={handleCancel}
             disabled={isSaving}
-            className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+            className="p-1.5 text-[#94A3B8] hover:text-white hover:bg-white/10 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
             title="Close"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Employee Information Card */}
-        <div className="p-6 pb-4">
-          <div className="p-3.5 bg-slate-50/80 rounded-xl border border-slate-200/70 flex items-center justify-between gap-3 shadow-2xs">
+        {/* Scrollable Content Body */}
+        <div className="p-5 sm:p-6 overflow-y-auto space-y-4 flex-1">
+          {/* Employee Information Card */}
+          <div className="p-3.5 bg-[#151D2B] rounded-xl border border-[#334155] flex items-center justify-between gap-3 shadow-xs">
             <div className="flex items-center gap-3 min-w-0">
               <img
                 src={employee.avatar}
-                alt=""
-                className="w-11 h-11 rounded-xl object-cover ring-1 ring-slate-200 flex-shrink-0"
+                alt={employee.fullName}
+                className="w-11 h-11 rounded-xl object-cover ring-1 ring-[#334155] flex-shrink-0 bg-[#0F172A]"
               />
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <h4 className="font-bold text-sm text-[#172B4D] truncate">{employee.fullName}</h4>
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 bg-white rounded border border-slate-200 text-slate-600 flex-shrink-0">
+                  <h4 className="font-bold text-sm text-white truncate">{employee.fullName}</h4>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 bg-[#0F172A] rounded border border-[#334155] text-[#94A3B8] flex-shrink-0 font-medium">
                     {employee.employeeCode}
                   </span>
                 </div>
-                <p className="text-xs text-slate-500 truncate mt-0.5 flex items-center gap-1.5">
-                  <Building2 className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                <p className="text-xs text-[#94A3B8] truncate mt-0.5 flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-[#64748B] flex-shrink-0" />
                   <span>{employee.departmentName}</span>
                 </p>
-                <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-500">
-                  <span className="inline-flex items-center gap-1 font-medium text-slate-600">
-                    <Calendar className="w-3 h-3 text-slate-400" />
+                <div className="flex items-center gap-2 mt-1 text-[11px] text-[#94A3B8]">
+                  <span className="inline-flex items-center gap-1 font-medium text-[#94A3B8]">
+                    <Calendar className="w-3 h-3 text-[#64748B]" />
                     {formattedDate}
                   </span>
-                  <span>•</span>
+                  <span className="text-[#475569]">•</span>
                   <span
                     className="inline-flex items-center gap-1 font-medium"
-                    style={{ color: shift?.color || '#206DA6' }}
+                    style={{ color: shift?.color || '#38BDF8' }}
                   >
                     <Clock className="w-3 h-3" />
                     {shift?.name || 'Assigned Shift'}
@@ -352,11 +347,11 @@ export const AttendanceStatusModal: React.FC<AttendanceStatusModalProps> = ({
               </div>
             </div>
             <div className="text-right flex-shrink-0 pl-1">
-              <span className="text-[9px] uppercase font-bold text-slate-400 block mb-0.5">
+              <span className="text-[9px] uppercase font-bold text-[#64748B] tracking-wider block mb-1">
                 Current
               </span>
               <span
-                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold border ${currentConfig.badgeBg} ${currentConfig.badgeBorder} ${currentConfig.badgeText}`}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${currentConfig.badgeBg} ${currentConfig.badgeBorder} ${currentConfig.badgeText}`}
               >
                 <span className={`w-1.5 h-1.5 rounded-full ${currentConfig.dotColor}`} />
                 {currentConfig.label}
@@ -366,141 +361,133 @@ export const AttendanceStatusModal: React.FC<AttendanceStatusModalProps> = ({
 
           {/* Advance Date Info Banner */}
           {isFutureDate && (
-            <div className="mt-3 p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-800 text-xs flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-blue-600 flex-shrink-0" />
+            <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/25 text-blue-300 text-xs flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-blue-400 flex-shrink-0" />
               <span>Advance attendance record for date: {formattedDate}</span>
             </div>
           )}
 
+          {/* Error Message */}
           {errorMessage && (
-            <div className="mt-3 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0" />
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/25 text-rose-300 text-xs flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-400 flex-shrink-0" />
               <span>{errorMessage}</span>
             </div>
           )}
 
-          {/* Modal Body Views */}
-          <div className="mt-4">
-            {currentView === 'main' ? (
-              /* VIEW 1: MAIN OPTIONS (PRESENT & ABSENT) */
-              <div className="space-y-3">
-                {/* Option 1 — PRESENT */}
-                <button
-                  type="button"
-                  data-testid="status-opt-present"
-                  onClick={() => setSelectedStatus('present')}
-                  className={`w-full text-left p-3.5 sm:p-4 rounded-xl border-2 transition-all flex items-center justify-between cursor-pointer ${
+          {/* Attendance Status Options */}
+          <div className="space-y-2.5">
+            {/* Option 1 — PRESENT */}
+            <button
+              type="button"
+              data-testid="status-opt-present"
+              onClick={() => setSelectedStatus('present')}
+              className={`w-full text-left p-3.5 rounded-xl border-2 transition-all flex items-center justify-between cursor-pointer ${
+                selectedStatus === 'present'
+                  ? 'border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/30 shadow-md shadow-emerald-950/30'
+                  : 'border-[#334155] bg-[#151D2B] hover:border-emerald-500/50 hover:bg-[#151D2B]/80'
+              }`}
+            >
+              <div className="flex items-center gap-3.5">
+                <div
+                  className={`p-2.5 rounded-xl transition-colors ${
                     selectedStatus === 'present'
-                      ? 'border-emerald-500 bg-emerald-50/70 shadow-xs ring-1 ring-emerald-500/20'
-                      : 'border-slate-200 hover:border-emerald-300 hover:bg-slate-50/70'
+                      ? 'bg-emerald-500 text-white shadow-xs'
+                      : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20'
                   }`}
                 >
-                  <div className="flex items-center gap-3.5">
-                    <div
-                      className={`p-2.5 rounded-xl transition-colors ${
-                        selectedStatus === 'present'
-                          ? 'bg-emerald-500 text-white shadow-xs'
-                          : 'bg-emerald-100/80 text-emerald-700'
-                      }`}
-                    >
-                      <CheckCircle2 className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-sm text-[#172B4D]">Present</span>
-                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                      </div>
-                      <p className="text-xs text-slate-500 mt-0.5">Employee attended work</p>
-                    </div>
-                  </div>
-                  <div
-                    className={`w-5 h-5 rounded-full border flex items-center justify-center transition-all ${
-                      selectedStatus === 'present'
-                        ? 'border-emerald-500 bg-emerald-500 text-white'
-                        : 'border-slate-300 bg-white'
-                    }`}
-                  >
-                    {selectedStatus === 'present' && <Check className="w-3.5 h-3.5 stroke-[3]" />}
-                  </div>
-                </button>
-
-                {/* Option 2 — ABSENT */}
-                <button
-                  type="button"
-                  data-testid="status-opt-absent"
-                  onClick={() => setSelectedStatus('absent')}
-                  className={`w-full text-left p-3.5 sm:p-4 rounded-xl border-2 transition-all flex items-center justify-between cursor-pointer ${
-                    selectedStatus === 'absent'
-                      ? 'border-rose-500 bg-rose-50/70 shadow-xs ring-1 ring-rose-500/20'
-                      : 'border-slate-200 hover:border-rose-300 hover:bg-slate-50/70'
-                  }`}
-                >
-                  <div className="flex items-center gap-3.5">
-                    <div
-                      className={`p-2.5 rounded-xl transition-colors ${
-                        selectedStatus === 'absent'
-                          ? 'bg-rose-500 text-white shadow-xs'
-                          : 'bg-rose-100/80 text-rose-700'
-                      }`}
-                    >
-                      <UserX className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-sm text-[#172B4D]">Absent</span>
-                        <span className="w-2 h-2 rounded-full bg-rose-500" />
-                      </div>
-                      <p className="text-xs text-slate-500 mt-0.5">Employee did not attend work</p>
-                    </div>
-                  </div>
-                  <div
-                    className={`w-5 h-5 rounded-full border flex items-center justify-center transition-all ${
-                      selectedStatus === 'absent'
-                        ? 'border-rose-500 bg-rose-500 text-white'
-                        : 'border-slate-300 bg-white'
-                    }`}
-                  >
-                    {selectedStatus === 'absent' && <Check className="w-3.5 h-3.5 stroke-[3]" />}
-                  </div>
-                </button>
-
-                {/* More Options Button */}
-                <button
-                  type="button"
-                  data-testid="status-opt-more"
-                  onClick={() => setCurrentView('more')}
-                  className="w-full mt-2 py-2.5 px-4 rounded-xl border border-slate-200 bg-slate-50/50 text-slate-700 hover:text-[#206DA6] hover:bg-slate-100/80 hover:border-slate-300 font-semibold text-xs transition-colors flex items-center justify-between cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    <MoreHorizontal className="w-4 h-4 text-slate-400" />
-                    <span>More Options</span>
-                    {isMoreSelected && (
-                      <span className="text-[10px] font-bold text-[#206DA6] bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
-                        Selected: {selectedConfig.label}
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-slate-400 font-bold">→</span>
-                </button>
-              </div>
-            ) : (
-              /* VIEW 2: MORE OPTIONS (9 ADDITIONAL STATUSES) */
-              <div>
-                {/* Back Button */}
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setCurrentView('main')}
-                    className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-[#206DA6] transition-colors cursor-pointer p-1 -ml-1 rounded-lg hover:bg-slate-100"
-                  >
-                    <ArrowLeft className="w-4 h-4" />
-                    <span>Back to Present / Absent</span>
-                  </button>
-                  <span className="text-[11px] font-medium text-slate-400">9 additional statuses</span>
+                  <CheckCircle2 className="w-5 h-5" />
                 </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-sm text-white">Present</span>
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  </div>
+                  <p className="text-xs text-[#94A3B8] mt-0.5">Employee attended work</p>
+                </div>
+              </div>
+              <div
+                className={`w-5 h-5 rounded-full border flex items-center justify-center transition-all ${
+                  selectedStatus === 'present'
+                    ? 'border-emerald-500 bg-emerald-500 text-white'
+                    : 'border-[#475569] bg-[#0F172A]'
+                }`}
+              >
+                {selectedStatus === 'present' && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+              </div>
+            </button>
 
-                {/* 9 Additional Statuses List */}
-                <div className="space-y-1.5 max-h-[260px] overflow-y-auto pr-1">
+            {/* Option 2 — ABSENT */}
+            <button
+              type="button"
+              data-testid="status-opt-absent"
+              onClick={() => setSelectedStatus('absent')}
+              className={`w-full text-left p-3.5 rounded-xl border-2 transition-all flex items-center justify-between cursor-pointer ${
+                selectedStatus === 'absent'
+                  ? 'border-rose-500 bg-rose-500/10 ring-1 ring-rose-500/30 shadow-md shadow-rose-950/30'
+                  : 'border-[#334155] bg-[#151D2B] hover:border-rose-500/50 hover:bg-[#151D2B]/80'
+              }`}
+            >
+              <div className="flex items-center gap-3.5">
+                <div
+                  className={`p-2.5 rounded-xl transition-colors ${
+                    selectedStatus === 'absent'
+                      ? 'bg-rose-500 text-white shadow-xs'
+                      : 'bg-rose-500/15 text-rose-400 border border-rose-500/20'
+                  }`}
+                >
+                  <UserX className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-sm text-white">Absent</span>
+                    <span className="w-2 h-2 rounded-full bg-rose-500" />
+                  </div>
+                  <p className="text-xs text-[#94A3B8] mt-0.5">Employee did not attend work</p>
+                </div>
+              </div>
+              <div
+                className={`w-5 h-5 rounded-full border flex items-center justify-center transition-all ${
+                  selectedStatus === 'absent'
+                    ? 'border-rose-500 bg-rose-500 text-white'
+                    : 'border-[#475569] bg-[#0F172A]'
+                }`}
+              >
+                {selectedStatus === 'absent' && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+              </div>
+            </button>
+
+            {/* More Options Accordion Toggle */}
+            <div className="pt-1">
+              <button
+                type="button"
+                data-testid="status-opt-more"
+                onClick={() => setIsMoreExpanded((prev) => !prev)}
+                className={`w-full py-2.5 px-4 rounded-xl border transition-all flex items-center justify-between cursor-pointer text-xs font-semibold ${
+                  isMoreExpanded || isMoreSelected
+                    ? 'border-[#206DA6] bg-[#206DA6]/15 text-white'
+                    : 'border-[#334155] bg-[#151D2B] text-[#94A3B8] hover:text-white hover:bg-[#1E293B] hover:border-[#475569]'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <MoreHorizontal className="w-4 h-4 text-[#64748B]" />
+                  <span>More Options</span>
+                  {isMoreSelected && (
+                    <span className="text-[10px] font-bold text-[#38BDF8] bg-[#0F172A] px-2 py-0.5 rounded-full border border-[#334155]">
+                      Selected: {selectedConfig.label}
+                    </span>
+                  )}
+                </div>
+                <ChevronDown
+                  className={`w-4 h-4 text-[#94A3B8] transition-transform duration-200 ${
+                    isMoreExpanded ? 'rotate-180 text-[#38BDF8]' : ''
+                  }`}
+                />
+              </button>
+
+              {/* Collapsible List of Additional Statuses */}
+              {isMoreExpanded && (
+                <div className="space-y-2 mt-2 pt-2 border-t border-[#334155]/60 max-h-[240px] overflow-y-auto pr-1">
                   {MORE_STATUS_ITEMS.map((opt) => {
                     const isSelected = selectedStatus === opt.value;
                     return (
@@ -511,22 +498,22 @@ export const AttendanceStatusModal: React.FC<AttendanceStatusModalProps> = ({
                         onClick={() => setSelectedStatus(opt.value)}
                         className={`w-full text-left p-2.5 rounded-xl border transition-all flex items-center justify-between cursor-pointer ${
                           isSelected
-                            ? 'border-[#206DA6] bg-blue-50/70 shadow-2xs ring-1 ring-[#206DA6]/30'
-                            : 'border-slate-200/90 hover:border-slate-300 hover:bg-slate-50/70'
+                            ? 'border-[#206DA6] bg-[#206DA6]/20 ring-1 ring-[#206DA6]/50 shadow-xs'
+                            : 'border-[#334155] bg-[#151D2B] hover:border-[#475569] hover:bg-[#1E293B]'
                         }`}
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
                           <span className={`w-2.5 h-2.5 rounded-full ${opt.dotColor} flex-shrink-0`} />
                           <div className="min-w-0">
-                            <p className="font-bold text-xs text-[#172B4D] truncate">{opt.label}</p>
-                            <p className="text-[11px] text-slate-500 truncate">{opt.description}</p>
+                            <p className="font-bold text-xs text-white truncate">{opt.label}</p>
+                            <p className="text-[11px] text-[#94A3B8] truncate">{opt.description}</p>
                           </div>
                         </div>
                         <div
                           className={`w-4 h-4 rounded-full border flex items-center justify-center flex-shrink-0 ml-2 ${
                             isSelected
                               ? 'border-[#206DA6] bg-[#206DA6] text-white'
-                              : 'border-slate-300 bg-white'
+                              : 'border-[#475569] bg-[#0F172A]'
                           }`}
                         >
                           {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
@@ -535,40 +522,40 @@ export const AttendanceStatusModal: React.FC<AttendanceStatusModalProps> = ({
                     );
                   })}
                 </div>
-              </div>
-            )}
-
-            {/* Optional Notes / Remarks Field */}
-            <div className="mt-3.5 pt-3 border-t border-slate-100">
-              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                Notes / Remarks <span className="text-slate-400 font-normal">(Optional)</span>
-              </label>
-              <input
-                type="text"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Add optional attendance note..."
-                className="w-full text-xs px-3 py-2 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]/30 focus:border-[#206DA6] bg-slate-50/50 focus:bg-white transition-colors"
-              />
+              )}
             </div>
+          </div>
+
+          {/* Optional Notes / Remarks Field */}
+          <div className="pt-2 border-t border-[#334155]">
+            <label className="block text-xs font-semibold text-white mb-1.5">
+              Notes / Remarks <span className="text-[#64748B] font-normal">(Optional)</span>
+            </label>
+            <input
+              type="text"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Add optional attendance note..."
+              className="w-full text-xs px-3.5 py-2.5 bg-[#0F172A] border border-[#334155] text-white rounded-xl placeholder-[#64748B] focus:outline-hidden focus:ring-1 focus:ring-[#206DA6] focus:border-[#206DA6] transition-colors"
+            />
           </div>
         </div>
 
-        {/* Modal Footer: Cancel | Save Attendance */}
-        <div className="px-6 py-4 bg-slate-50/70 border-t border-slate-100 flex items-center justify-between">
-          <div className="text-[11px] text-slate-500 min-w-0 pr-2">
+        {/* Modal Footer: Selected status indicator | Cancel | Save Attendance */}
+        <div className="px-6 py-4 bg-[#151D2B] border-t border-[#334155] flex flex-col sm:flex-row items-center justify-between gap-3 flex-shrink-0">
+          <div className="text-xs text-[#94A3B8] w-full sm:w-auto text-left">
             Selected:{' '}
-            <span className="font-bold text-[#172B4D] capitalize">
-              {selectedStatus === 'not_marked' ? 'Please select a status' : selectedConfig.label}
+            <span className="font-bold text-white capitalize">
+              {selectedStatus === 'not_marked' ? 'Please Select A Status' : selectedConfig.label}
             </span>
           </div>
-          <div className="flex items-center gap-2.5 flex-shrink-0">
+          <div className="flex items-center justify-end gap-2.5 w-full sm:w-auto">
             <button
               type="button"
               data-testid="status-cancel-btn"
               onClick={handleCancel}
               disabled={isSaving}
-              className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-200/60 transition-colors cursor-pointer disabled:opacity-50"
+              className="px-4 py-2 rounded-xl text-xs font-semibold text-[#94A3B8] hover:text-white bg-transparent hover:bg-white/5 border border-[#334155] transition-colors cursor-pointer disabled:opacity-50"
             >
               Cancel
             </button>
@@ -582,10 +569,10 @@ export const AttendanceStatusModal: React.FC<AttendanceStatusModalProps> = ({
                   ? 'Please select an attendance status'
                   : undefined
               }
-              className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-xs transition-colors ${
+              className={`inline-flex items-center justify-center gap-2 px-5 py-2 rounded-xl text-xs font-bold text-white shadow-md transition-all ${
                 !canSave
-                  ? 'bg-slate-400 cursor-not-allowed opacity-60'
-                  : 'bg-[#206DA6] hover:bg-[#1a5784] cursor-pointer disabled:opacity-50'
+                  ? 'bg-[#334155] text-[#64748B] border border-[#475569]/40 cursor-not-allowed opacity-60'
+                  : 'bg-[#206DA6] hover:bg-[#1a5784] border border-[#206DA6] cursor-pointer'
               }`}
             >
               {isSaving ? (
