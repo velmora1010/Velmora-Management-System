@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Users,
   UserCheck,
@@ -42,7 +42,8 @@ import {
   Tooltip,
   Legend,
   CartesianGrid,
-  Cell
+  Cell,
+  LabelList
 } from 'recharts';
 import {
   customerRepeatAnalyticsService,
@@ -59,6 +60,7 @@ export interface CustomerRepeatAnalyticsDashboardProps {
   defaultDateRange?: { startDate?: string; endDate?: string };
   onNavigateToOrder?: (orderId: string) => void;
   className?: string;
+  department?: 'sales' | 'logistics';
 }
 
 const FREQUENCY_COLORS = [
@@ -84,7 +86,8 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
   sourceChannel,
   defaultDateRange,
   onNavigateToOrder,
-  className = ''
+  className = '',
+  department = 'logistics'
 }) => {
   // 1. Data State
   const [data, setData] = useState<ComprehensiveRepeatAnalyticsData | null>(null);
@@ -105,6 +108,22 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
   // Shared Phone Masking State
   const [showMaskedPhone, setShowMaskedPhone] = useState<boolean>(true);
   const [selectedCustomerForModal, setSelectedCustomerForModal] = useState<TopCustomerItem | null>(null);
+
+  // Interactive Purchase Frequency Drilldown States (Sales Department)
+  const [selectedFrequencyBucket, setSelectedFrequencyBucket] = useState<number | null>(null);
+  const [cohortSearch, setCohortSearch] = useState<string>('');
+  const [cohortSortField, setCohortSortField] = useState<'totalValue' | 'totalOrders' | 'averageOrderValue' | 'lastOrderDate'>('totalValue');
+  const [cohortSortAsc, setCohortSortAsc] = useState<boolean>(false);
+  const [cohortPageIndex, setCohortPageIndex] = useState<number>(0);
+  const cohortPageSize = 25;
+  const drilldownPanelRef = useRef<HTMLDivElement>(null);
+
+  const handleSelectFrequencyBucket = (bucketNum: number) => {
+    if (department !== 'sales') return;
+    setSelectedFrequencyBucket(prev => (prev === bucketNum ? null : bucketNum));
+    setCohortPageIndex(0);
+    setCohortSearch('');
+  };
 
   // 3. Top Customers by Customer Value Controls
   const [valueLimit, setValueLimit] = useState<number>(100);
@@ -453,6 +472,57 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
     URL.revokeObjectURL(url);
   };
 
+  // -------------------------------------------------------------
+  // Filtered & Sorted Customers for Selected Frequency Bucket
+  // -------------------------------------------------------------
+  const selectedBucketInfo = useMemo(() => {
+    if (selectedFrequencyBucket === null || !data?.frequencyDistribution) return null;
+    return data.frequencyDistribution.find(f => f.bucketNum === selectedFrequencyBucket) || null;
+  }, [selectedFrequencyBucket, data?.frequencyDistribution]);
+
+  const cohortMatchingCustomers = useMemo(() => {
+    if (selectedFrequencyBucket === null || !data?.allCustomers) return [];
+    if (selectedFrequencyBucket === 16) {
+      return data.allCustomers.filter(c => c.totalOrders >= 15);
+    }
+    return data.allCustomers.filter(c => c.totalOrders === selectedFrequencyBucket);
+  }, [selectedFrequencyBucket, data?.allCustomers]);
+
+  const filteredCohortCustomers = useMemo(() => {
+    let list = [...cohortMatchingCustomers];
+    if (cohortSearch.trim()) {
+      const q = cohortSearch.toLowerCase().trim();
+      list = list.filter(c =>
+        c.customerName.toLowerCase().includes(q) ||
+        c.phone.toLowerCase().includes(q) ||
+        c.maskedPhone.toLowerCase().includes(q) ||
+        c.city.toLowerCase().includes(q) ||
+        c.state.toLowerCase().includes(q)
+      );
+    }
+    list.sort((a, b) => {
+      let comparison = 0;
+      if (cohortSortField === 'totalValue') {
+        comparison = b.totalValue - a.totalValue;
+      } else if (cohortSortField === 'totalOrders') {
+        comparison = b.totalOrders - a.totalOrders;
+      } else if (cohortSortField === 'averageOrderValue') {
+        comparison = b.averageOrderValue - a.averageOrderValue;
+      } else if (cohortSortField === 'lastOrderDate') {
+        comparison = (b.lastOrderDate || '').localeCompare(a.lastOrderDate || '');
+      }
+      return cohortSortAsc ? -comparison : comparison;
+    });
+    return list;
+  }, [cohortMatchingCustomers, cohortSearch, cohortSortField, cohortSortAsc]);
+
+  const visibleCohortCustomers = useMemo(() => {
+    const start = cohortPageIndex * cohortPageSize;
+    return filteredCohortCustomers.slice(start, start + cohortPageSize);
+  }, [filteredCohortCustomers, cohortPageIndex]);
+
+  const totalCohortPages = Math.ceil(filteredCohortCustomers.length / cohortPageSize) || 1;
+
   const kpis = data?.kpis;
 
   // -------------------------------------------------------------
@@ -752,40 +822,48 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
             </div>
           </div>
 
-          {/* Card 6: Exactly 3 Purchases */}
+          {/* Card 6: 3 Purchases */}
           <div className="p-3 sm:p-3.5 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-sm flex flex-col justify-between">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">3 Purchases</span>
             <div className="text-lg font-bold text-slate-200 font-mono mt-1">
               {kpis?.customersWith3.toLocaleString('en-IN') || 0}
             </div>
-            <span className="text-[10px] text-slate-500">Tri-purchasers</span>
+            <span className="text-[10px] text-slate-500" title="Customers with 3 or more total orders">
+              {kpis?.customersWith3Plus || 0} with 3+ orders
+            </span>
           </div>
 
-          {/* Card 7: Exactly 5 Purchases */}
+          {/* Card 7: 5 Purchases */}
           <div className="p-3 sm:p-3.5 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-sm flex flex-col justify-between">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">5 Purchases</span>
             <div className="text-lg font-bold text-slate-200 font-mono mt-1">
               {kpis?.customersWith5.toLocaleString('en-IN') || 0}
             </div>
-            <span className="text-[10px] text-slate-500">Power buyers</span>
+            <span className="text-[10px] text-slate-500" title="Customers with 5 or more total orders">
+              {kpis?.customersWith5Plus || 0} with 5+ orders
+            </span>
           </div>
 
-          {/* Card 8: Exactly 10 Purchases */}
+          {/* Card 8: 10 Purchases */}
           <div className="p-3 sm:p-3.5 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-sm flex flex-col justify-between">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">10 Purchases</span>
             <div className="text-lg font-bold text-slate-200 font-mono mt-1">
               {kpis?.customersWith10.toLocaleString('en-IN') || 0}
             </div>
-            <span className="text-[10px] text-slate-500">VIP buyers</span>
+            <span className="text-[10px] text-slate-500" title="Customers with 10 or more total orders">
+              {kpis?.customersWith10Plus || 0} with 10+ orders
+            </span>
           </div>
 
-          {/* Card 9: Exactly 15 Purchases */}
+          {/* Card 9: 15 Purchases */}
           <div className="p-3 sm:p-3.5 rounded-xl bg-[#0b1220] border border-slate-800/90 shadow-sm flex flex-col justify-between">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">15 Purchases</span>
             <div className="text-lg font-bold text-slate-200 font-mono mt-1">
               {kpis?.customersWith15.toLocaleString('en-IN') || 0}
             </div>
-            <span className="text-[10px] text-slate-500">Super champions</span>
+            <span className="text-[10px] text-slate-500" title="Customers with 15 or more total orders">
+              {kpis?.customersWith15Plus || 0} with 15+ orders
+            </span>
           </div>
 
           {/* Card 10: Net Sales vs Exclusions */}
@@ -807,23 +885,46 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
         
         {/* Frequency Distribution Bar Chart */}
         <div className="p-4 rounded-2xl bg-[#0b1220] border border-slate-800 shadow-xl space-y-3">
-          <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <BarChart3 size={15} className="text-indigo-400" />
               <h3 className="text-xs sm:text-sm font-bold text-white tracking-tight">
                 Purchase Frequency Distribution (1 to 15+ Orders)
               </h3>
             </div>
-            <span className="text-[11px] text-slate-400 font-mono">
-              Total: {kpis?.totalUniqueCustomers.toLocaleString('en-IN')}
-            </span>
+            <div className="flex items-center gap-2">
+              {department === 'sales' && selectedFrequencyBucket !== null ? (
+                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] font-bold">
+                  <span>Selected: {selectedBucketInfo?.bucket || `${selectedFrequencyBucket} orders`}</span>
+                  <button
+                    onClick={() => setSelectedFrequencyBucket(null)}
+                    className="ml-1 hover:text-white"
+                    title="Reset Selection"
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+              ) : department === 'sales' ? (
+                <span className="hidden sm:inline-block text-[10px] text-indigo-400/80 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20">
+                  Click bar for details
+                </span>
+              ) : null}
+              <span className="text-[11px] text-slate-400 font-mono">
+                Total: {kpis?.totalUniqueCustomers.toLocaleString('en-IN')}
+              </span>
+            </div>
           </div>
 
           <div className="h-[260px] w-full pt-1">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart
+                            <BarChart
                 data={data?.frequencyDistribution || []}
-                margin={{ top: 10, right: 10, left: -20, bottom: 25 }}
+                margin={{ top: 20, right: 10, left: -20, bottom: 25 }}
+                onClick={(e: any) => {
+                  if (department === 'sales' && e?.activePayload?.[0]?.payload?.bucketNum) {
+                    handleSelectFrequencyBucket(e.activePayload[0].payload.bucketNum);
+                  }
+                }}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
                 <XAxis
@@ -838,6 +939,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
                 />
                 <YAxis stroke="#64748b" fontSize={10} tickLine={false} />
                 <Tooltip
+                  cursor={{ fill: 'rgba(99, 102, 241, 0.12)' }}
                   content={({ active, payload }) => {
                     if (active && payload && payload.length) {
                       const item = payload[0].payload;
@@ -856,10 +958,35 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
                     return null;
                   }}
                 />
-                <Bar dataKey="customerCount" radius={[4, 4, 0, 0]}>
-                  {(data?.frequencyDistribution || []).map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={FREQUENCY_COLORS[index % FREQUENCY_COLORS.length]} />
-                  ))}
+                <Bar dataKey="customerCount" radius={[4, 4, 0, 0]} minPointSize={6}>
+                  <LabelList
+                    dataKey="customerCount"
+                    position="top"
+                    fill="#94a3b8"
+                    fontSize={10}
+                    formatter={(val: any) => (Number(val) > 0 ? Number(val).toLocaleString('en-IN') : '')}
+                  />
+                                    {(data?.frequencyDistribution || []).map((entry, index) => {
+                    const isSelected = selectedFrequencyBucket === entry.bucketNum;
+                    const isAnySelected = selectedFrequencyBucket !== null;
+                    const baseColor = FREQUENCY_COLORS[index % FREQUENCY_COLORS.length];
+                    return (
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={baseColor}
+                        fillOpacity={!isAnySelected ? 1 : isSelected ? 1 : 0.3}
+                        stroke={isSelected ? '#ffffff' : 'none'}
+                        strokeWidth={isSelected ? 2.5 : 0}
+                        style={{ cursor: department === 'sales' ? 'pointer' : 'default' }}
+                        onClick={(e: any) => {
+                          if (department === 'sales') {
+                            e.stopPropagation?.();
+                            handleSelectFrequencyBucket(entry.bucketNum);
+                          }
+                        }}
+                      />
+                    );
+                  })}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -943,9 +1070,265 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
                   dot={{ r: 4, fill: '#818cf8' }}
                 />
               </LineChart>
-            </ResponsiveContainer>
+                        </ResponsiveContainer>
           </div>
         </div>
+
+        {/* Purchase Frequency Drilldown Customer Details Panel (Sales Department) */}
+        {department === 'sales' && selectedFrequencyBucket !== null && (
+          <div
+            ref={drilldownPanelRef}
+            data-testid="purchase-frequency-details-panel"
+            className="col-span-1 lg:col-span-2 p-4 sm:p-5 rounded-2xl bg-[#0b1220] border border-indigo-500/40 shadow-2xl space-y-3.5 animate-in fade-in slide-in-from-top-2 duration-200"
+          >
+            {/* Header with Title, Count badge, Reset button, Phone toggle, Search */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className="w-3.5 h-3.5 rounded-full shrink-0 shadow-sm"
+                  style={{
+                    backgroundColor:
+                      selectedFrequencyBucket === 16
+                        ? FREQUENCY_COLORS[15]
+                        : FREQUENCY_COLORS[(selectedFrequencyBucket - 1) % FREQUENCY_COLORS.length]
+                  }}
+                />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm sm:text-base font-bold text-white tracking-tight">
+                      {selectedFrequencyBucket === 16
+                        ? 'Customers with 15+ Orders'
+                        : `Customers with ${selectedFrequencyBucket} Order${selectedFrequencyBucket > 1 ? 's' : ''}`}
+                    </h3>
+                    <span
+                      className="px-2 py-0.5 rounded-md text-[11px] font-mono font-bold"
+                      style={{
+                        backgroundColor: `${
+                          selectedFrequencyBucket === 16
+                            ? FREQUENCY_COLORS[15]
+                            : FREQUENCY_COLORS[(selectedFrequencyBucket - 1) % FREQUENCY_COLORS.length]
+                        }25`,
+                        color:
+                          selectedFrequencyBucket === 16
+                            ? FREQUENCY_COLORS[15]
+                            : FREQUENCY_COLORS[(selectedFrequencyBucket - 1) % FREQUENCY_COLORS.length],
+                        border: `1px solid ${
+                          selectedFrequencyBucket === 16
+                            ? FREQUENCY_COLORS[15]
+                            : FREQUENCY_COLORS[(selectedFrequencyBucket - 1) % FREQUENCY_COLORS.length]
+                        }50`
+                      }}
+                    >
+                      {cohortMatchingCustomers.length.toLocaleString('en-IN')}{' '}
+                      {cohortMatchingCustomers.length === 1 ? 'Customer' : 'Customers'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Showing all distinct customers who placed exactly{' '}
+                    {selectedFrequencyBucket === 16 ? '15 or more' : selectedFrequencyBucket} valid orders.
+                  </p>
+                </div>
+              </div>
+
+              {/* Controls: Search, Phone Mask Toggle, Reset Selection */}
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Search */}
+                <div className="relative">
+                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={cohortSearch}
+                    onChange={e => {
+                      setCohortSearch(e.target.value);
+                      setCohortPageIndex(0);
+                    }}
+                    placeholder="Search name, phone, city..."
+                    className="h-8 pl-8 pr-2.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 w-44 sm:w-52"
+                  />
+                  {cohortSearch && (
+                    <button
+                      onClick={() => setCohortSearch('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                    >
+                      <X size={11} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Mask/Unmask Phone Toggle */}
+                <button
+                  onClick={() => setShowMaskedPhone(!showMaskedPhone)}
+                  className="h-8 px-2.5 bg-slate-900 border border-slate-700/80 hover:border-slate-600 rounded-lg text-xs text-slate-300 hover:text-white flex items-center gap-1.5 transition"
+                  title={showMaskedPhone ? 'Reveal full phone numbers' : 'Mask phone numbers'}
+                >
+                  {showMaskedPhone ? <EyeOff size={13} /> : <Eye size={13} />}
+                  <span className="hidden sm:inline">{showMaskedPhone ? 'Masked' : 'Unmasked'}</span>
+                </button>
+
+                {/* Reset Selection Button */}
+                <button
+                  onClick={() => setSelectedFrequencyBucket(null)}
+                  className="h-8 px-3 bg-indigo-950/70 border border-indigo-700/60 hover:bg-indigo-900/80 text-indigo-300 hover:text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
+                >
+                  <X size={13} />
+                  <span>Reset Selection</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Vertically Scrollable Table with Fixed Height & Sticky Header */}
+            <div className="overflow-x-auto rounded-xl border border-slate-800">
+              <div className="max-h-[340px] overflow-y-auto">
+                <table data-testid="frequency-cohort-table" className="w-full text-left text-xs border-collapse">
+                  <thead className="sticky top-0 bg-slate-900 z-10 shadow-sm">
+                    <tr className="bg-slate-900 text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800">
+                      <th className="py-2.5 px-3 text-center w-12">#</th>
+                      <th className="py-2.5 px-3">Customer Name</th>
+                      <th className="py-2.5 px-3">Phone Number</th>
+                      <th className="py-2.5 px-3">City</th>
+                      <th className="py-2.5 px-3">State</th>
+                      <th
+                        className="py-2.5 px-3 text-center cursor-pointer hover:text-white"
+                        onClick={() => {
+                          if (cohortSortField === 'totalOrders') setCohortSortAsc(!cohortSortAsc);
+                          else { setCohortSortField('totalOrders'); setCohortSortAsc(false); }
+                        }}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          <span>Total Orders</span>
+                          <ArrowUpDown size={11} />
+                        </div>
+                      </th>
+                      <th
+                        className="py-2.5 px-3 text-right cursor-pointer hover:text-white"
+                        onClick={() => {
+                          if (cohortSortField === 'totalValue') setCohortSortAsc(!cohortSortAsc);
+                          else { setCohortSortField('totalValue'); setCohortSortAsc(false); }
+                        }}
+                      >
+                        <div className="flex items-center justify-end gap-1">
+                          <span>Total Purchase Value</span>
+                          <ArrowUpDown size={11} />
+                        </div>
+                      </th>
+                      <th
+                        className="py-2.5 px-3 text-right cursor-pointer hover:text-white"
+                        onClick={() => {
+                          if (cohortSortField === 'averageOrderValue') setCohortSortAsc(!cohortSortAsc);
+                          else { setCohortSortField('averageOrderValue'); setCohortSortAsc(false); }
+                        }}
+                      >
+                        <div className="flex items-center justify-end gap-1">
+                          <span>Average Order Value</span>
+                          <ArrowUpDown size={11} />
+                        </div>
+                      </th>
+                      <th
+                        className="py-2.5 px-3 text-right cursor-pointer hover:text-white"
+                        onClick={() => {
+                          if (cohortSortField === 'lastOrderDate') setCohortSortAsc(!cohortSortAsc);
+                          else { setCohortSortField('lastOrderDate'); setCohortSortAsc(false); }
+                        }}
+                      >
+                        <div className="flex items-center justify-end gap-1">
+                          <span>Last Purchase Date</span>
+                          <ArrowUpDown size={11} />
+                        </div>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 bg-slate-950/40">
+                    {visibleCohortCustomers.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="py-10 text-center text-slate-500">
+                          <p className="text-sm font-semibold text-slate-400">
+                            No customers match this frequency cohort.
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1">
+                            {cohortSearch ? 'Try clearing your search query.' : 'There are currently 0 customers with this exact purchase count.'}
+                          </p>
+                        </td>
+                      </tr>
+                    ) : (
+                      visibleCohortCustomers.map((cust, idx) => (
+                        <tr
+                          key={cust.customerKey || idx}
+                          onClick={() => setSelectedCustomerForModal(cust)}
+                          className="hover:bg-slate-800/50 transition cursor-pointer"
+                        >
+                          <td className="py-2.5 px-3 text-center text-slate-400 font-mono">
+                            {cohortPageIndex * cohortPageSize + idx + 1}
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold text-white">
+                            {cust.customerName}
+                          </td>
+                          <td className="py-2.5 px-3 font-mono text-slate-300">
+                            {showMaskedPhone ? cust.maskedPhone : (cust.phone || 'Not Provided')}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-300">{cust.city || '—'}</td>
+                          <td className="py-2.5 px-3 text-slate-300">{cust.state || '—'}</td>
+                          <td className="py-2.5 px-3 text-center font-mono font-bold text-indigo-400">
+                            {cust.totalOrders}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-400">
+                            ₹{Math.round(cust.totalValue).toLocaleString('en-IN')}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono text-slate-300">
+                            ₹{Math.round(cust.averageOrderValue).toLocaleString('en-IN')}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono text-slate-400">
+                            {cust.lastOrderDate || '—'}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Pagination Controls */}
+            {filteredCohortCustomers.length > cohortPageSize && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 text-xs text-slate-400 border-t border-slate-800/80">
+                <div>
+                  Showing{' '}
+                  <span className="font-semibold text-white">
+                    {cohortPageIndex * cohortPageSize + 1}
+                  </span>
+                  {' '}to{' '}
+                  <span className="font-semibold text-white">
+                    {Math.min((cohortPageIndex + 1) * cohortPageSize, filteredCohortCustomers.length)}
+                  </span>
+                  {' '}of{' '}
+                  <span className="font-semibold text-white">
+                    {filteredCohortCustomers.length.toLocaleString('en-IN')}
+                  </span>
+                  {' '}customers
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    disabled={cohortPageIndex === 0}
+                    onClick={() => setCohortPageIndex(prev => Math.max(0, prev - 1))}
+                    className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700/80 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-slate-300 hover:text-white transition"
+                  >
+                    Previous
+                  </button>
+                  <span className="px-2 font-mono text-slate-400">
+                    Page {cohortPageIndex + 1} of {totalCohortPages}
+                  </span>
+                  <button
+                    disabled={cohortPageIndex >= totalCohortPages - 1}
+                    onClick={() => setCohortPageIndex(prev => Math.min(totalCohortPages - 1, prev + 1))}
+                    className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700/80 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-slate-300 hover:text-white transition"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
       </div>
 
@@ -1037,7 +1420,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
 
         {/* Top Customers by Value Table (Clean, responsive, NO inner scrollbar) */}
         <div className="overflow-x-auto rounded-xl border border-slate-800">
-          <table className="w-full text-left text-xs border-collapse">
+          <table data-testid="top-value-customers-table" className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-900/90 text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800">
                 <th className="py-2.5 px-3 text-center w-12">#</th>
@@ -1295,7 +1678,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
 
         {/* Top Repeat Customers Table (Clean, responsive, NO inner scrollbar) */}
         <div className="overflow-x-auto rounded-xl border border-slate-800">
-          <table className="w-full text-left text-xs border-collapse">
+          <table data-testid="top-repeat-customers-table" className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-900/90 text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800">
                 <th className="py-2.5 px-3 text-center w-12">#</th>

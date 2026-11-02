@@ -12,9 +12,13 @@ export interface CustomerRepeatKpis {
   repeatBuyers: number; // 2+ orders
   repeatPercentage: number;
   customersWith3: number;
+  customersWith3Plus: number;
   customersWith5: number;
+  customersWith5Plus: number;
   customersWith10: number;
+  customersWith10Plus: number;
   customersWith15: number;
+  customersWith15Plus: number;
   totalRepeatRevenue: number;
   repeatAOV: number;
 }
@@ -88,6 +92,7 @@ export interface ComprehensiveRepeatAnalyticsData {
   kpis: CustomerRepeatKpis;
   frequencyDistribution: FrequencyDistributionItem[];
   repeatTrends: RepeatTrendPoint[];
+  allCustomers: TopCustomerItem[];
   topCustomers: TopCustomerItem[];
   topCustomersByValue: TopCustomerItem[];
   topCustomersByRepeat: TopCustomerItem[];
@@ -105,9 +110,11 @@ export interface ComprehensiveRepeatAnalyticsData {
 export function normalizeCustomerPhone(raw?: string | null): string {
   if (!raw) return '';
   const digits = String(raw).replace(/\D/g, '');
-  if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
-  if (digits.length === 11 && digits.startsWith('0')) return digits.slice(1);
   if (digits.length === 10) return digits;
+  if (digits.length === 11 && (digits.startsWith('0') || digits.startsWith('1'))) return digits.slice(1);
+  if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
+  if (digits.length === 13 && digits.startsWith('910')) return digits.slice(3);
+  if (digits.length === 14 && digits.startsWith('0091')) return digits.slice(4);
   return '';
 }
 
@@ -321,14 +328,25 @@ class CustomerRepeatAnalyticsService {
 
     // 1. Filter and identify distinct valid orders
     // Rules:
-    // - Distinct order counted once by order_id
-    // - Exclude cancelled orders (order_status === 'CANCELLED' or cancellation object)
+    // - Deduplicate raw orders first so duplicated imported rows are never double-counted
+    // - Distinct order counted once by canonical order_id
+    // - Exclude cancelled orders from valid purchase counts and net sales
     // - Exclude fully refunded / voided orders from net sales
-    // - Apply date range, state, city, channel filters
+    // - Apply date range, state, city, channel, and product filters
     let grossOrderValue = 0;
     let netSalesValue = 0;
     let cancelledOrders = 0;
     let refundedOrders = 0;
+
+    const seenOrderIds = new Set<string>();
+    const distinctRawOrders: any[] = [];
+    for (const o of rawOrders) {
+      const cleanId = String(o.order_id || '').trim().toLowerCase();
+      if (!cleanId) continue;
+      if (seenOrderIds.has(cleanId)) continue;
+      seenOrderIds.add(cleanId);
+      distinctRawOrders.push(o);
+    }
 
     const distinctOrdersMap = new Map<string, any>();
     const allUniqueStates = new Set<string>();
@@ -342,10 +360,8 @@ class CustomerRepeatAnalyticsService {
       });
     });
 
-    rawOrders.forEach(o => {
-      const cleanId = String(o.order_id || '').trim();
-      if (!cleanId) return;
-
+    distinctRawOrders.forEach(o => {
+      const cleanId = String(o.order_id || '').trim().toLowerCase();
       const normState = normalizeStateName(o.state);
       const normCity = normalizeCityName(o.city);
       if (normState && normState !== 'Unknown') allUniqueStates.add(normState);
@@ -353,8 +369,8 @@ class CustomerRepeatAnalyticsService {
 
       const isCancelled = o.isCancelled ?? false;
       const isRefunded = o.isRefunded ?? false;
-
       const orderAmount = Number(o.order_total) || 0;
+
       grossOrderValue += orderAmount;
 
       if (isCancelled) {
@@ -398,8 +414,11 @@ class CustomerRepeatAnalyticsService {
     const validOrders = Array.from(distinctOrdersMap.values());
 
     // 2. Group Valid Orders into Customers
-    // Rule: Identify by normalized 10-digit phone number, then email, otherwise clean name + city.
-    // Never identify customers by name alone.
+    // Rules:
+    // 1. Normalized 10-digit customer phone number, when available.
+    // 2. Otherwise normalized email.
+    // 3. Otherwise stable customer ID, if available.
+    // 4. Otherwise individual unique order key (order_id) to NEVER merge distinct customers with missing contact info!
     const customerMap = new Map<string, {
       customerKey: string;
       name: string;
@@ -412,16 +431,17 @@ class CustomerRepeatAnalyticsService {
     validOrders.forEach(o => {
       const phone = normalizeCustomerPhone(o.phone);
       const email = (o.email || '').toLowerCase().trim();
+      const cleanOrderId = String(o.order_id || '').trim().toLowerCase();
       
       let custKey = '';
       if (phone) {
         custKey = `phone_${phone}`;
       } else if (email) {
         custKey = `email_${email}`;
+      } else if (o.customer_id) {
+        custKey = `custid_${o.customer_id}`;
       } else {
-        const cleanName = (o.customer_name || 'unknown').trim().toLowerCase().replace(/\s+/g, '_');
-        const cleanCity = (o.city || 'nocity').trim().toLowerCase().replace(/\s+/g, '_');
-        custKey = `cust_${cleanName}_${cleanCity}`;
+        custKey = `order_${cleanOrderId || o.id}`;
       }
 
       const normCity = normalizeCityName(o.city);
@@ -461,7 +481,7 @@ class CustomerRepeatAnalyticsService {
       });
     }
 
-    // 4. Compute KPIs
+    // 4. Compute KPIs & Precise Purchase Frequency Buckets
     const totalUniqueCustomers = targetCustomers.length;
     let oneTimeBuyers = 0;
     let repeatBuyers = 0;
@@ -469,9 +489,13 @@ class CustomerRepeatAnalyticsService {
     let repeatOrdersCount = 0;
 
     let customersWith3 = 0;
+    let customersWith3Plus = 0;
     let customersWith5 = 0;
+    let customersWith5Plus = 0;
     let customersWith10 = 0;
+    let customersWith10Plus = 0;
     let customersWith15 = 0;
+    let customersWith15Plus = 0;
 
     const frequencyBuckets: Record<number, { count: number; revenue: number }> = {};
     for (let i = 1; i <= 15; i++) {
@@ -502,9 +526,13 @@ class CustomerRepeatAnalyticsService {
         }
 
         if (orderCount === 3) customersWith3++;
+        if (orderCount >= 3) customersWith3Plus++;
         if (orderCount === 5) customersWith5++;
+        if (orderCount >= 5) customersWith5Plus++;
         if (orderCount === 10) customersWith10++;
+        if (orderCount >= 10) customersWith10Plus++;
         if (orderCount === 15) customersWith15++;
+        if (orderCount >= 15) customersWith15Plus++;
       }
     });
 
@@ -522,9 +550,13 @@ class CustomerRepeatAnalyticsService {
       repeatBuyers,
       repeatPercentage,
       customersWith3,
+      customersWith3Plus,
       customersWith5,
+      customersWith5Plus,
       customersWith10,
+      customersWith10Plus,
       customersWith15,
+      customersWith15Plus,
       totalRepeatRevenue,
       repeatAOV
     };
@@ -548,33 +580,35 @@ class CustomerRepeatAnalyticsService {
       totalRevenue: bucket15PlusRevenue
     });
 
-    // 6. Repeat Purchase Trends Over Time (Monthly timeline)
+    // 6. Repeat Purchase Trends Over Time (Chronological first-time vs repeat classification)
+    // Rule: First order ever placed by each customer is their first-time order.
+    // Subsequent orders placed after their first order are repeat orders.
     const trendMap = new Map<string, { repeatOrders: number; repeatRevenue: number; firstTimeOrders: number }>();
-    validOrders.forEach(o => {
-      const d = o.order_date ? String(o.order_date).slice(0, 7) : 'Unknown';
-      if (!trendMap.has(d)) {
-        trendMap.set(d, { repeatOrders: 0, repeatRevenue: 0, firstTimeOrders: 0 });
-      }
-      const entry = trendMap.get(d)!;
-      const phone = normalizeCustomerPhone(o.phone);
-      const custKey = phone ? `phone_${phone}` : `cust_${(o.customer_name || 'unknown').trim().toLowerCase()}_${(o.city || '').trim().toLowerCase()}`;
-      const cust = customerMap.get(custKey);
-      const isRepeatCust = cust && cust.orders.length >= 2;
-      const amt = Number(o.order_total) || 0;
-
-      if (isRepeatCust) {
-        entry.repeatOrders++;
-        entry.repeatRevenue += amt;
-      } else {
-        entry.firstTimeOrders++;
-      }
+    
+    targetCustomers.forEach(c => {
+      // Sort customer orders chronologically
+      const chronOrders = [...c.orders].sort((a, b) => String(a.order_date || '').localeCompare(String(b.order_date || '')));
+      chronOrders.forEach((o, index) => {
+        const d = o.order_date ? String(o.order_date).slice(0, 7) : 'Unknown';
+        if (d === 'Unknown') return;
+        if (!trendMap.has(d)) {
+          trendMap.set(d, { repeatOrders: 0, repeatRevenue: 0, firstTimeOrders: 0 });
+        }
+        const entry = trendMap.get(d)!;
+        const amt = Number(o.order_total) || 0;
+        if (index === 0) {
+          entry.firstTimeOrders++;
+        } else {
+          entry.repeatOrders++;
+          entry.repeatRevenue += amt;
+        }
+      });
     });
 
     const repeatTrends: RepeatTrendPoint[] = Array.from(trendMap.entries())
       .filter(([k]) => k !== 'Unknown')
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([dateKey, stats]) => {
-        // Format display e.g. "Jul 2026"
         const [year, month] = dateKey.split('-');
         const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         const displayDate = month ? `${monthNames[parseInt(month, 10) - 1]} ${year}` : dateKey;
@@ -799,6 +833,7 @@ class CustomerRepeatAnalyticsService {
       kpis,
       frequencyDistribution,
       repeatTrends,
+      allCustomers: allCustomerProfiles,
       topCustomers,
       topCustomersByValue,
       topCustomersByRepeat,

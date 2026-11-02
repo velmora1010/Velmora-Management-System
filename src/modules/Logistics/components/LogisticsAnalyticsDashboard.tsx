@@ -187,7 +187,7 @@ export const LogisticsAnalyticsDashboard: React.FC<LogisticsAnalyticsDashboardPr
       {/* 9. SECTION 8: TRACKING & EXCEPTION INTELLIGENCE */}
       {/* 9. CUSTOMER REPEAT & GEOGRAPHIC ANALYTICS */}
       <div ref={customerRepeatRef} className="scroll-mt-4">
-        <CustomerRepeatAnalyticsDashboard />
+        <CustomerRepeatAnalyticsDashboard sourceChannel="WEBSITE" />
       </div>
 
       <div ref={exceptionsRef} className="scroll-mt-4">
