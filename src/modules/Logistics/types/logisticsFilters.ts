@@ -21,13 +21,14 @@ export type LogisticsDatePreset =
 export type LogisticsDateField = 'orderDate' | 'dispatchDate' | 'deliveredDate' | 'syncedAt';
 
 export type LogisticsSection = 
+  | 'all_shipments'
   | 'pending_awb' 
   | 'ready_to_ship' 
   | 'ready_for_pickup' 
   | 'in_transit' 
   | 'rto_in_transit' 
   | 'delivered' 
-  | 'all_shipments' 
+  | 'cancelled_orders'
   | 'third_party';
 
 export interface LogisticsFilterState {
@@ -451,7 +452,7 @@ export function isOrderInTransit(order: UnifiedLogisticsOrder): boolean {
     st.includes('out for delivery') || 
     st.includes('shipped') || 
     st.includes('dispatched for delivery') ||
-    (isDispatchedOrder(order) && !st.includes('ready for pickup') && !st.includes('delivered'))
+    (isDispatchedOrder(order) && !st.includes('ready for pickup') && !st.includes('awaiting tracking') && !st.includes('info received') && !st.includes('delivered'))
   );
 }
 
@@ -495,8 +496,35 @@ export function isOrderThirdParty(order: UnifiedLogisticsOrder): boolean {
 /**
  * Evaluates whether an order belongs to a given section.
  */
+/**
+ * 8. Cancelled Orders:
+ * Confirmed cancelled orders.
+ */
+export function isOrderCancelled(order: UnifiedLogisticsOrder): boolean {
+  const stage = (order.workflowStage || order.stage || '').toLowerCase();
+  if (stage === 'trash') return false;
+  const st = (order.status || '').toLowerCase();
+  const fst = (order.fulfillmentStatus || order.sourceFulfillmentStatus || '').toLowerCase();
+  const cst = (order.cancellationStatus || '').toLowerCase();
+  const rawStatus = (order.rawStatus || '').toLowerCase();
+  return (
+    st === 'cancelled' ||
+    st === 'canceled' ||
+    st.includes('cancelled') ||
+    st.includes('canceled') ||
+    rawStatus.includes('cancel') ||
+    fst === 'cancelled' ||
+    fst === 'canceled' ||
+    cst === 'completed' ||
+    cst === 'approved' ||
+    (order as any).isCancelled === true
+  );
+}
+
 export function isOrderMatchingSection(order: UnifiedLogisticsOrder, section: LogisticsSection): boolean {
   if (order.stage === 'trash' || order.workflowStage === 'trash') return false;
+  if (section === 'cancelled_orders') return isOrderCancelled(order);
+  if (isOrderCancelled(order)) return false; // Confirmed cancelled orders must never leak into active queues
   if (section === 'all_shipments') return true;
   if (section === 'pending_awb') return isOrderPendingAwb(order);
   if (section === 'ready_to_ship') return isOrderReadyToShip(order);
@@ -513,18 +541,25 @@ export function isOrderMatchingSection(order: UnifiedLogisticsOrder, section: Lo
  */
 export function calculateSectionCounts(orders: UnifiedLogisticsOrder[]): Record<LogisticsSection, number> {
   const counts: Record<LogisticsSection, number> = {
+    all_shipments: 0,
     pending_awb: 0,
     ready_to_ship: 0,
     ready_for_pickup: 0,
     in_transit: 0,
     rto_in_transit: 0,
     delivered: 0,
-    all_shipments: 0,
+    cancelled_orders: 0,
     third_party: 0
   };
 
   orders.forEach(order => {
     if (order.stage === 'trash' || order.workflowStage === 'trash') return;
+
+    if (isOrderCancelled(order)) {
+      counts.cancelled_orders++;
+      return;
+    }
+
     counts.all_shipments++;
 
     if (isOrderPendingAwb(order)) counts.pending_awb++;

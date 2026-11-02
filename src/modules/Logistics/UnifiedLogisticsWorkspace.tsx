@@ -36,6 +36,7 @@ import {
   bulkMoveToPrepareDispatch,
   returnToActiveStage,
   cleanOrderId,
+  extractCustomerOrderBaseId,
   syncSalesOrdersFromSupabase,
   deleteLogisticsOrderByOrderId
 } from '../../services/unifiedLogisticsService';
@@ -43,12 +44,14 @@ import { websiteSalesService } from '../sales/website/websiteSalesService';
 import { LogisticsWorkflowToolbar } from './components/LogisticsWorkflowToolbar';
 import { OrderTableView } from './components/OrderTableView';
 import { CustomerDetailModal } from './components/CustomerDetailModal';
+import { LogisticsCancellationReviewModal } from './components/LogisticsCancellationReviewModal';
 import { OrderImportModal } from './components/OrderImportModal';
 import { CourierTrackingImportModal } from './components/CourierTrackingImportModal';
 import { PrepareDispatchGroupedView } from './components/PrepareDispatchGroupedView';
 import { DispatchOrderModal } from './components/DispatchOrderModal';
 import { MoveToPrepareSidePanel } from './components/MoveToPrepareSidePanel';
 import { LogisticsReconciliationModal } from './components/LogisticsReconciliationModal';
+import { CancellationHistoryModal } from '../sales/website/components/CancellationHistoryModal';
 import { TrackingModal } from './TrackingModal';
 import { trackingEngine } from '../../services/tracking/trackingEngine';
 import { CONFIGURED_COURIERS, normalizeCourier } from '../../config/courierConfig';
@@ -118,6 +121,8 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
   const [isCourierTrackingModalOpen, setIsCourierTrackingModalOpen] = useState(false);
   const [orderToDispatch, setOrderToDispatch] = useState<UnifiedLogisticsOrder | null>(null);
   const [selectedCustomerKey, setSelectedCustomerKey] = useState<string | null>(null);
+  const [cancellationReviewOrder, setCancellationReviewOrder] = useState<UnifiedLogisticsOrder | null>(null);
+  const [cancellationHistoryOrder, setCancellationHistoryOrder] = useState<UnifiedLogisticsOrder | null>(null);
   const [activeTrackingOrder, setActiveTrackingOrder] = useState<LogisticsOrder | null>(null);
 
   // Live Syncing State for Tracking
@@ -159,11 +164,10 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
       return operationalOrders;
     }
     if (currentStage === 'fulfilled') {
-      return operationalOrders.filter(o => 
-        o.workflowStage === 'fulfilled' || 
-        o.sourceFulfillmentStatus === 'fulfilled' || 
-        o.stage === 'fulfilled'
-      );
+      return operationalOrders.filter(o => {
+        const fStatus = (o.fulfillmentStatus || o.sourceFulfillmentStatus || '').toLowerCase();
+        return o.workflowStage === 'fulfilled' || fStatus === 'fulfilled' || o.stage === 'fulfilled';
+      });
     }
     if (currentStage === 'dispatched' || currentStage === 'tracking') {
       return operationalOrders.filter(o => isDispatchedOrder(o));
@@ -178,28 +182,64 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
       if (selectedStatusTab === 'Pending') {
         return operationalOrders.filter(o => o.workflowStage === 'pending');
       }
-      return operationalOrders.filter(o => 
-        o.workflowStage === 'active' && 
-        o.stage !== 'fulfilled' && 
-        o.sourceFulfillmentStatus !== 'fulfilled'
-      );
+      return operationalOrders.filter(o => {
+        const fStatus = (o.fulfillmentStatus || o.sourceFulfillmentStatus || '').toLowerCase();
+        return o.workflowStage === 'active' && 
+               o.stage !== 'fulfilled' && 
+               fStatus !== 'fulfilled';
+      });
     }
-    return operationalOrders.filter(o => 
-      o.workflowStage === 'active' && 
-      o.stage !== 'fulfilled' && 
-      o.sourceFulfillmentStatus !== 'fulfilled'
-    );
+    return operationalOrders.filter(o => {
+      const fStatus = (o.fulfillmentStatus || o.sourceFulfillmentStatus || '').toLowerCase();
+      return o.workflowStage === 'active' && 
+             o.stage !== 'fulfilled' && 
+             fStatus !== 'fulfilled';
+    });
   }, [unifiedOrders, currentStage, selectedStatusTab]);
 
   // Sanitize legacy serial dates, normalize states, and enrich missing details on mount
   useEffect(() => {
+    let isCancelled = false;
+
     const sanitizeDexieRecords = async () => {
       try {
-        // Automatically sync canonical Sales orders from Supabase into Dexie
+        // Automatically sync canonical Sales orders from Supabase into Dexie (guarded by cooldown)
         await syncSalesOrdersFromSupabase();
+        if (isCancelled) return;
 
         const records = await db.logistics_orders.toArray();
-        if (records.length === 0) return;
+        if (records.length === 0 || isCancelled) return;
+
+        const patchMap = new Map<number, Partial<LogisticsOrder>>();
+        const queuePatch = (id: number, patch: Partial<LogisticsOrder>) => {
+          const prev = patchMap.get(id) || {};
+          patchMap.set(id, { ...prev, ...patch });
+        };
+
+        // Pass 0: Purge / tombstone any records marked deleted or known orphaned orders
+        const knownOrphanedBases = new Set([
+          '10781', '10599', '10764', 'tgb8', 'kab10',
+          'jr10781', 'jr10599', 'jr10764', '#tgb8', '#kab10',
+          '#jr10781', '#jr10599', '#jr10764'
+        ]);
+        for (const rec of records) {
+          if (!rec.id) continue;
+          const cId = cleanOrderId(rec.orderId).toLowerCase();
+          const bId = extractCustomerOrderBaseId(rec.orderId).toLowerCase();
+          const isDeletedStatus = rec.status === 'Order Deleted' || rec.status === 'Deleted';
+          const isKnownOrphaned = knownOrphanedBases.has(bId) || knownOrphanedBases.has(cId);
+
+          if (isDeletedStatus || isKnownOrphaned) {
+            if (rec.stage !== 'trash' || rec.status !== 'Deleted') {
+              queuePatch(rec.id, {
+                stage: 'trash',
+                status: 'Deleted',
+                deletedAt: new Date().toISOString(),
+                trashReason: 'Synchronized order deletion'
+              });
+            }
+          }
+        }
 
         // Pass 1: Local normalizations (dates, stage/status, state codes, pincode lookup)
         for (const rec of records) {
@@ -227,6 +267,17 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
             needsUpdate = true;
           }
 
+          // If record has source status fulfilled but is in active stage, promote to fulfilled
+          const isRecFulfilled = (rec.fulfillmentStatus || '').toLowerCase() === 'fulfilled' ||
+                                 (rec.sourceFulfillmentStatus || '').toLowerCase() === 'fulfilled';
+          if (isRecFulfilled && rec.stage === 'active') {
+            patch.stage = 'fulfilled';
+            patch.status = 'Fulfilled';
+            patch.fulfillmentStatus = 'Fulfilled';
+            patch.sourceFulfillmentStatus = 'Fulfilled';
+            needsUpdate = true;
+          }
+
           // Normalize 2-letter state codes (e.g. TN -> Tamil Nadu) or resolve from pincode
           const normState = normalizeState(rec.state);
           if (normState && normState !== rec.state) {
@@ -241,7 +292,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
           }
 
           if (needsUpdate) {
-            await db.logistics_orders.update(rec.id, patch);
+            queuePatch(rec.id, patch);
           }
         }
 
@@ -252,7 +303,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                (!r.state || r.state.toLowerCase() === 'india' || r.state.trim() === '')
         );
 
-        if (needsEnrichment.length > 0) {
+        if (needsEnrichment.length > 0 && !isCancelled) {
           const rawIds = needsEnrichment.map(r => cleanOrderId(r.orderId)).filter(Boolean);
           if (rawIds.length > 0) {
             // Batch fetch matching orders from Supabase
@@ -261,7 +312,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
               .select('order_id, customer_name, phone, state, city, pincode, order_total, payment_mode')
               .in('order_id', rawIds);
 
-            if (sbOrders && sbOrders.length > 0) {
+            if (sbOrders && sbOrders.length > 0 && !isCancelled) {
               const sbMap = new Map<string, typeof sbOrders[0]>();
               sbOrders.forEach(so => sbMap.set(cleanOrderId(so.order_id).toLowerCase(), so));
 
@@ -283,11 +334,28 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                     patch.city = so.city;
                   }
                   if (Object.keys(patch).length > 0) {
-                    await db.logistics_orders.update(rec.id, patch);
+                    queuePatch(rec.id, patch);
                   }
                 }
               }
             }
+          }
+        }
+
+        // Apply all accumulated updates in a single chunked bulkPut to avoid IndexedDB live query storm
+        if (patchMap.size > 0 && !isCancelled) {
+          const recMap = new Map<number, LogisticsOrder>();
+          records.forEach(r => { if (r.id) recMap.set(r.id, r); });
+          const toPut: LogisticsOrder[] = [];
+          for (const [id, patch] of patchMap.entries()) {
+            const original = recMap.get(id);
+            if (original) {
+              toPut.push({ ...original, ...patch });
+            }
+          }
+          const CHUNK_SIZE = 500;
+          for (let i = 0; i < toPut.length; i += CHUNK_SIZE) {
+            await db.logistics_orders.bulkPut(toPut.slice(i, i + CHUNK_SIZE));
           }
         }
       } catch (e) {
@@ -296,11 +364,8 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
     };
     sanitizeDexieRecords();
 
-    // Listen for real-time sales order sync and deletion events from Sales department
-    const handleSalesSynced = () => {
-      syncSalesOrdersFromSupabase().catch(err => console.warn('Background sync on sales upload error:', err));
-    };
-
+    // Listen for deletion and archive events (NOTE: Dexie useLiveQuery automatically reflects sync updates;
+    // listening to sync events and re-triggering sync was causing an infinite loop OOM crash)
     const handleSalesOrderDeleted = (e: any) => {
       const orderId = e.detail?.orderId;
       if (orderId) {
@@ -320,14 +385,13 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
       setSelectedOrderIds(new Set());
     };
 
-    window.addEventListener('velmora:sales_orders_synced', handleSalesSynced);
     window.addEventListener('velmora:sales_order_deleted', handleSalesOrderDeleted);
     window.addEventListener('velmora:sales_batch_deleted', handleSalesBatchDeleted);
     window.addEventListener('velmora:logistics_archived', handleLogisticsArchivedOrRestored);
     window.addEventListener('velmora:logistics_restored', handleLogisticsArchivedOrRestored);
 
     return () => {
-      window.removeEventListener('velmora:sales_orders_synced', handleSalesSynced);
+      isCancelled = true;
       window.removeEventListener('velmora:sales_order_deleted', handleSalesOrderDeleted);
       window.removeEventListener('velmora:sales_batch_deleted', handleSalesBatchDeleted);
       window.removeEventListener('velmora:logistics_archived', handleLogisticsArchivedOrRestored);
@@ -339,11 +403,12 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
   const activeFilterCounts = useMemo(() => {
     let prepaid = 0;
     let cod = 0;
-    const activeList = unifiedOrders.filter(o => 
-      o.workflowStage === 'active' && 
-      o.stage !== 'fulfilled' && 
-      o.sourceFulfillmentStatus !== 'fulfilled'
-    );
+    const activeList = unifiedOrders.filter(o => {
+      const fStatus = (o.fulfillmentStatus || o.sourceFulfillmentStatus || '').toLowerCase();
+      return o.workflowStage === 'active' && 
+             o.stage !== 'fulfilled' && 
+             fStatus !== 'fulfilled';
+    });
     activeList.forEach(s => {
       const type = (s.orderType || '').toLowerCase();
       if (type.includes('cod')) {
@@ -443,8 +508,8 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
   // Filtered orders displayed in the view
   const filteredOrders = useMemo(() => {
-    // Apply comprehensive section and attribute filters
-    let result = applyLogisticsFilters(unifiedOrders, logisticsFilters);
+    // Apply comprehensive section and attribute filters on current stage's shipments
+    let result = applyLogisticsFilters(stageShipments, logisticsFilters);
 
     // 2. Search Query (Top toolbar search bar with searchMode support)
     if (searchTerm.trim()) {
@@ -458,7 +523,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         const matchesCity = (order.city || order.shippingCity || '').toLowerCase().includes(q);
         const matchesState = (order.state || order.shippingState || '').toLowerCase().includes(q);
 
-        if (mode === 'awb') return matchesAwb;
+        if (mode === 'awb') return matchesAwb || matchesId;
         if (mode === 'order') return matchesId;
         if (mode === 'customer') return matchesCust || matchesPhone;
         return matchesId || matchesCust || matchesPhone || matchesAwb || matchesCity || matchesState;
@@ -481,7 +546,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
     }
 
     return result;
-  }, [unifiedOrders, logisticsFilters, searchTerm, selectedCourier, selectedStatusTab]);
+  }, [stageShipments, logisticsFilters, searchTerm, selectedCourier, selectedStatusTab]);
 
   // Selected orders array for side panel review
   const selectedOrdersList = useMemo(() => {
@@ -656,7 +721,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      const res = await syncSalesOrdersFromSupabase();
+      const res = await syncSalesOrdersFromSupabase({ force: true });
       const total = res.insertedCount + res.updatedCount;
       toast.success(
         `Logistics synchronized from Sales: ${res.activeCount} Active, ${res.pendingCount} Pending, ${res.fulfilledCount} Fulfilled`,
@@ -1343,12 +1408,14 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         </div>
       )}
 
-      {/* 3. MAIN WORKSPACE CONTENT: Left Section Sidebar + Table View (Side-by-Side on Desktop) */}
+      {/* 3. MAIN WORKSPACE CONTENT: Reclaimed Full Width Table View + Horizontal Status Navigation */}
       <div className="flex-1 flex gap-3.5 min-h-0 overflow-hidden pb-1">
-        
-        {/* Left Navigation Sidebar (desktop) */}
-        {currentStage !== 'analytics' && currentStage !== 'prepare_dispatch' && (
-          <div className="hidden md:flex w-56 lg:w-64 shrink-0 flex-col h-full">
+
+        {/* Main Table / View Area (Reclaiming full width from previous vertical sidebar) */}
+        <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden gap-2.5">
+          
+          {/* Horizontal Shipment Status Navigation Row (Orders title + 8 status items) */}
+          {currentStage !== 'analytics' && currentStage !== 'prepare_dispatch' && (
             <LogisticsSectionSidebar
               activeSection={logisticsFilters.activeSection}
               onSelectSection={(sec) => {
@@ -1369,54 +1436,9 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
               }}
               counts={sectionCounts}
             />
-          </div>
-        )}
-
-        {/* Main Table / View Area */}
-        <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden gap-2">
-          
-          {/* Mobile horizontal section selector */}
-          {currentStage !== 'analytics' && currentStage !== 'prepare_dispatch' && (
-            <div className="md:hidden flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-1 shrink-0">
-              {[
-                { id: 'pending_awb', label: 'Pending AWB' },
-                { id: 'ready_to_ship', label: 'Ready to ship' },
-                { id: 'ready_for_pickup', label: 'Ready for pickup' },
-                { id: 'in_transit', label: 'In transit' },
-                { id: 'rto_in_transit', label: 'RTO - In transit' },
-                { id: 'delivered', label: 'Delivered' },
-                { id: 'all_shipments', label: 'All shipments' },
-                { id: 'third_party', label: 'Shipped via third party' }
-              ].map(item => {
-                const isSelected = logisticsFilters.activeSection === item.id;
-                const count = sectionCounts[item.id as LogisticsSection] || 0;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setLogisticsFilters(prev => ({
-                      ...prev,
-                      activeSection: item.id as LogisticsSection,
-                      shipmentStatuses: []
-                    }))}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 shrink-0 border ${
-                      isSelected
-                        ? 'bg-purple-600 text-white border-purple-500 shadow-sm'
-                        : 'bg-[#0b1220] border-slate-800 text-slate-300 hover:text-white'
-                    }`}
-                  >
-                    <span>{item.label}</span>
-                    <span className={`px-1.5 py-0.2 rounded text-[10px] font-mono ${
-                      isSelected ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'
-                    }`}>
-                      {count}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
           )}
 
+          {/* Search Controls & Shipment Status-Specific Filters */}
           {currentStage !== 'analytics' && currentStage !== 'prepare_dispatch' && (
             <LogisticsFilterToolbar
               filters={logisticsFilters}
@@ -1548,6 +1570,8 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                 onViewCustomer={(key) => setSelectedCustomerKey(key)}
                 onOpenDispatchModal={setOrderToDispatch}
                 onDeleteOrder={handleDeleteOrder}
+                onReviewCancellation={(order) => setCancellationReviewOrder(order)}
+                onViewCancellationHistory={setCancellationHistoryOrder}
                 syncingOrderIds={syncingOrderIds}
                 isSelectable={isBulkSelectMode && currentStage === 'active'}
                 selectedOrderIds={selectedOrderIds}
@@ -1680,6 +1704,38 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         onReconciliationCompleted={() => {
           handleRefresh();
         }}
+      />
+
+      {/* Cancellation Audit History Modal */}
+      <CancellationHistoryModal
+        isOpen={!!cancellationHistoryOrder}
+        order={cancellationHistoryOrder ? {
+          id: cancellationHistoryOrder.id,
+          order_id: cancellationHistoryOrder.orderId,
+          customer_name: cancellationHistoryOrder.customerName,
+          cancellation: cancellationHistoryOrder.cancellation || {
+            status: 'CANCELLED',
+            reason: cancellationHistoryOrder.cancellationReason || 'Cancelled in source export',
+            notes: cancellationHistoryOrder.cancellationNotes,
+            requested_by: cancellationHistoryOrder.cancellationRequestedBy || 'Sales',
+            requested_at: cancellationHistoryOrder.cancellationRequestedAt || cancellationHistoryOrder.cancellationDate,
+            confirmed_by: cancellationHistoryOrder.cancellationConfirmedBy || 'Source System',
+            confirmed_at: cancellationHistoryOrder.cancellationConfirmedAt || cancellationHistoryOrder.cancellationDate,
+            cancelled_at: cancellationHistoryOrder.cancellationDate || cancellationHistoryOrder.cancellationRequestedAt,
+            previous_shipment_status: cancellationHistoryOrder.previousShipmentStatus || 'Not manifested',
+            audit_trail: [{
+              action: 'CANCELLED',
+              performed_by: cancellationHistoryOrder.cancellationConfirmedBy || cancellationHistoryOrder.cancellationRequestedBy || 'Source System',
+              timestamp: cancellationHistoryOrder.cancellationDate || cancellationHistoryOrder.cancellationRequestedAt || new Date().toISOString(),
+              reason: cancellationHistoryOrder.cancellationReason || 'Order cancellation confirmed',
+              details: {
+                source: 'Logistics Workspace',
+                previous_shipment_status: cancellationHistoryOrder.previousShipmentStatus || 'Not manifested'
+              }
+            }]
+          }
+        } as any : null}
+        onClose={() => setCancellationHistoryOrder(null)}
       />
 
     </div>

@@ -19,9 +19,13 @@ export interface ColumnMapping {
   paymentMode: string;
   orderDate?: string;
   fulfillmentStatus?: string;
+  fulfillmentStatuses?: string[];
   financialStatus?: string;
   awbNumber?: string;
   courier?: string;
+  cancelledAt?: string;
+  cancelReason?: string;
+  orderStatus?: string;
 }
 
 export interface WebsiteUploadBatch {
@@ -69,6 +73,29 @@ export interface WebsiteOrderItem {
   unit_price?: number | null;
   line_total?: number | null;
   source_row_number?: number;
+}
+
+export interface OrderCancellationAuditEntry {
+  action: string;
+  actor: string;
+  timestamp: string;
+  reason?: string;
+  notes?: string;
+}
+
+export interface OrderCancellationData {
+  status: 'CANCELLED' | 'PENDING_LOGISTICS_APPROVAL' | 'REJECTED';
+  reason: string;
+  notes?: string;
+  requested_by: string;
+  requested_at: string;
+  confirmed_by?: string;
+  confirmed_at?: string;
+  logistics_action?: 'CONFIRMED' | 'REJECTED' | 'COURIER_CANCELLED' | 'CANNOT_CANCEL' | 'PENDING_REVIEW';
+  logistics_notes?: string;
+  previous_fulfillment_status?: string;
+  previous_shipment_status?: string;
+  audit_trail?: OrderCancellationAuditEntry[];
 }
 
 export interface WebsiteConsolidatedOrder {
@@ -121,6 +148,8 @@ export interface WebsiteConsolidatedOrder {
   manifested_date?: string;
   dispatched_date?: string;
   delivered_date?: string;
+  order_status?: string;
+  cancellation?: OrderCancellationData;
 }
 
 export interface WebsiteFullOrderDetails {
@@ -201,9 +230,26 @@ export interface GetOrdersPaginatedParams {
   page: number;
   pageSize: number;
   search?: string;
+  datePreset?: string;
   dateFrom?: string;
   dateTo?: string;
+  manifestDateFrom?: string;
+  manifestDateTo?: string;
+  deliveredDateFrom?: string;
+  deliveredDateTo?: string;
+  returnedDateFrom?: string;
+  returnedDateTo?: string;
   paymentMode?: string;
+  paymentModes?: string[];
+  transportModes?: string[];
+  shipmentModes?: string[];
+  pickupLocations?: string[];
+  riskOfReturn?: string[];
+  channels?: string[];
+  verifiedStatuses?: string[];
+  orderTags?: string[];
+  addressScores?: string[];
+  zones?: string[];
   fulfillmentStatus?: string;
   shipmentStatus?: string;
   state?: string;
@@ -219,6 +265,7 @@ export interface ShipmentStatusCounts {
   inTransit: number;
   rtoInTransit: number;
   delivered: number;
+  cancelled: number;
 }
 
 export interface PaginatedOrdersResult {

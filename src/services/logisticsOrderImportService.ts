@@ -11,7 +11,8 @@ import {
   parseOrderAmount, 
   normalizeOrderPhone,
   isDispatchedOrder,
-  detectOrderChanges
+  detectOrderChanges,
+  normalizeShopifyFulfillmentStatus
 } from '../utils/logisticsOrderUtils';
 
 export interface ParsedCustomerOrder {
@@ -348,18 +349,29 @@ export const parseAndValidateCustomerOrders = async (
     }
 
     // Payment Mode
-    const paymentMode = String(findHeaderValueFromRows(rows, [
-      'Payment Method', 'Payment Mode', 'Financial Status', 'Type', 'Order Type'
-    ]) || 'Prepaid').trim();
-
-    // Fulfillment Status & Cancellation
-    const fulfillmentStatusRaw = String(findHeaderValueFromRows(rows, [
-      'Fulfillment Status', 'Fulfillment_Status', 'Fulfilment Status', 'Status', 'Order Status'
-    ]) || '').toLowerCase().trim();
+    let paymentMode = String(findHeaderValueFromRows(rows, [
+      'Payment Method', 'Payment Mode', 'Type', 'Order Type'
+    ]) || '').trim();
 
     const financialStatusRaw = String(findHeaderValueFromRows(rows, [
       'Financial Status', 'Financial_Status'
     ]) || '').toLowerCase().trim();
+
+    if (!paymentMode) {
+      if (financialStatusRaw === 'pending') {
+        paymentMode = 'COD';
+      } else {
+        paymentMode = 'Prepaid';
+      }
+    }
+
+    // Fulfillment Status & Cancellation
+    const rawFulfillmentCandidate = findHeaderValueFromRows(rows, [
+      'Fulfillment Status', 'Fulfillment_Status', 'Fulfilment Status',
+      'Lineitem fulfillment status', 'Lineitem Fulfillment Status', 'fulfillment_status'
+    ]);
+    const normalizedFulfillment = normalizeShopifyFulfillmentStatus(rawFulfillmentCandidate);
+    const fulfillmentStatusRaw = (rawFulfillmentCandidate ? String(rawFulfillmentCandidate) : '').toLowerCase().trim();
 
     const cancelledAt = findHeaderValueFromRows(rows, ['Cancelled at', 'Cancelled At', 'Cancel Reason']);
 
@@ -394,6 +406,7 @@ export const parseAndValidateCustomerOrders = async (
     let reviewReason = '';
 
     const isSourceFulfilledStatus = (
+      normalizedFulfillment === 'Fulfilled' ||
       fulfillmentStatusRaw === 'fulfilled' ||
       fulfillmentStatusRaw === 'shipped' ||
       fulfillmentStatusRaw === 'delivered'
@@ -446,8 +459,8 @@ export const parseAndValidateCustomerOrders = async (
       orderDate,
       orderDateDisplay,
       fulfilledDate: parsedFulfilledDate || (isFulfilled ? orderDateDisplay : undefined),
-      fulfillmentStatus: fulfillmentStatusRaw || (isFulfilled ? 'fulfilled' : 'unfulfilled'),
-      sourceFulfillmentStatus: fulfillmentStatusRaw || (isFulfilled ? 'fulfilled' : 'unfulfilled'),
+      fulfillmentStatus: normalizedFulfillment || (isFulfilled ? 'Fulfilled' : 'Unfulfilled'),
+      sourceFulfillmentStatus: normalizedFulfillment || (isFulfilled ? 'Fulfilled' : 'Unfulfilled'),
       financialStatus: financialStatusRaw || undefined,
       isEligibleActive,
       isAlreadyFulfilled: isFulfilled,
@@ -651,8 +664,8 @@ export const commitCustomerOrdersImport = async (
           orderDate: order.orderDate,
           orderDateDisplay: order.orderDateDisplay,
           fulfilledDate: order.fulfilledDate || order.orderDate,
-          fulfillmentStatus: 'fulfilled',
-          sourceFulfillmentStatus: 'fulfilled',
+          fulfillmentStatus: order.fulfillmentStatus || 'Fulfilled',
+          sourceFulfillmentStatus: order.sourceFulfillmentStatus || order.fulfillmentStatus || 'Fulfilled',
           financialStatus: order.financialStatus
         });
         insertedFulfilled++;
@@ -676,8 +689,8 @@ export const commitCustomerOrdersImport = async (
           uploadedAt: new Date().toLocaleString(),
           orderDate: order.orderDate,
           orderDateDisplay: order.orderDateDisplay,
-          fulfillmentStatus: order.fulfillmentStatus || 'unfulfilled',
-          sourceFulfillmentStatus: 'unfulfilled',
+          fulfillmentStatus: order.fulfillmentStatus || 'Unfulfilled',
+          sourceFulfillmentStatus: order.sourceFulfillmentStatus || order.fulfillmentStatus || 'Unfulfilled',
           financialStatus: order.financialStatus
         });
         insertedPending++;
@@ -847,7 +860,9 @@ export const syncLogisticsOrdersToSupabaseSales = async (
       : (paymentMode === 'PARTIAL COD' ? Math.round(numericAmount * 0.2) : 0);
     const remainingCod = paymentMode === 'PREPAID' ? 0 : Math.max(0, numericAmount - advancePaid);
 
-    const isFulfilled = order.isAlreadyFulfilled || (order.fulfillmentStatus || '').toLowerCase() === 'fulfilled';
+    const isFulfilled = order.isAlreadyFulfilled || 
+                        (order.fulfillmentStatus || '').toLowerCase() === 'fulfilled' || 
+                        (order.sourceFulfillmentStatus || '').toLowerCase() === 'fulfilled';
     const orderStatus = isFulfilled ? 'FULFILLED' : (order.isCancelled ? 'CANCELLED' : 'CONFIRMED');
     const dispatchStatus = isFulfilled ? 'FULFILLED' : (order.awbNumber ? 'DISPATCHED' : 'UNFULFILLED');
 
@@ -881,7 +896,7 @@ export const syncLogisticsOrdersToSupabaseSales = async (
         address: order.address || '',
         order_formatted: order.products || '',
         product_name: order.products || '',
-        fulfillment_status: order.fulfillmentStatus || (isFulfilled ? 'fulfilled' : 'unfulfilled'),
+        fulfillment_status: order.fulfillmentStatus || (isFulfilled ? 'Fulfilled' : 'Unfulfilled'),
         awb_number: order.awbNumber || '',
         courier: order.courier || '',
         source: 'logistics_import'

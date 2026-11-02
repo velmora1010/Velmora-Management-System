@@ -11,8 +11,11 @@ import type {
   GetOrdersPaginatedParams,
   ShipmentStatusCounts,
   PaginatedOrdersResult,
-  WebsiteFullOrderDetails
+  WebsiteFullOrderDetails,
+  OrderCancellationData
 } from './types';
+import { getCustomerOrderIdentifierVariants, areCustomerOrdersMatching, extractCustomerOrderBaseId } from '../../../utils/orderIdUtils';
+import { normalizeShopifyFulfillmentStatus } from '../../../utils/logisticsOrderUtils';
 import { 
   syncSalesUploadToLogistics,
   deleteLogisticsOrderByOrderId,
@@ -282,7 +285,61 @@ export class WebsiteSalesService {
           orderIdToUuid.set(o.order_id, orderUuid);
 
           const fStatus = (o.fulfillment_status || '').toLowerCase().trim();
-          const isFulfilled = fStatus === 'fulfilled' || fStatus === 'shipped' || fStatus === 'delivered';
+          const isIncomingCancelled = o.order_status === 'CANCELLED' || Boolean(o.cancellation) || fStatus === 'cancelled';
+          const isExistingCancelled = existingRecord?.order_status === 'CANCELLED' || Boolean(existingRecord?.extra_data?.cancellation);
+          const isCancelled = isIncomingCancelled || isExistingCancelled;
+
+          const normFulfillment = normalizeShopifyFulfillmentStatus(o.fulfillment_status);
+          const existingFulfillment = existingRecord?.extra_data?.fulfillment_status;
+
+          const isFulfilled = !isCancelled && (
+            normFulfillment === 'Fulfilled' || 
+            fStatus === 'fulfilled' || 
+            fStatus === 'shipped' || 
+            fStatus === 'delivered' ||
+            (existingRecord?.order_status === 'FULFILLED' && !normFulfillment)
+          );
+          const isPartiallyFulfilled = !isCancelled && !isFulfilled && (
+            normFulfillment === 'Partially Fulfilled' || 
+            fStatus === 'partial' || 
+            fStatus === 'partially fulfilled'
+          );
+
+          // Resolve canonical fulfillment status safely:
+          let finalFulfillmentStatus: string;
+          if (isCancelled) {
+            finalFulfillmentStatus = 'Cancelled';
+          } else if (normFulfillment) {
+            finalFulfillmentStatus = normFulfillment;
+          } else if (existingFulfillment) {
+            finalFulfillmentStatus = normalizeShopifyFulfillmentStatus(existingFulfillment) || existingFulfillment;
+            console.warn(`[Fulfillment Warning] Order ${o.order_id} had missing/unrecognized fulfillment status in upload; preserved existing: ${finalFulfillmentStatus}`);
+          } else {
+            finalFulfillmentStatus = isFulfilled ? 'Fulfilled' : 'Unfulfilled';
+          }
+
+          let cancellationData = existingRecord?.extra_data?.cancellation || o.cancellation;
+          if (isCancelled && !cancellationData) {
+            cancellationData = {
+              status: 'CANCELLED',
+              reason: 'Source upload cancellation',
+              cancelled_at: new Date().toISOString(),
+              requested_at: new Date().toISOString(),
+              requested_by: 'Source Upload',
+              confirmed_at: new Date().toISOString(),
+              confirmed_by: 'Source System',
+              logistics_action: 'CONFIRMED',
+              previous_fulfillment_status: fStatus && fStatus !== 'cancelled' ? fStatus : 'Unfulfilled'
+            };
+          }
+
+          const finalOrderStatus = isCancelled 
+            ? 'CANCELLED' 
+            : (isFulfilled ? 'FULFILLED' : (isPartiallyFulfilled ? 'PARTIAL_FULFILLED' : 'CONFIRMED'));
+
+          const finalDispatchStatus = isCancelled
+            ? 'CANCELLED'
+            : (isFulfilled ? 'DELIVERED' : (existingRecord?.dispatch_status || 'UNFULFILLED'));
 
           orderPayloads.push({
             id: orderUuid,
@@ -303,22 +360,24 @@ export class WebsiteSalesService {
             source_payment_method: o.source_payment_method || o.source_payment_mode || 'Unknown',
             advance_paid: Number(o.advance_paid) || 0,
             remaining_cod: o.payment_mode === 'PREPAID' ? 0 : Number(o.remaining_payable ?? o.price),
-            order_status: isFulfilled ? 'FULFILLED' : 'CONFIRMED',
-            dispatch_status: isFulfilled ? 'DELIVERED' : 'UNFULFILLED',
+            order_status: finalOrderStatus,
+            dispatch_status: finalDispatchStatus,
             dispatch_date: isFulfilled ? (o.order_date || getTodayInBusinessTimezone()) : null,
             extra_data: {
-              address: o.address || '',
-              order_formatted: o.order_formatted || '',
-              product_name: o.product_name || '',
-              original_order_date: o.original_order_date || '',
-              payment_classification_reason: o.payment_classification_reason || '',
+              ...(existingRecord?.extra_data || {}),
+              address: o.address || existingRecord?.extra_data?.address || '',
+              order_formatted: o.order_formatted || existingRecord?.extra_data?.order_formatted || '',
+              product_name: o.product_name || existingRecord?.extra_data?.product_name || '',
+              original_order_date: o.original_order_date || existingRecord?.extra_data?.original_order_date || '',
+              payment_classification_reason: o.payment_classification_reason || existingRecord?.extra_data?.payment_classification_reason || '',
               data_conflict: o.data_conflict || false,
               conflict_details: o.conflict_details || '',
-              fulfillment_status: o.fulfillment_status || (isFulfilled ? 'fulfilled' : 'unfulfilled'),
-              financial_status: o.financial_status || '',
-              awb_number: o.awb_number || '',
-              courier: o.courier || '',
-              fulfilled_date: o.fulfilled_date || (isFulfilled ? o.order_date : '')
+              fulfillment_status: finalFulfillmentStatus,
+              financial_status: o.financial_status || existingRecord?.extra_data?.financial_status || (o.payment_mode === 'PREPAID' ? 'paid' : 'pending'),
+              awb_number: o.awb_number || existingRecord?.extra_data?.awb_number || '',
+              courier: o.courier || existingRecord?.extra_data?.courier || '',
+              fulfilled_date: o.fulfilled_date || (isFulfilled ? o.order_date : ''),
+              ...(cancellationData ? { cancellation: cancellationData } : {})
             }
           });
         });
@@ -635,7 +694,18 @@ export class WebsiteSalesService {
         financial_status: extra.financial_status || '',
         awb_number: extra.awb_number || o.awb_number || '',
         courier: extra.courier || o.courier || '',
-        fulfilled_date: extra.fulfilled_date || o.dispatch_date || ''
+        fulfilled_date: extra.fulfilled_date || o.dispatch_date || '',
+        order_status: o.order_status,
+        cancellation: extra.cancellation || (o.order_status === 'CANCELLED' ? {
+          status: 'CANCELLED',
+          reason: extra.cancellation_reason || 'Order cancelled',
+          notes: extra.cancellation_notes,
+          requested_by: extra.cancellation_requested_by || 'Sales Team',
+          requested_at: extra.cancellation_requested_at || o.updated_at || o.created_at,
+          confirmed_by: extra.cancellation_confirmed_by || 'Sales Team',
+          confirmed_at: extra.cancellation_confirmed_at || o.updated_at || o.created_at,
+          logistics_action: extra.logistics_action || 'CONFIRMED'
+        } : undefined)
       };
     });
 
@@ -796,7 +866,7 @@ export class WebsiteSalesService {
     return consolidatedOrders;
   }
 
-  // Delete an upload batch and all associated records from Supabase and Logistics
+  // Delete an upload batch and all associated records from Supabase and Logistics atomically
   async deleteUploadBatch(batchId: string): Promise<boolean> {
     try {
       const orders = await this.fetchAllPages<{ id: string; order_id: string }>((start, end) =>
@@ -812,18 +882,71 @@ export class WebsiteSalesService {
       const salesOrderIds = (orders || []).map(o => o.id);
       const rawOrderIds = (orders || []).map(o => cleanOrderId(o.order_id));
 
+      // Collect all identifier variants for every order in this batch
+      const allBatchVariants = new Set<string>();
+      for (const oid of rawOrderIds) {
+        getCustomerOrderIdentifierVariants(oid).forEach(v => allBatchVariants.add(v));
+      }
+      const batchVariantsList = Array.from(allBatchVariants);
+
       if (salesOrderIds.length > 0) {
         for (let i = 0; i < salesOrderIds.length; i += 300) {
           await supabase.from('sales_order_items').delete().in('sales_order_id', salesOrderIds.slice(i, i + 300));
         }
       }
 
+      // 1. Delete Sales records
       await supabase.from('sales_orders').delete().eq('upload_id', batchId).eq('channel', 'WEBSITE');
       await supabase.from('sales_raw_data').delete().eq('upload_id', batchId);
       await supabase.from('sales_uploads').delete().eq('id', batchId);
 
-      // Propagate batch deletion to Logistics Dexie
-      await deleteLogisticsOrdersByBatchId(batchId, rawOrderIds);
+      // 2. Synchronize Supabase customer_tracking_shipments:
+      // Archive / soft-delete linked shipments so they never remain as orphaned active orders
+      if (batchVariantsList.length > 0) {
+        for (let i = 0; i < batchVariantsList.length; i += 200) {
+          const chunk = batchVariantsList.slice(i, i + 200);
+          await supabase
+            .from('customer_tracking_shipments')
+            .update({
+              status: 'Order Deleted',
+              raw_status: 'DELETED',
+              remarks: 'Batch deleted from Sales',
+              updated_at: new Date().toISOString()
+            })
+            .in('order_id', chunk);
+
+          await supabase
+            .from('customer_tracking_shipments')
+            .update({
+              status: 'Order Deleted',
+              raw_status: 'DELETED',
+              remarks: 'Batch deleted from Sales',
+              updated_at: new Date().toISOString()
+            })
+            .in('display_order_id', chunk);
+        }
+      }
+
+      // Also update any shipments directly tagged with this batch_id
+      await supabase
+        .from('customer_tracking_shipments')
+        .update({
+          status: 'Order Deleted',
+          raw_status: 'DELETED',
+          remarks: 'Batch deleted from Sales',
+          updated_at: new Date().toISOString()
+        })
+        .eq('batch_id', batchId);
+
+      // 3. Propagate batch deletion to Logistics Dexie
+      await deleteLogisticsOrdersByBatchId(batchId, batchVariantsList);
+
+      // 4. Dispatch live event
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('velmora:batch_deleted', {
+          detail: { batchId, orderIds: batchVariantsList, timestamp: Date.now() }
+        }));
+      }
     } catch (e: any) {
       console.error('[Supabase Error] Table: sales_uploads/orders, Op: DELETE, Message:', e.message);
       throw new Error(`Failed to delete upload batch: ${e.message}`);
@@ -849,7 +972,7 @@ export class WebsiteSalesService {
     }
   }
 
-  // Permanently delete a single order from Sales and propagate deletion to Logistics
+  // Permanently delete a single order from Sales and propagate deletion to Logistics across all aliases
   async deleteSalesOrder(orderId: string): Promise<{
     success: boolean;
     orderId: string;
@@ -859,70 +982,88 @@ export class WebsiteSalesService {
     const cleanId = cleanOrderId(orderId);
     if (!cleanId) throw new Error('Invalid order ID provided for deletion');
 
+    const variants = getCustomerOrderIdentifierVariants(orderId);
+
     try {
-      // 1. Fetch matching sales_orders row from Supabase
+      // 1. Fetch matching sales_orders rows from Supabase using all canonical variants
       const { data: orderRows, error: fetchErr } = await supabase
         .from('sales_orders')
         .select('id, order_id, dispatch_status, extra_data')
         .eq('channel', 'WEBSITE')
-        .eq('order_id', cleanId);
+        .in('order_id', variants);
 
       if (fetchErr) {
         console.error('[Supabase Error] Table: sales_orders, Op: SELECT, Message:', fetchErr.message);
         throw new Error(`Failed to locate order in database: ${fetchErr.message}`);
       }
 
-      const existingOrder = orderRows && orderRows[0];
       let wasDispatched = false;
 
-      if (existingOrder) {
-        if (existingOrder.dispatch_status === 'DISPATCHED' || existingOrder.dispatch_status === 'DELIVERED') {
-          wasDispatched = true;
+      if (orderRows && orderRows.length > 0) {
+        for (const existingOrder of orderRows) {
+          if (existingOrder.dispatch_status === 'DISPATCHED' || existingOrder.dispatch_status === 'DELIVERED') {
+            wasDispatched = true;
+          }
+
+          // A. Delete child line items
+          await supabase
+            .from('sales_order_items')
+            .delete()
+            .eq('sales_order_id', existingOrder.id);
+
+          // B. Mark sales_orders as DELETED (tombstone)
+          const currentExtra = existingOrder.extra_data || {};
+          await supabase
+            .from('sales_orders')
+            .update({
+              order_status: 'DELETED',
+              dispatch_status: 'CANCELLED',
+              extra_data: {
+                ...currentExtra,
+                is_deleted: true,
+                deleted_at: new Date().toISOString(),
+                tombstone: true
+              }
+            })
+            .eq('id', existingOrder.id);
         }
 
-        // A. Delete child line items
-        const { error: itemErr } = await supabase
-          .from('sales_order_items')
-          .delete()
-          .eq('sales_order_id', existingOrder.id);
-
-        if (itemErr) {
-          console.error('[Supabase Error] Table: sales_order_items, Op: DELETE, Message:', itemErr.message);
-          throw new Error(`Failed to delete order items: ${itemErr.message}`);
-        }
-
-        // B. Mark sales_orders as DELETED (tombstone)
-        const currentExtra = existingOrder.extra_data || {};
-        const { error: updateErr } = await supabase
-          .from('sales_orders')
-          .update({
-            order_status: 'DELETED',
-            dispatch_status: 'CANCELLED',
-            extra_data: {
-              ...currentExtra,
-              is_deleted: true,
-              deleted_at: new Date().toISOString(),
-              tombstone: true
-            }
-          })
-          .eq('id', existingOrder.id);
-
-        if (updateErr) {
-          console.error('[Supabase Error] Table: sales_orders, Op: UPDATE, Message:', updateErr.message);
-          throw new Error(`Failed to update order status: ${updateErr.message}`);
-        }
-
-        // C. Clean up raw spreadsheet data
+        // C. Clean up raw spreadsheet data for all variants
         await supabase
           .from('sales_raw_data')
           .delete()
-          .eq('order_id', cleanId);
+          .in('order_id', variants);
       }
 
-      // 2. Propagate deletion to Logistics
+      // 2. Synchronize to Supabase customer_tracking_shipments:
+      // Archive / soft-delete any matching shipment record for this order and all its aliases
+      try {
+        for (const v of variants) {
+          await supabase
+            .from('customer_tracking_shipments')
+            .update({
+              status: 'Order Deleted',
+              raw_status: 'DELETED',
+              remarks: `Deleted from Sales (${new Date().toLocaleDateString('en-IN')})`,
+              updated_at: new Date().toISOString()
+            })
+            .or(`order_id.eq.${v},display_order_id.eq.${v}`);
+        }
+      } catch (sbLogErr) {
+        console.warn('Supabase customer_tracking_shipments soft-delete note:', sbLogErr);
+      }
+
+      // 3. Propagate deletion to Logistics Dexie
       const logRes = await deleteLogisticsOrderByOrderId(cleanId, 'Deleted from Sales');
       if (logRes.wasDispatched) {
         wasDispatched = true;
+      }
+
+      // 4. Dispatch live event
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('velmora:order_deleted', {
+          detail: { orderId: cleanId, variants, wasDispatched, timestamp: Date.now() }
+        }));
       }
 
       return {
@@ -960,17 +1101,19 @@ export class WebsiteSalesService {
   // Get dynamic shipment status counts directly from database & logistics
   async getShipmentStatusCounts(): Promise<ShipmentStatusCounts> {
     try {
-      const [totalRes, deliveredRes, dispatchedRes, unfulfilledRes] = await Promise.all([
-        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').neq('order_status', 'DELETED'),
-        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').neq('order_status', 'DELETED').eq('dispatch_status', 'DELIVERED'),
-        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').neq('order_status', 'DELETED').eq('dispatch_status', 'DISPATCHED'),
-        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').neq('order_status', 'DELETED').eq('dispatch_status', 'UNFULFILLED')
+      const [totalRes, deliveredRes, dispatchedRes, unfulfilledRes, cancelledRes] = await Promise.all([
+        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').neq('order_status', 'DELETED').neq('order_status', 'CANCELLED'),
+        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').neq('order_status', 'DELETED').neq('order_status', 'CANCELLED').eq('dispatch_status', 'DELIVERED'),
+        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').neq('order_status', 'DELETED').neq('order_status', 'CANCELLED').eq('dispatch_status', 'DISPATCHED'),
+        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').neq('order_status', 'DELETED').neq('order_status', 'CANCELLED').eq('dispatch_status', 'UNFULFILLED'),
+        supabase.from('sales_orders').select('*', { count: 'exact', head: true }).eq('channel', 'WEBSITE').eq('order_status', 'CANCELLED')
       ]);
 
       const all = totalRes.count ?? 0;
       let delivered = deliveredRes.count ?? 0;
       let inTransit = dispatchedRes.count ?? 0;
       let unfulfilled = unfulfilledRes.count ?? Math.max(0, all - delivered - inTransit);
+      let cancelled = cancelledRes.count ?? 0;
 
       let pendingAwb = unfulfilled;
       let readyToShip = unfulfilled;
@@ -1026,7 +1169,8 @@ export class WebsiteSalesService {
         readyForPickup,
         inTransit,
         rtoInTransit,
-        delivered
+        delivered,
+        cancelled
       };
     } catch (err) {
       console.error('Failed to get shipment status counts:', err);
@@ -1062,6 +1206,7 @@ export class WebsiteSalesService {
       query = query.or(`order_id.ilike.%${q}%,customer_name.ilike.%${q}%,phone.ilike.%${q}%`);
     }
 
+    // 1. General Date Range (Order Date)
     if (params.dateFrom && params.dateTo) {
       query = query.gte('order_date', params.dateFrom).lte('order_date', params.dateTo);
     } else if (params.dateFrom) {
@@ -1070,37 +1215,113 @@ export class WebsiteSalesService {
       query = query.lte('order_date', params.dateTo);
     }
 
-    if (params.paymentMode && params.paymentMode !== 'ALL') {
-      query = query.eq('payment_mode', params.paymentMode);
+    // 1b. Manifested Date (dispatch_date)
+    if (params.manifestDateFrom && params.manifestDateTo) {
+      query = query.gte('dispatch_date', params.manifestDateFrom).lte('dispatch_date', params.manifestDateTo);
+    } else if (params.manifestDateFrom) {
+      query = query.gte('dispatch_date', params.manifestDateFrom);
+    } else if (params.manifestDateTo) {
+      query = query.lte('dispatch_date', params.manifestDateTo);
     }
 
-    if (params.state && params.state !== 'ALL') {
-      query = query.ilike('state', `%${params.state}%`);
+    // 1c. Delivered Date
+    if (params.deliveredDateFrom && params.deliveredDateTo) {
+      query = query.gte('dispatch_date', params.deliveredDateFrom).lte('dispatch_date', params.deliveredDateTo);
+    } else if (params.deliveredDateFrom) {
+      query = query.gte('dispatch_date', params.deliveredDateFrom);
+    } else if (params.deliveredDateTo) {
+      query = query.lte('dispatch_date', params.deliveredDateTo);
     }
 
-    if (params.fulfillmentStatus && params.fulfillmentStatus !== 'ALL') {
-      const fs = params.fulfillmentStatus.toUpperCase();
-      if (fs === 'FULFILLED') {
-        query = query.eq('dispatch_status', 'DELIVERED');
-      } else if (fs === 'UNFULFILLED') {
-        query = query.eq('dispatch_status', 'UNFULFILLED');
+    // 2. Payment Modes Filter (Prepaid, COD, Partial COD)
+    const rawModes: string[] = [];
+    if (params.paymentModes && params.paymentModes.length > 0) {
+      rawModes.push(...params.paymentModes);
+    } else if (params.paymentMode && params.paymentMode.toUpperCase() !== 'ALL') {
+      rawModes.push(params.paymentMode);
+    }
+
+    if (rawModes.length > 0) {
+      const selectedDbModes = new Set<string>();
+      rawModes.forEach(m => {
+        const norm = m.trim().toUpperCase();
+        if (norm === 'PREPAID') {
+          selectedDbModes.add('PREPAID');
+        } else if (norm === 'PARTIAL COD' || norm === 'PARTIAL' || norm === 'PARTIAL_COD') {
+          selectedDbModes.add('PARTIAL COD');
+        } else if (norm === 'COD' || norm === 'FULL COD') {
+          selectedDbModes.add('COD');
+        }
+      });
+
+      const modesArr = Array.from(selectedDbModes);
+      // If user selected a proper subset of the 3 payment modes, apply exact in() filter
+      if (modesArr.length > 0 && modesArr.length < 3) {
+        query = query.in('payment_mode', modesArr);
       }
     }
 
-    if (params.shipmentStatus && params.shipmentStatus.toLowerCase() !== 'all shipments' && params.shipmentStatus.toUpperCase() !== 'ALL') {
-      const ss = params.shipmentStatus.trim().toLowerCase();
-      if (ss === 'delivered') {
-        query = query.eq('dispatch_status', 'DELIVERED');
-      } else if (ss === 'pending awb') {
-        query = query.eq('dispatch_status', 'UNFULFILLED');
-      } else if (ss === 'ready to ship') {
-        query = query.eq('dispatch_status', 'UNFULFILLED');
-      } else if (ss === 'in transit') {
-        query = query.eq('dispatch_status', 'DISPATCHED');
-      } else if (ss === 'rto - in transit') {
-        query = query.ilike('dispatch_status', '%RTO%');
-      } else if (ss === 'ready for pickup') {
-        query = query.ilike('dispatch_status', '%PICKUP%');
+    // 2b. Fulfillment Status Filter (Fulfilled, Unfulfilled) - kept distinct from courier dispatch_status!
+    const rawFulfillment: string[] = [];
+    if (params.fulfillmentStatuses && params.fulfillmentStatuses.length > 0) {
+      rawFulfillment.push(...params.fulfillmentStatuses);
+    } else if (params.fulfillmentStatus && params.fulfillmentStatus.toUpperCase() !== 'ALL') {
+      rawFulfillment.push(params.fulfillmentStatus);
+    }
+
+    if (rawFulfillment.length > 0) {
+      const norms = rawFulfillment.map(f => f.trim().toUpperCase());
+      const hasFulfilled = norms.includes('FULFILLED');
+      const hasUnfulfilled = norms.includes('UNFULFILLED');
+
+      const hasPartial = norms.includes('PARTIALLY FULFILLED') || norms.includes('PARTIAL');
+      if (hasFulfilled && !hasUnfulfilled && !hasPartial) {
+        query = query.eq('order_status', 'FULFILLED');
+      } else if (hasUnfulfilled && !hasFulfilled && !hasPartial) {
+        query = query.neq('order_status', 'FULFILLED').neq('order_status', 'PARTIAL_FULFILLED');
+      } else if (hasPartial && !hasFulfilled && !hasUnfulfilled) {
+        query = query.eq('order_status', 'PARTIAL_FULFILLED');
+      }
+    }
+
+    // 3. Zones / States Filter
+    if (params.zones && params.zones.length > 0) {
+      const zoneStates: string[] = [];
+      params.zones.forEach(z => {
+        if (z === 'Zone A') zoneStates.push('Tamil Nadu');
+        if (z === 'Zone B') zoneStates.push('Kerala', 'Karnataka', 'Andhra Pradesh', 'Telangana', 'Puducherry');
+        if (z === 'Zone C') zoneStates.push('Maharashtra', 'Delhi', 'Gujarat', 'West Bengal');
+        if (z === 'Zone D') zoneStates.push('Uttar Pradesh', 'Madhya Pradesh', 'Rajasthan', 'Punjab', 'Haryana', 'Bihar', 'Odisha');
+        if (z === 'Zone E') zoneStates.push('Assam', 'Jammu', 'Kashmir', 'Manipur', 'Meghalaya', 'Tripura', 'Nagaland');
+      });
+      if (zoneStates.length > 0) {
+        query = query.or(zoneStates.map(s => `state.ilike.%${s}%`).join(','));
+      }
+    } else if (params.state && params.state !== 'ALL') {
+      query = query.ilike('state', `%${params.state}%`);
+    }
+
+    const ss = (params.shipmentStatus || '').trim().toLowerCase();
+    const isCancelledSection = ss === 'cancelled orders' || ss === 'cancelled';
+
+    if (isCancelledSection) {
+      query = query.eq('order_status', 'CANCELLED');
+    } else {
+      query = query.neq('order_status', 'CANCELLED');
+      if (ss && ss !== 'all shipments' && ss !== 'all') {
+        if (ss === 'delivered') {
+          query = query.eq('dispatch_status', 'DELIVERED');
+        } else if (ss === 'pending awb') {
+          query = query.eq('dispatch_status', 'UNFULFILLED');
+        } else if (ss === 'ready to ship') {
+          query = query.eq('dispatch_status', 'UNFULFILLED');
+        } else if (ss === 'in transit') {
+          query = query.eq('dispatch_status', 'DISPATCHED');
+        } else if (ss === 'rto - in transit') {
+          query = query.ilike('dispatch_status', '%RTO%');
+        } else if (ss === 'ready for pickup') {
+          query = query.ilike('dispatch_status', '%PICKUP%');
+        }
       }
     }
 
@@ -1232,12 +1453,27 @@ export class WebsiteSalesService {
         conflict_details: extra.conflict_details || '',
         created_at: o.created_at,
         items,
-        fulfillment_status: extra.fulfillment_status || (o.dispatch_status === 'DELIVERED' ? 'fulfilled' : 'unfulfilled'),
+        fulfillment_status: o.order_status === 'CANCELLED' || extra.cancellation?.status === 'CANCELLED'
+          ? 'Cancelled'
+          : (normalizeShopifyFulfillmentStatus(extra.fulfillment_status) || 
+             (o.order_status === 'FULFILLED' || o.dispatch_status === 'DELIVERED' ? 'Fulfilled' : 
+              (o.order_status === 'PARTIAL_FULFILLED' ? 'Partially Fulfilled' : 'Unfulfilled'))),
         financial_status: extra.financial_status || (o.payment_mode === 'PREPAID' ? 'paid' : 'pending'),
         awb_number: awb,
         courier: courier,
         shipment_status: shipmentStatus,
-        fulfilled_date: extra.fulfilled_date || o.dispatch_date || ''
+        fulfilled_date: extra.fulfilled_date || o.dispatch_date || '',
+        order_status: o.order_status,
+        cancellation: extra.cancellation || (o.order_status === 'CANCELLED' ? {
+          status: 'CANCELLED',
+          reason: extra.cancellation_reason || 'Order cancelled',
+          notes: extra.cancellation_notes,
+          requested_by: extra.cancellation_requested_by || 'Sales Team',
+          requested_at: extra.cancellation_requested_at || o.updated_at || o.created_at,
+          confirmed_by: extra.cancellation_confirmed_by || 'Sales Team',
+          confirmed_at: extra.cancellation_confirmed_at || o.updated_at || o.created_at,
+          logistics_action: extra.logistics_action || 'CONFIRMED'
+        } : undefined)
       };
     });
 
@@ -1307,7 +1543,10 @@ export class WebsiteSalesService {
     const discountCode = raw0['Discount Code'] || raw0.discount_code || orderRow.offer || 'No Offer';
     const refundedAmount = Number(raw0['Refunded Amount'] || raw0.refunded_amount) || 0;
     const financialStatus = (raw0['Financial Status'] || orderRow.extra_data?.financial_status || (orderRow.payment_mode === 'PREPAID' ? 'paid' : 'pending')).toLowerCase();
-    const fulfillmentStatus = (raw0['Fulfillment Status'] || orderRow.extra_data?.fulfillment_status || (orderRow.dispatch_status === 'DELIVERED' ? 'fulfilled' : 'unfulfilled')).toLowerCase();
+    const isCancelledOrder = orderRow.order_status === 'CANCELLED' || Boolean(orderRow.extra_data?.cancellation);
+    const fulfillmentStatus = isCancelledOrder
+      ? 'cancelled'
+      : (raw0['Fulfillment Status'] || orderRow.extra_data?.fulfillment_status || (orderRow.dispatch_status === 'DELIVERED' ? 'fulfilled' : 'unfulfilled')).toLowerCase();
 
     // Map items with SKU and unit prices
     const items = (itemRows && itemRows.length > 0) ? itemRows.map((it: any, i: number) => {
@@ -1481,6 +1720,366 @@ export class WebsiteSalesService {
       timeline
     };
   }
+
+  // ==========================================
+  // ORDER CANCELLATION WORKFLOW METHODS
+  // ==========================================
+
+  // 1. Request or Confirm Cancellation (from Website Sales)
+  async cancelOrder(params: {
+    orderId: string;
+    reason: string;
+    notes?: string;
+    requestedBy?: string;
+  }): Promise<{ success: boolean; mode: 'DIRECT_CANCELLED' | 'REQUESTED_LOGISTICS'; message: string }> {
+    await this.checkAndMigrateLocalStorage();
+    const cleanId = cleanOrderId(params.orderId);
+    const requestedBy = params.requestedBy || 'Sales Team';
+    const now = new Date().toISOString();
+
+    if (!params.reason || !params.reason.trim()) {
+      throw new Error('A cancellation reason is required');
+    }
+
+    // Fetch existing order from Supabase
+    const { data: orderRow, error: fetchErr } = await supabase
+      .from('sales_orders')
+      .select('*')
+      .eq('channel', 'WEBSITE')
+      .or(`order_id.eq.${cleanId},order_id.eq.#${cleanId}`)
+      .neq('order_status', 'DELETED')
+      .single();
+
+    if (fetchErr || !orderRow) {
+      throw new Error(`Order #${cleanId} not found in database`);
+    }
+
+    if (orderRow.order_status === 'CANCELLED') {
+      throw new Error(`Order #${cleanId} is already cancelled`);
+    }
+
+    const extra = orderRow.extra_data || {};
+    if (extra.cancellation && extra.cancellation.status === 'PENDING_LOGISTICS_APPROVAL') {
+      throw new Error(`Order #${cleanId} already has an active pending cancellation request awaiting Logistics review`);
+    }
+
+    // Check courier & logistics status from Dexie and Supabase
+    let dexieOrder: any = null;
+    try {
+      dexieOrder = await db.logistics_orders.where('orderId').equalsIgnoreCase(cleanId).first();
+    } catch (e) {
+      // dexie fallback
+    }
+
+    const hasAwb = Boolean(orderRow.awb_number || extra.awb_number || dexieOrder?.awbNumber);
+    const isDelivered = orderRow.dispatch_status === 'DELIVERED' || dexieOrder?.status?.toLowerCase().includes('deliv');
+    const isDispatched = hasAwb || orderRow.dispatch_status === 'DISPATCHED' || dexieOrder?.stage === 'dispatched' || dexieOrder?.stage === 'tracking';
+
+    if (isDelivered) {
+      throw new Error(`Cannot cancel order #${cleanId} because it is already Delivered. Standard cancellation is prevented. Please direct customer to Returns & Refunds.`);
+    }
+
+    if (isDispatched) {
+      // Dispatched / In Transit / Manifested: Submit request for Logistics to review
+      const cancellationData: OrderCancellationData = {
+        status: 'PENDING_LOGISTICS_APPROVAL',
+        reason: params.reason,
+        notes: params.notes,
+        requested_by: requestedBy,
+        requested_at: now,
+        logistics_action: 'PENDING_REVIEW',
+        previous_fulfillment_status: extra.fulfillment_status || orderRow.order_status || 'unfulfilled',
+        previous_shipment_status: dexieOrder?.status || (hasAwb ? 'Dispatched' : 'Pending Manifest'),
+        audit_trail: [
+          ...(extra.cancellation?.audit_trail || []),
+          {
+            action: 'CANCELLATION_REQUESTED',
+            actor: requestedBy,
+            timestamp: now,
+            reason: params.reason,
+            notes: params.notes
+          }
+        ]
+      };
+
+      const updatedExtra = {
+        ...extra,
+        cancellation: cancellationData
+      };
+
+      const { error: updateErr } = await supabase
+        .from('sales_orders')
+        .update({
+          extra_data: updatedExtra,
+          updated_at: now
+        })
+        .eq('id', orderRow.id);
+
+      if (updateErr) {
+        throw new Error(`Failed to submit cancellation request: ${updateErr.message}`);
+      }
+
+      // Update Dexie logistics_orders
+      if (dexieOrder) {
+        await db.logistics_orders.update(dexieOrder.id!, {
+          cancellationStatus: 'Requested',
+          cancellationReason: params.reason,
+          cancellationNotes: params.notes,
+          cancellationRequestedAt: now,
+          cancellationRequestedBy: requestedBy,
+          remarks: `Cancellation Requested: ${params.reason}`
+        });
+      }
+
+      window.dispatchEvent(new CustomEvent('velmora:website_sales_updated', { detail: { orderId: cleanId } }));
+      window.dispatchEvent(new CustomEvent('velmora:logistics_order_updated', { detail: { orderId: cleanId } }));
+
+      return {
+        success: true,
+        mode: 'REQUESTED_LOGISTICS',
+        message: `Cancellation requested for Order #${cleanId}. Submitted to Logistics for shipment review.`
+      };
+    } else {
+      // Un-dispatched / Not manifested: Direct cancellation
+      const cancellationData: OrderCancellationData = {
+        status: 'CANCELLED',
+        reason: params.reason,
+        notes: params.notes,
+        requested_by: requestedBy,
+        requested_at: now,
+        confirmed_by: requestedBy,
+        confirmed_at: now,
+        logistics_action: 'CONFIRMED',
+        logistics_notes: 'Direct pre-dispatch cancellation',
+        previous_fulfillment_status: extra.fulfillment_status || orderRow.order_status || 'unfulfilled',
+        previous_shipment_status: dexieOrder?.status || 'Pending Manifest',
+        audit_trail: [
+          ...(extra.cancellation?.audit_trail || []),
+          {
+            action: 'DIRECT_CANCELLATION_CONFIRMED',
+            actor: requestedBy,
+            timestamp: now,
+            reason: params.reason,
+            notes: params.notes
+          }
+        ]
+      };
+
+      const updatedExtra = {
+        ...extra,
+        cancellation: cancellationData,
+        fulfillment_status: 'cancelled'
+      };
+
+      const { error: updateErr } = await supabase
+        .from('sales_orders')
+        .update({
+          order_status: 'CANCELLED',
+          dispatch_status: 'CANCELLED',
+          extra_data: updatedExtra,
+          updated_at: now
+        })
+        .eq('id', orderRow.id);
+
+      if (updateErr) {
+        throw new Error(`Failed to cancel order: ${updateErr.message}`);
+      }
+
+      // Update Dexie logistics_orders
+      if (dexieOrder) {
+        await db.logistics_orders.update(dexieOrder.id!, {
+          status: 'Cancelled',
+          stage: 'trash',
+          cancellationStatus: 'Completed',
+          remarks: `Order Cancelled: ${params.reason}`
+        });
+      }
+
+      window.dispatchEvent(new CustomEvent('velmora:website_sales_updated', { detail: { orderId: cleanId } }));
+      window.dispatchEvent(new CustomEvent('velmora:logistics_order_updated', { detail: { orderId: cleanId } }));
+
+      return {
+        success: true,
+        mode: 'DIRECT_CANCELLED',
+        message: `Order #${cleanId} cancelled successfully`
+      };
+    }
+  }
+
+  // 2. Logistics Confirms Cancellation
+  async confirmLogisticsCancellation(params: {
+    orderId: string;
+    confirmedBy?: string;
+    logisticsNotes?: string;
+  }): Promise<{ success: boolean; message: string }> {
+    const cleanId = cleanOrderId(params.orderId);
+    const confirmedBy = params.confirmedBy || 'Logistics Team';
+    const now = new Date().toISOString();
+
+    const { data: orderRow, error: fetchErr } = await supabase
+      .from('sales_orders')
+      .select('*')
+      .eq('channel', 'WEBSITE')
+      .or(`order_id.eq.${cleanId},order_id.eq.#${cleanId}`)
+      .neq('order_status', 'DELETED')
+      .single();
+
+    if (fetchErr || !orderRow) {
+      throw new Error(`Order #${cleanId} not found in database`);
+    }
+
+    const extra = orderRow.extra_data || {};
+    const existingCanc = extra.cancellation || {};
+
+    const updatedCancellation: OrderCancellationData = {
+      ...existingCanc,
+      status: 'CANCELLED',
+      reason: existingCanc.reason || 'Logistics confirmed cancellation',
+      requested_by: existingCanc.requested_by || 'Sales Team',
+      requested_at: existingCanc.requested_at || now,
+      confirmed_by: confirmedBy,
+      confirmed_at: now,
+      logistics_action: 'CONFIRMED',
+      logistics_notes: params.logisticsNotes || 'Shipment intercepted and confirmed cancelled by Logistics',
+      audit_trail: [
+        ...(existingCanc.audit_trail || []),
+        {
+          action: 'LOGISTICS_CONFIRMED_CANCELLATION',
+          actor: confirmedBy,
+          timestamp: now,
+          notes: params.logisticsNotes
+        }
+      ]
+    };
+
+    const updatedExtra = {
+      ...extra,
+      cancellation: updatedCancellation,
+      fulfillment_status: 'cancelled'
+    };
+
+    const { error: updateErr } = await supabase
+      .from('sales_orders')
+      .update({
+        order_status: 'CANCELLED',
+        dispatch_status: 'CANCELLED',
+        extra_data: updatedExtra,
+        updated_at: now
+      })
+      .eq('id', orderRow.id);
+
+    if (updateErr) {
+      throw new Error(`Failed to confirm cancellation: ${updateErr.message}`);
+    }
+
+    // Update Dexie
+    try {
+      const dexieOrder = await db.logistics_orders.where('orderId').equalsIgnoreCase(cleanId).first();
+      if (dexieOrder) {
+        await db.logistics_orders.update(dexieOrder.id!, {
+          status: 'Cancelled',
+          stage: 'trash',
+          cancellationStatus: 'Completed',
+          remarks: `Logistics Confirmed Cancellation: ${params.logisticsNotes || ''}`
+        });
+      }
+    } catch (e) {
+      // Dexie update fallback
+    }
+
+    window.dispatchEvent(new CustomEvent('velmora:website_sales_updated', { detail: { orderId: cleanId } }));
+    window.dispatchEvent(new CustomEvent('velmora:logistics_order_updated', { detail: { orderId: cleanId } }));
+
+    return {
+      success: true,
+      message: `Logistics confirmed cancellation for Order #${cleanId}`
+    };
+  }
+
+  // 3. Logistics Rejects Cancellation
+  async rejectLogisticsCancellation(params: {
+    orderId: string;
+    rejectedBy?: string;
+    rejectionReason: string;
+  }): Promise<{ success: boolean; message: string }> {
+    if (!params.rejectionReason || !params.rejectionReason.trim()) {
+      throw new Error('A rejection reason is required when rejecting cancellation');
+    }
+
+    const cleanId = cleanOrderId(params.orderId);
+    const rejectedBy = params.rejectedBy || 'Logistics Team';
+    const now = new Date().toISOString();
+
+    const { data: orderRow, error: fetchErr } = await supabase
+      .from('sales_orders')
+      .select('*')
+      .eq('channel', 'WEBSITE')
+      .or(`order_id.eq.${cleanId},order_id.eq.#${cleanId}`)
+      .neq('order_status', 'DELETED')
+      .single();
+
+    if (fetchErr || !orderRow) {
+      throw new Error(`Order #${cleanId} not found in database`);
+    }
+
+    const extra = orderRow.extra_data || {};
+    const existingCanc = extra.cancellation || {};
+
+    const updatedCancellation: OrderCancellationData = {
+      ...existingCanc,
+      status: 'REJECTED',
+      logistics_action: 'REJECTED',
+      logistics_notes: params.rejectionReason,
+      audit_trail: [
+        ...(existingCanc.audit_trail || []),
+        {
+          action: 'LOGISTICS_REJECTED_CANCELLATION',
+          actor: rejectedBy,
+          timestamp: now,
+          reason: params.rejectionReason
+        }
+      ]
+    };
+
+    const updatedExtra = {
+      ...extra,
+      cancellation: updatedCancellation
+    };
+
+    const { error: updateErr } = await supabase
+      .from('sales_orders')
+      .update({
+        extra_data: updatedExtra,
+        updated_at: now
+      })
+      .eq('id', orderRow.id);
+
+    if (updateErr) {
+      throw new Error(`Failed to reject cancellation: ${updateErr.message}`);
+    }
+
+    // Update Dexie
+    try {
+      const dexieOrder = await db.logistics_orders.where('orderId').equalsIgnoreCase(cleanId).first();
+      if (dexieOrder) {
+        await db.logistics_orders.update(dexieOrder.id!, {
+          cancellationStatus: 'Rejected',
+          remarks: `Cancellation Rejected by Logistics: ${params.rejectionReason}`
+        });
+      }
+    } catch (e) {
+      // Dexie update fallback
+    }
+
+    window.dispatchEvent(new CustomEvent('velmora:website_sales_updated', { detail: { orderId: cleanId } }));
+    window.dispatchEvent(new CustomEvent('velmora:logistics_order_updated', { detail: { orderId: cleanId } }));
+
+    return {
+      success: true,
+      message: `Cancellation rejected for Order #${cleanId}. Order remains in active workflow.`
+    };
+  }
+
 }
 
 export const websiteSalesService = new WebsiteSalesService();

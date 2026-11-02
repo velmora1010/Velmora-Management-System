@@ -33,7 +33,7 @@ import { OptionItem } from './components/MultiSelectDropdown';
 import { AnalyticsSegmentedControl, SegmentOption } from './components/AnalyticsSegmentedControl';
 import { AnalyticsDonutChart } from './components/AnalyticsDonutChart';
 import { CardMatchingOrdersList } from './components/CardMatchingOrdersList';
-import { CustomerProductAnalyticsSection } from './components/CustomerProductAnalyticsSection';
+import { CustomerRepeatAnalyticsDashboard } from '../../../components/analytics/CustomerRepeatAnalyticsDashboard';
 import { AnalyticsFullPageDataView, CustomerPurchaseProfile, OperationalOrderRecord } from './components/AnalyticsFullPageDataView';
 import { OrderDetailsModal } from './components/OrderDetailsModal';
 import { AnalyticsFilterDrawer } from './components/AnalyticsFilterDrawer';
@@ -116,7 +116,7 @@ const ANALYTICS_VIEW_OPTIONS = [
   { id: 'analytics-order-value', label: 'Order Value Distribution' },
   { id: 'analytics-order-composition', label: 'Order Composition' },
   { id: 'analytics-cod-receivable', label: 'COD Receivable Overview' },
-  { id: 'analytics-customer-product', label: 'Customer Product Analytics' }
+  { id: 'analytics-customer-repeat', label: 'Customer Repeat & Geographic' }
 ];
 
 const REVENUE_MIX_SEGMENTS: SegmentOption<'Payment Mode' | 'State' | 'Product' | 'Offer' | 'Order Value Range'>[] = [
@@ -244,15 +244,6 @@ export const WebsiteAnalytics: React.FC = () => {
       title,
       subtitle: `Viewing ${list.length} orders for ${title}`,
       orders: list
-    });
-  };
-
-  const handleOpenCustomersFullPage = (title: string, list: CustomerPurchaseProfile[]) => {
-    setFullPageView({
-      viewType: 'customers',
-      title,
-      subtitle: `Viewing ${list.length} customer profiles`,
-      customers: list
     });
   };
 
@@ -1930,12 +1921,11 @@ export const WebsiteAnalytics: React.FC = () => {
             <CardMatchingOrdersList onViewAll={handleOpenOrdersFullPage} title="COD Receivable Orders" orders={codMatchingOrders} onOrderDeleted={loadData} />
           </div>
 
-          {/* 9. CUSTOMER PRODUCT ANALYTICS */}
-          <CustomerProductAnalyticsSection
-            orders={filteredOrders}
-            onViewAllCustomers={handleOpenCustomersFullPage}
-            highlighted={highlightedSectionId === 'analytics-customer-product'}
-          />
+
+          {/* 9. CUSTOMER REPEAT & GEOGRAPHIC ANALYTICS */}
+          <div id="analytics-customer-repeat" className="scroll-mt-6">
+            <CustomerRepeatAnalyticsDashboard sourceChannel="WEBSITE" department="sales" />
+          </div>
         </>
       )}
 

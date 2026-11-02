@@ -402,3 +402,63 @@ export function formatDisplayOrderId(
 
   return `#${base}`;
 }
+
+/**
+ * Extracts canonical core base ID for customer sales orders.
+ * Handles prefixes like '#' and company/courier booking prefixes like 'JR', 'JR-', 'JR_'.
+ * Examples:
+ * - '#10781'   -> '10781'
+ * - 'JR10781'  -> '10781'
+ * - 'JR-10781' -> '10781'
+ * - '10781'    -> '10781'
+ */
+export function extractCustomerOrderBaseId(input?: string | null): string {
+  if (!input) return '';
+  const trimmed = String(input).trim().replace(/^#+/, '').trim();
+  const jrMatch = trimmed.match(/^JR[\-_]?(\d+)$/i);
+  if (jrMatch) {
+    return jrMatch[1];
+  }
+  return trimmed;
+}
+
+/**
+ * Returns all potential representations and aliases of a customer order ID
+ * across Sales, Logistics, and Courier exports.
+ */
+export function getCustomerOrderIdentifierVariants(input?: string | null): string[] {
+  if (!input) return [];
+  const raw = String(input).trim();
+  const withoutHash = raw.replace(/^#+/, '').trim();
+  const base = extractCustomerOrderBaseId(withoutHash);
+
+  const variants = new Set<string>();
+  if (raw) variants.add(raw);
+  if (withoutHash) variants.add(withoutHash);
+  if (base) {
+    variants.add(base);
+    variants.add(`#${base}`);
+    variants.add(`JR${base}`);
+    variants.add(`#JR${base}`);
+    variants.add(`JR-${base}`);
+    variants.add(`JR_${base}`);
+  }
+  return Array.from(variants);
+}
+
+/**
+ * Checks if two customer order identifiers refer to the same order.
+ * Strictly compares normalized unique identifiers (never customer name, phone, or amount).
+ */
+export function areCustomerOrdersMatching(idA?: string | null, idB?: string | null): boolean {
+  if (!idA || !idB) return false;
+  const cleanA = String(idA).trim().replace(/^#+/, '').toLowerCase();
+  const cleanB = String(idB).trim().replace(/^#+/, '').toLowerCase();
+  if (cleanA === cleanB) return true;
+
+  const baseA = extractCustomerOrderBaseId(cleanA).toLowerCase();
+  const baseB = extractCustomerOrderBaseId(cleanB).toLowerCase();
+  if (baseA && baseB && baseA === baseB) return true;
+
+  return false;
+}

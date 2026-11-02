@@ -317,8 +317,8 @@ export const LogisticsFilterToolbar: React.FC<LogisticsFilterToolbarProps> = ({
           </>
         )}
 
-        {/* SECTION 8: SHIPPED VIA THIRD PARTY -> Date Range, Pickup Location, Transport Mode, Payment Mode, All Filters */}
-        {section === 'third_party' && (
+        {/* SECTION 8: CANCELLED ORDERS -> Date Range, Pickup Location, Transport Mode, Payment Mode, All Filters */}
+        {(section === 'cancelled_orders' || section === 'third_party') && (
           <>
             <LogisticsDateDropdown
               label="Date Range"

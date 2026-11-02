@@ -22,7 +22,11 @@ import {
   Clock,
   Send,
   Layers,
-  SlidersHorizontal
+  SlidersHorizontal,
+  X,
+  ShieldAlert,
+  XCircle,
+  History
 } from 'lucide-react';
 import type { WebsiteConsolidatedOrder, ShipmentStatusCounts } from './types';
 import { websiteSalesService } from './websiteSalesService';
@@ -34,7 +38,22 @@ import {
   cleanOrderId
 } from './websiteSalesUtils';
 import { OrderDetailsModal } from './components/OrderDetailsModal';
+import { CancelOrderModal } from './components/CancelOrderModal';
+import { CancellationHistoryModal } from './components/CancellationHistoryModal';
 import toast from 'react-hot-toast';
+import { LogisticsFilterToolbar } from '../../Logistics/components/filters/LogisticsFilterToolbar';
+import { AllFiltersModal } from '../../Logistics/components/filters/AllFiltersModal';
+import { 
+  LogisticsFilterState, 
+  LogisticsSection, 
+  INITIAL_LOGISTICS_FILTER_STATE,
+  resolveDateRangeForPreset,
+  formatRangeDisplay
+} from '../../Logistics/types/logisticsFilters';
+import { BulkAwbSearchInput } from '../../Logistics/components/filters/BulkAwbSearchInput';
+import { LogisticsDateDropdown } from '../../Logistics/components/filters/LogisticsDateDropdown';
+import { WebsiteFulfillmentDropdown } from './components/WebsiteFulfillmentDropdown';
+import { WebsitePaymentDropdown } from './components/WebsitePaymentDropdown';
 
 export const WebsiteOrders: React.FC = () => {
   // Data State
@@ -58,14 +77,109 @@ export const WebsiteOrders: React.FC = () => {
     readyForPickup: 0,
     inTransit: 0,
     rtoInTransit: 0,
-    delivered: 0
+    delivered: 0,
+    cancelled: 0
   });
+
+  // Cancellation Modals State
+  const [cancellingOrder, setCancellingOrder] = useState<WebsiteConsolidatedOrder | null>(null);
+  const [historyOrder, setHistoryOrder] = useState<WebsiteConsolidatedOrder | null>(null);
 
   // Selected Order for Details View Modal
   const [selectedOrder, setSelectedOrder] = useState<WebsiteConsolidatedOrder | null>(null);
 
+  // Active Filter Controls State
+  const [fulfillmentStatuses, setFulfillmentStatuses] = useState<string[]>([]);
+  const [paymentModes, setPaymentModes] = useState<string[]>([]);
+
+  // Status-Specific Filter State
+  const [logisticsFilters, setLogisticsFilters] = useState<LogisticsFilterState>({
+    ...INITIAL_LOGISTICS_FILTER_STATE,
+    activeSection: 'all_shipments'
+  });
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [isAllFiltersModalOpen, setIsAllFiltersModalOpen] = useState<boolean>(false);
+
+  // Count active deep filters from AllFiltersModal
+  const activeDeepFilterCount = React.useMemo(() => {
+    let cnt = 0;
+    if (logisticsFilters.transportModes.length > 0) cnt++;
+    if (logisticsFilters.shipmentStatuses.length > 0) cnt++;
+    if (logisticsFilters.pickupLocations.length > 0) cnt++;
+    if (logisticsFilters.zones.length > 0) cnt++;
+    if (logisticsFilters.channels.length > 0) cnt++;
+    if (logisticsFilters.verifiedStatuses.length > 0) cnt++;
+    if (logisticsFilters.orderTags.length > 0) cnt++;
+    if (logisticsFilters.addressScores.length > 0) cnt++;
+    if (logisticsFilters.riskOfReturn.length > 0) cnt++;
+    return cnt;
+  }, [logisticsFilters]);
+
+  const hasAnyActiveFilter = 
+    fulfillmentStatuses.length > 0 ||
+    paymentModes.length > 0 ||
+    Boolean(searchTerm.trim()) ||
+    logisticsFilters.datePreset !== 'all' ||
+    Boolean(logisticsFilters.startDate) ||
+    activeDeepFilterCount > 0;
+
+  const handleClearAllFilters = () => {
+    setFulfillmentStatuses([]);
+    setPaymentModes([]);
+    setSearchTerm('');
+    setLogisticsFilters(prev => ({
+      ...INITIAL_LOGISTICS_FILTER_STATE,
+      activeSection: prev.activeSection
+    }));
+    setPage(1);
+    toast.success('All filters cleared');
+  };
+
+  // Status to Section Mapping
+  const statusToSectionMap: Record<string, LogisticsSection> = {
+    'Pending AWB': 'pending_awb',
+    'Ready to Ship': 'ready_to_ship',
+    'Ready for Pickup': 'ready_for_pickup',
+    'In Transit': 'in_transit',
+    'RTO - In Transit': 'rto_in_transit',
+    'Delivered': 'delivered',
+    'All Shipments': 'all_shipments',
+    'Cancelled Orders': 'cancelled_orders' as any
+  };
+
+  // Mapped orders for filter calculations
+  const mappedForFilters = React.useMemo(() => {
+    return orders.map(o => ({
+      id: o.order_id,
+      orderId: o.order_id,
+      displayOrderId: o.order_id,
+      customerName: o.customer_name,
+      phoneNumber: o.phone,
+      shippingAddress: o.address,
+      city: o.city,
+      state: o.state,
+      pincode: o.pincode,
+      amount: o.price || 0,
+      orderType: o.payment_mode,
+      paymentMode: o.payment_mode,
+      courier: o.courier || '',
+      awbNumber: o.awb_number || '',
+      status: o.shipment_status || 'Pending',
+      workflowStage: (o.fulfillment_status || 'unfulfilled').toLowerCase(),
+      orderDate: o.order_date
+    } as any));
+  }, [orders]);
+
   // Status Navigation Configuration (7 options as compact horizontal cards)
   const statusItems = [
+    {
+      id: 'All Shipments',
+      label: 'All Shipments',
+      count: statusCounts.all,
+      icon: Layers,
+      color: 'text-slate-300',
+      badgeBg: 'bg-slate-800 text-slate-300 border-slate-700'
+    },
     {
       id: 'Pending AWB',
       label: 'Pending AWB',
@@ -115,12 +229,12 @@ export const WebsiteOrders: React.FC = () => {
       badgeBg: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
     },
     {
-      id: 'All Shipments',
-      label: 'All Shipments',
-      count: statusCounts.all,
-      icon: Layers,
-      color: 'text-slate-300',
-      badgeBg: 'bg-slate-800 text-slate-300 border-slate-700'
+      id: 'Cancelled Orders',
+      label: 'Cancelled Orders',
+      count: statusCounts.cancelled || 0,
+      icon: ShieldAlert,
+      color: 'text-rose-400',
+      badgeBg: 'bg-rose-500/15 text-rose-300 border-rose-500/30'
     }
   ];
 
@@ -134,13 +248,55 @@ export const WebsiteOrders: React.FC = () => {
     }
   }, []);
 
-  // Fetch paginated orders from server filtered by selected status
+  // Fetch paginated orders from server filtered by selected status and filters
   const loadOrders = useCallback(async () => {
     setLoading(true);
     try {
+      let dateFrom = logisticsFilters.startDate;
+      let dateTo = logisticsFilters.endDate;
+      if (logisticsFilters.datePreset !== 'all' && logisticsFilters.datePreset !== 'custom') {
+        const r = resolveDateRangeForPreset(logisticsFilters.datePreset);
+        dateFrom = r.start;
+        dateTo = r.end;
+      }
+
+      let manifestFrom = logisticsFilters.manifestStartDate;
+      let manifestTo = logisticsFilters.manifestEndDate;
+      if (logisticsFilters.manifestDatePreset !== 'all' && logisticsFilters.manifestDatePreset !== 'custom') {
+        const rm = resolveDateRangeForPreset(logisticsFilters.manifestDatePreset);
+        manifestFrom = rm.start;
+        manifestTo = rm.end;
+      }
+
+      let deliveredFrom = logisticsFilters.deliveredStartDate;
+      let deliveredTo = logisticsFilters.deliveredEndDate;
+      if (logisticsFilters.deliveredDatePreset !== 'all' && logisticsFilters.deliveredDatePreset !== 'custom') {
+        const rd = resolveDateRangeForPreset(logisticsFilters.deliveredDatePreset);
+        deliveredFrom = rd.start;
+        deliveredTo = rd.end;
+      }
+
       const res = await websiteSalesService.getOrdersPaginated({
         page,
         pageSize,
+        search: searchTerm,
+        dateFrom,
+        dateTo,
+        manifestDateFrom: manifestFrom,
+        manifestDateTo: manifestTo,
+        deliveredDateFrom: deliveredFrom,
+        deliveredDateTo: deliveredTo,
+        paymentModes: paymentModes.length > 0 ? paymentModes : logisticsFilters.paymentModes,
+        fulfillmentStatuses: fulfillmentStatuses,
+        transportModes: logisticsFilters.transportModes,
+        shipmentModes: logisticsFilters.shipmentStatuses,
+        pickupLocations: logisticsFilters.pickupLocations,
+        riskOfReturn: logisticsFilters.riskOfReturn,
+        channels: logisticsFilters.channels,
+        verifiedStatuses: logisticsFilters.verifiedStatuses,
+        orderTags: logisticsFilters.orderTags,
+        addressScores: logisticsFilters.addressScores,
+        zones: logisticsFilters.zones,
         shipmentStatus: selectedStatus,
         sortBy: 'order_date',
         sortOrder: 'desc'
@@ -155,12 +311,22 @@ export const WebsiteOrders: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, selectedStatus]);
+  }, [page, pageSize, selectedStatus, logisticsFilters, searchTerm, fulfillmentStatuses, paymentModes]);
 
   // Initial load
   useEffect(() => {
     loadStatusCounts();
-  }, [loadStatusCounts]);
+    const handleUpdate = () => {
+      loadStatusCounts();
+      loadOrders();
+    };
+    window.addEventListener('velmora:order_cancelled', handleUpdate);
+    window.addEventListener('velmora:website_sales_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('velmora:order_cancelled', handleUpdate);
+      window.removeEventListener('velmora:website_sales_updated', handleUpdate);
+    };
+  }, [loadStatusCounts, loadOrders]);
 
   useEffect(() => {
     loadOrders();
@@ -223,64 +389,22 @@ export const WebsiteOrders: React.FC = () => {
   return (
     <div className="w-full space-y-4 animate-in fade-in duration-200">
       
-      {/* 1. TOP HEADER & METRIC BANNER */}
-      <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-md flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center shadow-inner">
-            <ShoppingBag size={20} />
-          </div>
-          <div>
-            <div className="flex items-center gap-2.5">
-              <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">
-                Website Sales Orders
-              </h2>
-              <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-mono font-bold text-xs border border-indigo-500/30">
-                {(statusCounts.all > 0 ? statusCounts.all : totalCount).toLocaleString('en-IN')} Total
-              </span>
-            </div>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Live orders repository synced from spreadsheet uploads and Logistics fulfillment.
-            </p>
-          </div>
-        </div>
-
-        {/* Action buttons: Export & Refresh */}
-        <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={() => handleExport('csv')}
-            disabled={isExporting || totalCount === 0}
-            className="h-[38px] px-3.5 bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl border border-slate-800 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm disabled:opacity-50"
-            title="Export filtered orders to CSV"
-          >
-            <Download size={13} className="text-indigo-400" />
-            <span>CSV</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleExport('xlsx')}
-            disabled={isExporting || totalCount === 0}
-            className="h-[38px] px-3.5 bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl border border-slate-800 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm disabled:opacity-50"
-            title="Export filtered orders to Excel"
-          >
-            <FileSpreadsheet size={13} className="text-emerald-400" />
-            <span>Excel</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              loadStatusCounts();
-              loadOrders();
-            }}
-            disabled={loading}
-            className="h-[38px] w-[38px] bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl border border-slate-800 transition-colors cursor-pointer flex items-center justify-center shrink-0 disabled:opacity-50 shadow-sm"
-            title="Refresh Orders"
-          >
-            <RefreshCw size={14} className={loading ? 'animate-spin text-purple-400' : ''} />
-          </button>
-        </div>
+      {/* 1. COMPACT HEADER AREA: Simplified layout with only the Refresh icon button aligned to the right */}
+      <div className="flex items-center justify-end -mb-1">
+        <button
+          type="button"
+          onClick={() => {
+            loadStatusCounts();
+            loadOrders();
+            toast.success('Orders refreshed');
+          }}
+          disabled={loading}
+          className="h-9 w-9 bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl border border-slate-800 transition-colors cursor-pointer flex items-center justify-center shrink-0 disabled:opacity-50 shadow-sm"
+          title="Refresh Orders"
+          aria-label="Refresh Orders"
+        >
+          <RefreshCw size={14} className={loading ? 'animate-spin text-purple-400' : ''} />
+        </button>
       </div>
 
       {/* 2. FULL-WIDTH HORIZONTAL SHIPMENT STATUS ROW */}
@@ -306,7 +430,7 @@ export const WebsiteOrders: React.FC = () => {
         </div>
 
         {/* 7 Horizontally Arranged Selectable Status Items */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2 sm:gap-2.5">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 sm:gap-2.5">
           {statusItems.map((item) => {
             const Icon = item.icon;
             const isActive = selectedStatus === item.id;
@@ -318,6 +442,21 @@ export const WebsiteOrders: React.FC = () => {
                 onClick={() => {
                   setSelectedStatus(item.id);
                   setPage(1);
+                  const sec = statusToSectionMap[item.id] || 'all_shipments';
+                  setLogisticsFilters(prev => ({
+                    ...prev,
+                    activeSection: sec,
+                    shipmentStatuses: [],
+                    manifestStartDate: '',
+                    manifestEndDate: '',
+                    manifestDatePreset: 'all',
+                    deliveredStartDate: '',
+                    deliveredEndDate: '',
+                    deliveredDatePreset: 'all',
+                    returnedStartDate: '',
+                    returnedEndDate: '',
+                    returnedDatePreset: 'all'
+                  }));
                 }}
                 className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-xs transition-all cursor-pointer border ${
                   isActive
@@ -343,18 +482,181 @@ export const WebsiteOrders: React.FC = () => {
         </div>
       </div>
 
-      {/* 3. CLEAN EMPTY PLACEHOLDER FILTER AREA */}
-      <div className="min-h-[48px] px-4 py-3 rounded-2xl bg-slate-900/60 border border-slate-800/80 shadow-sm flex items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-2.5 text-slate-500">
-          <SlidersHorizontal size={14} className="text-slate-500" />
-          <span className="italic">Filter controls placeholder — filters will be configured later</span>
+      {/* 3. FUNCTIONAL FILTER TOOLBAR BELOW SHIPMENT STATUS */}
+      <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-md space-y-3">
+        {/* Main Toolbar Row: Search, Date Range, Fulfillment Status, Payment Mode, All Filters */}
+        <div className="flex flex-wrap items-center gap-2.5 w-full">
+          {/* Search Input with Mode Selector */}
+          <div className="w-full sm:w-64 md:w-72 shrink-0">
+            <BulkAwbSearchInput
+              searchMode={logisticsFilters.searchMode}
+              onSearchModeChange={mode => setLogisticsFilters(prev => ({ ...prev, searchMode: mode }))}
+              searchTerm={searchTerm}
+              onSearchTermChange={val => {
+                setSearchTerm(val);
+                setPage(1);
+              }}
+              bulkAwbs={logisticsFilters.bulkAwbs}
+              onBulkAwbsChange={awbs => setLogisticsFilters(prev => ({ ...prev, bulkAwbs: awbs }))}
+            />
+          </div>
+
+          {/* Date Range Dropdown */}
+          <LogisticsDateDropdown
+            label="Date Range"
+            preset={logisticsFilters.datePreset}
+            startDate={logisticsFilters.startDate}
+            endDate={logisticsFilters.endDate}
+            onApply={data => {
+              setLogisticsFilters(prev => ({
+                ...prev,
+                datePreset: data.preset,
+                startDate: data.startDate,
+                endDate: data.endDate
+              }));
+              setPage(1);
+            }}
+            onClear={() => {
+              setLogisticsFilters(prev => ({
+                ...prev,
+                datePreset: 'all',
+                startDate: '',
+                endDate: ''
+              }));
+              setPage(1);
+            }}
+          />
+
+          {/* 1. Fulfillment Status Filter (Fulfilled, Unfulfilled) */}
+          <WebsiteFulfillmentDropdown
+            selectedStatuses={fulfillmentStatuses}
+            onChange={statuses => {
+              setFulfillmentStatuses(statuses);
+              setPage(1);
+            }}
+          />
+
+          {/* 2. Payment Mode Filter (Prepaid, COD, Partial COD) */}
+          <WebsitePaymentDropdown
+            selectedModes={paymentModes}
+            onChange={modes => {
+              setPaymentModes(modes);
+              setLogisticsFilters(prev => ({ ...prev, paymentModes: modes }));
+              setPage(1);
+            }}
+          />
+
+          {/* All Filters Button */}
+          <button
+            type="button"
+            onClick={() => setIsAllFiltersModalOpen(true)}
+            className={`h-9 px-3 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition-all cursor-pointer shadow-sm ml-auto ${
+              activeDeepFilterCount > 0
+                ? 'bg-purple-950/70 border-purple-500 text-white'
+                : 'bg-[#0e1626] border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
+            }`}
+            title="Open comprehensive filters"
+          >
+            <SlidersHorizontal size={13} className={activeDeepFilterCount > 0 ? 'text-purple-400' : 'text-slate-400'} />
+            <span>All filters</span>
+            {activeDeepFilterCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-purple-500 text-white font-mono text-[10px] font-bold">
+                {activeDeepFilterCount}
+              </span>
+            )}
+          </button>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="text-[11px] text-slate-400">Viewing:</span>
-          <span className="px-2 py-0.5 rounded-lg bg-indigo-500/20 text-indigo-300 font-semibold border border-indigo-500/30 text-xs">
-            {selectedStatus} ({totalCount.toLocaleString('en-IN')})
-          </span>
-        </div>
+
+        {/* Active Filter Chips & Clear All Row */}
+        {hasAnyActiveFilter && (
+          <div className="flex items-center gap-2 pt-2.5 border-t border-slate-800/80 flex-wrap text-xs">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 shrink-0">
+              <SlidersHorizontal size={12} /> Active Filters:
+            </span>
+
+            {/* Date Range Chip */}
+            {(logisticsFilters.datePreset !== 'all' || logisticsFilters.startDate) && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-950/60 border border-cyan-700/50 text-cyan-200 text-xs shrink-0">
+                <span>Date: {formatRangeDisplay(logisticsFilters.startDate, logisticsFilters.endDate)}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLogisticsFilters(prev => ({ ...prev, datePreset: 'all', startDate: '', endDate: '' }));
+                    setPage(1);
+                  }}
+                  className="hover:text-white cursor-pointer ml-0.5"
+                  title="Remove date filter"
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            )}
+
+            {/* Fulfillment Status Chips */}
+            {fulfillmentStatuses.map(status => (
+              <span key={status} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-950/60 border border-indigo-700/50 text-indigo-200 text-xs shrink-0">
+                <span>Fulfillment: {status}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFulfillmentStatuses(prev => prev.filter(s => s !== status));
+                    setPage(1);
+                  }}
+                  className="hover:text-white cursor-pointer ml-0.5"
+                  title={`Remove ${status} fulfillment filter`}
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+
+            {/* Payment Mode Chips */}
+            {paymentModes.map(mode => (
+              <span key={mode} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-950/60 border border-purple-700/50 text-purple-200 text-xs shrink-0">
+                <span>Payment: {mode}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPaymentModes(prev => prev.filter(m => m !== mode));
+                    setLogisticsFilters(prev => ({ ...prev, paymentModes: prev.paymentModes.filter(m => m !== mode) }));
+                    setPage(1);
+                  }}
+                  className="hover:text-white cursor-pointer ml-0.5"
+                  title={`Remove ${mode} payment filter`}
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+
+            {/* Search Query Chip */}
+            {searchTerm.trim() && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 text-xs shrink-0">
+                <span>Search: "{searchTerm}"</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchTerm('');
+                    setPage(1);
+                  }}
+                  className="hover:text-white cursor-pointer ml-0.5"
+                  title="Clear search query"
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            )}
+
+            {/* Clear All button */}
+            <button
+              type="button"
+              onClick={handleClearAllFilters}
+              className="text-[11px] text-rose-400 hover:text-rose-300 underline font-medium ml-auto cursor-pointer pl-2 shrink-0"
+            >
+              Clear All
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 4. FULL-WIDTH ORDERS DATA TABLE */}
@@ -392,16 +694,38 @@ export const WebsiteOrders: React.FC = () => {
                   <th className="py-3 px-4">Customer</th>
                   <th className="py-3 px-4">Products & Items</th>
                   <th className="py-3 px-4">Financials & Payment</th>
-                  <th className="py-3 px-4">Fulfillment / Shipment</th>
-                  <th className="py-3 px-4 text-center">Actions</th>
+                  {selectedStatus === 'Cancelled Orders' ? (
+                    <>
+                      <th className="py-3 px-4">Cancellation Details</th>
+                      <th className="py-3 px-4">Prior Status</th>
+                      <th className="py-3 px-4 text-center">Actions</th>
+                    </>
+                  ) : (
+                    <>
+                      <th className="py-3 px-4">Fulfillment / Shipment</th>
+                      <th className="py-3 px-4 text-center">Actions</th>
+                      <th className="py-3 px-4 text-center">Cancel Order</th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 text-xs">
                 {orders.map((o) => {
                   const displayPhone = formatPhoneNumber(o.phone);
                   const isMulti = o.items && o.items.length > 1;
-                  const fStatus = (o.fulfillment_status || '').toLowerCase();
-                  const isFulfilled = fStatus.includes('deliv') || fStatus.includes('fulfill') || fStatus.includes('ship');
+                  const isCancelledOrder = o.order_status === 'CANCELLED' || o.cancellation?.status === 'CANCELLED' || (o.fulfillment_status || '').toLowerCase().trim() === 'cancelled';
+                  const rawFulfillment = (o.fulfillment_status || '').toLowerCase().trim();
+                  const rawDispatch = (o.dispatch_status || '').toUpperCase().trim();
+                  const isFulfilled = !isCancelledOrder && (
+                    rawFulfillment === 'fulfilled' || 
+                    rawFulfillment === 'shipped' || 
+                    o.order_status === 'FULFILLED' ||
+                    rawDispatch === 'DELIVERED'
+                  );
+                  const isPartiallyFulfilled = !isCancelledOrder && !isFulfilled && (
+                    rawFulfillment.includes('partial')
+                  );
+                  const isUnfulfilled = !isCancelledOrder && !isFulfilled && !isPartiallyFulfilled;
 
                   return (
                     <tr 
@@ -495,11 +819,21 @@ export const WebsiteOrders: React.FC = () => {
                       <td className="py-3.5 px-4 space-y-1">
                         <div className="flex items-center gap-1.5">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                            isFulfilled
+                            isCancelledOrder
+                              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                              : isFulfilled
                               ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                              : 'bg-slate-800 text-slate-400 border border-slate-700'
+                              : isPartiallyFulfilled
+                              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                              : 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
                           }`}>
-                            {o.fulfillment_status || 'Unfulfilled'}
+                            {isCancelledOrder 
+                              ? 'Cancelled' 
+                              : (isFulfilled 
+                                  ? 'Fulfilled' 
+                                  : (isPartiallyFulfilled 
+                                      ? 'Partially Fulfilled' 
+                                      : (o.fulfillment_status || 'Unfulfilled')))}
                           </span>
                         </div>
                         {o.awb_number ? (
@@ -514,20 +848,133 @@ export const WebsiteOrders: React.FC = () => {
                         )}
                       </td>
 
-                      {/* 6. ACTIONS */}
-                      <td className="py-3.5 px-4 text-center">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedOrder(o);
-                          }}
-                          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl border border-slate-700/80 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 mx-auto shadow-sm"
-                        >
-                          <Eye size={13} className="text-purple-400" />
-                          <span>Details</span>
-                        </button>
-                      </td>
+                      {/* 5 & 6. CONDITIONAL COLUMNS BASED ON CANCELLED ORDERS VIEW */}
+                      {selectedStatus === 'Cancelled Orders' ? (
+                        <>
+                          {/* CANCELLATION DETAILS */}
+                          <td className="py-3.5 px-4 space-y-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                                {o.cancellation?.reason || 'Customer / Internal Cancellation'}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-400">
+                              <span>Req: {o.cancellation?.requested_by || 'Sales'}</span>
+                              {o.cancellation?.requested_at && (
+                                <span className="ml-1 text-slate-500 font-mono">
+                                  ({new Date(o.cancellation.requested_at).toLocaleDateString()})
+                                </span>
+                              )}
+                            </div>
+                            {o.cancellation?.confirmed_by && (
+                              <div className="text-[10px] text-slate-500">
+                                Intercepted: <span className="text-emerald-400">{o.cancellation.confirmed_by}</span>
+                              </div>
+                            )}
+                          </td>
+
+                          {/* PRIOR STATUS */}
+                          <td className="py-3.5 px-4 space-y-1">
+                            <div className="text-[11px] text-slate-300">
+                              Fulfill: <span className="font-semibold text-slate-200">{o.cancellation?.previous_fulfillment_status || o.fulfillment_status || 'Unfulfilled'}</span>
+                            </div>
+                            <div className="text-[10px] text-slate-400">
+                              Ship: {o.cancellation?.previous_shipment_status || o.shipment_status || 'None'}
+                              {o.awb && <span className="font-mono ml-1 text-cyan-400">({o.awb})</span>}
+                            </div>
+                          </td>
+
+                          {/* ACTIONS */}
+                          <td className="py-3.5 px-4 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedOrder(o);
+                                }}
+                                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl border border-slate-700/80 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1 shadow-sm"
+                                title="View Order Details"
+                              >
+                                <Eye size={12} className="text-purple-400" />
+                                <span>Details</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setHistoryOrder(o);
+                                }}
+                                className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 hover:text-white rounded-xl border border-rose-500/30 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1 shadow-sm"
+                                title="View Cancellation Audit History"
+                              >
+                                <History size={12} className="text-rose-400" />
+                                <span>History</span>
+                              </button>
+                            </div>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          {/* 6. ACTIONS */}
+                          <td className="py-3.5 px-4 text-center">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedOrder(o);
+                              }}
+                              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl border border-slate-700/80 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 mx-auto shadow-sm"
+                            >
+                              <Eye size={13} className="text-purple-400" />
+                              <span>Details</span>
+                            </button>
+                          </td>
+
+                          {/* 7. CANCEL ORDER COLUMN */}
+                          <td className="py-3.5 px-4 text-center" onClick={(e) => e.stopPropagation()}>
+                            {isCancelledOrder ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                                  Cancelled
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setHistoryOrder(o)}
+                                  className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+                                  title="View Cancellation Audit Trail"
+                                >
+                                  <History size={13} className="text-rose-400" />
+                                </button>
+                              </div>
+                            ) : o.cancellation?.status === 'PENDING_LOGISTICS_APPROVAL' ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center gap-1" title="Cancellation awaiting Logistics verification">
+                                  <Clock size={10} /> Pending
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setHistoryOrder(o)}
+                                  className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+                                  title="View Cancellation Status"
+                                >
+                                  <History size={13} className="text-amber-400" />
+                                </button>
+                              </div>
+                            ) : isUnfulfilled ? (
+                              <button
+                                type="button"
+                                onClick={() => setCancellingOrder(o)}
+                                className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 hover:text-rose-200 rounded-xl border border-rose-500/30 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 mx-auto shadow-sm"
+                                title="Cancel this order"
+                              >
+                                <XCircle size={13} className="text-rose-400" />
+                                <span>Cancel</span>
+                              </button>
+                            ) : null}
+                          </td>
+                        </>
+                      )}
                     </tr>
                   );
                 })}
@@ -608,6 +1055,19 @@ export const WebsiteOrders: React.FC = () => {
       </div>
 
       {/* 5. ORDER DETAILS DEDICATED MODAL */}
+            {/* 5. ALL FILTERS CATEGORY PANEL MODAL */}
+      <AllFiltersModal
+        isOpen={isAllFiltersModalOpen}
+        onClose={() => setIsAllFiltersModalOpen(false)}
+        filters={logisticsFilters}
+        onApply={(nextFilters) => {
+          setLogisticsFilters(nextFilters);
+          setIsAllFiltersModalOpen(false);
+          setPage(1);
+        }}
+        orders={mappedForFilters}
+      />
+
       <OrderDetailsModal
         order={selectedOrder}
         onClose={() => setSelectedOrder(null)}
@@ -616,6 +1076,24 @@ export const WebsiteOrders: React.FC = () => {
           loadStatusCounts();
           loadOrders();
         }}
+      />
+
+      {/* CANCEL ORDER WORKFLOW MODAL */}
+      <CancelOrderModal
+        isOpen={Boolean(cancellingOrder)}
+        order={cancellingOrder}
+        onClose={() => setCancellingOrder(null)}
+        onSuccess={() => {
+          loadStatusCounts();
+          loadOrders();
+        }}
+      />
+
+      {/* CANCELLATION AUDIT HISTORY MODAL */}
+      <CancellationHistoryModal
+        isOpen={Boolean(historyOrder)}
+        order={historyOrder}
+        onClose={() => setHistoryOrder(null)}
       />
 
     </div>

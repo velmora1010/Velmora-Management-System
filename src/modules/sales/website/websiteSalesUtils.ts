@@ -15,6 +15,7 @@ import {
   CITY_ALIASES,
   STATE_ALIASES,
 } from '../../../data/indiaLocations';
+import { normalizeShopifyFulfillmentStatus } from '../../../utils/logisticsOrderUtils';
 
 // ============================================================================
 // 1. COLUMN MATCHING UTILITIES WITH PRECISE HEADER DETECTION
@@ -314,7 +315,186 @@ export function detectColumnMapping(headers: string[]): ColumnMapping {
     }
   }
 
+  // 18. CANCELLED AT / CANCELLATION DATE DETECTION
+  const cancelledAtCandidates = [
+    'cancelled at', 'cancelled_at', 'cancelledat',
+    'canceled at', 'canceled_at', 'canceledat',
+    'cancelled date', 'cancellation date', 'cancelled_date', 'cancelled on', 'canceled on'
+  ];
+  for (const candidate of cancelledAtCandidates) {
+    const idx = lowerHeaders.findIndex(h => h === candidate);
+    if (idx !== -1) {
+      mapping.cancelledAt = cleanHeaders[idx];
+      break;
+    }
+  }
+
+  // 19. CANCEL REASON DETECTION
+  const cancelReasonCandidates = [
+    'cancel reason', 'cancel_reason', 'cancelreason',
+    'cancelled reason', 'cancelled_reason',
+    'canceled reason', 'canceled_reason',
+    'cancellation reason', 'cancellation_reason'
+  ];
+  for (const candidate of cancelReasonCandidates) {
+    const idx = lowerHeaders.findIndex(h => h === candidate);
+    if (idx !== -1) {
+      mapping.cancelReason = cleanHeaders[idx];
+      break;
+    }
+  }
+
+  // 20. ORDER STATUS DETECTION
+  const orderStatusCandidates = [
+    'order status', 'order_status', 'orderstatus', 'status'
+  ];
+  for (const candidate of orderStatusCandidates) {
+    const idx = lowerHeaders.findIndex(h => h === candidate);
+    if (idx !== -1) {
+      mapping.orderStatus = cleanHeaders[idx];
+      break;
+    }
+  }
+
   return mapping;
+}
+
+/**
+ * Robust detection of cancellation indicators in raw order rows.
+ * Supports Shopify "Cancelled at", Delhivery/Marketplace "Status" variations,
+ * and explicit cancellation reason fields.
+ */
+export function detectOrderCancellationFromRaw(
+  rows: (WebsiteRawOrderRow | any)[],
+  mapping?: ColumnMapping
+): {
+  isCancelled: boolean;
+  cancelledAt?: string;
+  cancelReason?: string;
+  sourceIndicator?: string;
+} {
+  const CANCELLED_KEYWORDS = [
+    'cancelled',
+    'canceled',
+    'cancellation',
+    'cancelled by customer',
+    'canceled by customer',
+    'cancelled by seller',
+    'canceled by seller',
+    'order cancelled',
+    'order canceled',
+    'void',
+    'voided'
+  ];
+
+  for (const r of rows) {
+    const obj = r.raw_data || r;
+
+    // 1. Check explicit Cancelled at / Canceled at date/timestamp field (e.g. Shopify 'Cancelled at')
+    const cancelledAtCandidates = [
+      mapping?.cancelledAt,
+      'Cancelled at',
+      'Cancelled At',
+      'cancelled_at',
+      'Canceled at',
+      'Canceled At',
+      'canceled_at',
+      'Cancelled Date',
+      'Cancellation Date',
+      'cancelled_date'
+    ].filter(Boolean) as string[];
+
+    for (const key of cancelledAtCandidates) {
+      if (obj[key] !== undefined && obj[key] !== null) {
+        const val = String(obj[key]).trim();
+        if (val && val !== '-' && val !== 'null' && val !== 'undefined') {
+          const reasonKeyCandidates = [
+            mapping?.cancelReason,
+            'Cancel Reason',
+            'Cancel reason',
+            'cancel_reason',
+            'Cancelled Reason',
+            'Cancelled reason',
+            'Canceled Reason',
+            'Cancellation Reason',
+            'cancellation_reason'
+          ].filter(Boolean) as string[];
+
+          let reason = '';
+          for (const rk of reasonKeyCandidates) {
+            if (obj[rk] && String(obj[rk]).trim()) {
+              reason = String(obj[rk]).trim();
+              break;
+            }
+          }
+
+          return {
+            isCancelled: true,
+            cancelledAt: val,
+            cancelReason: reason || 'Cancelled in source export (Shopify)',
+            sourceIndicator: `${key}: ${val}`
+          };
+        }
+      }
+    }
+
+    // 2. Check Order Status / Shipment Status / Fulfillment Status for explicit cancellation words
+    const statusFieldCandidates = [
+      mapping?.orderStatus,
+      'Order Status',
+      'order_status',
+      'OrderStatus',
+      'Status',
+      'status',
+      'Shipment Status',
+      'shipment_status',
+      mapping?.fulfillmentStatus,
+      'Fulfillment Status',
+      'fulfillment_status'
+    ].filter(Boolean) as string[];
+
+    for (const key of statusFieldCandidates) {
+      if (obj[key] !== undefined && obj[key] !== null) {
+        const rawVal = String(obj[key]).trim().toLowerCase();
+        const isMatch = CANCELLED_KEYWORDS.some(kw => 
+          rawVal === kw || 
+          rawVal.startsWith(kw) || 
+          (rawVal.includes('cancel') && !rawVal.includes('uncancel'))
+        );
+
+        if (isMatch) {
+          const reasonCandidates = [
+            mapping?.cancelReason,
+            'Cancel Reason',
+            'cancel_reason',
+            'Cancelled Reason',
+            'Cancellation Reason',
+            'Remarks',
+            'remarks',
+            'Reason',
+            'reason'
+          ].filter(Boolean) as string[];
+
+          let reason = '';
+          for (const rk of reasonCandidates) {
+            if (obj[rk] && String(obj[rk]).trim()) {
+              reason = String(obj[rk]).trim();
+              break;
+            }
+          }
+
+          return {
+            isCancelled: true,
+            cancelledAt: obj['Cancelled at'] || obj['cancelled_at'] || undefined,
+            cancelReason: reason || `Cancelled in source upload (${obj[key]})`,
+            sourceIndicator: `${key}: ${obj[key]}`
+          };
+        }
+      }
+    }
+  }
+
+  return { isCancelled: false };
 }
 
 // ============================================================================
@@ -1126,23 +1306,35 @@ export function consolidateRawRows(
       quantity: productQtyMap.get(prod)!
     }));
 
+    const cancellationInfo = detectOrderCancellationFromRaw(rows, mapping);
+    const isCancelled = cancellationInfo.isCancelled;
+
     let rawFulfillmentStatus = getFirstVal(mapping.fulfillmentStatus);
     if (!rawFulfillmentStatus) {
       for (const r of rows) {
         const obj = r.raw_data || r;
-        const candidate = obj['Fulfillment Status'] || obj['fulfillment_status'] || obj['Lineitem fulfillment status'] || '';
+        const candidate = obj['Fulfillment Status'] || obj['fulfillment_status'] || obj['Fulfilment Status'] || obj['Lineitem fulfillment status'] || '';
         if (candidate && String(candidate).trim()) {
           rawFulfillmentStatus = String(candidate).trim();
           break;
         }
       }
     }
-    const fulfillmentStatus = rawFulfillmentStatus ? rawFulfillmentStatus.toLowerCase().trim() : '';
+
+    const normalizedFulfillment = normalizeShopifyFulfillmentStatus(rawFulfillmentStatus);
     const rawFinancialStatus = getFirstVal(mapping.financialStatus);
     const financialStatus = rawFinancialStatus ? rawFinancialStatus.toLowerCase().trim() : '';
     const rawAwb = getFirstVal(mapping.awbNumber);
     const rawCourier = getFirstVal(mapping.courier);
-    const isFulfilled = fulfillmentStatus === 'fulfilled' || fulfillmentStatus === 'shipped' || fulfillmentStatus === 'delivered';
+    
+    // Financial status pending just means payment pending (e.g. COD), NEVER unfulfilled!
+    // Fulfillment status must remain strictly independent of financial status.
+    const isFulfilled = !isCancelled && (normalizedFulfillment === 'Fulfilled' || rawFulfillmentStatus?.toLowerCase().trim() === 'fulfilled');
+    const isPartiallyFulfilled = !isCancelled && (normalizedFulfillment === 'Partially Fulfilled');
+
+    const fulfillmentStatus = isCancelled 
+      ? 'Cancelled' 
+      : (normalizedFulfillment || 'Unfulfilled');
 
     const orderRecord: WebsiteConsolidatedOrder = {
       id: crypto.randomUUID(),
@@ -1171,11 +1363,32 @@ export function consolidateRawRows(
       conflict_details: conflictDetails || undefined,
       created_at: new Date().toISOString(),
       items: orderItems,
-      fulfillment_status: fulfillmentStatus || undefined,
-      financial_status: financialStatus || undefined,
+      order_status: isCancelled ? 'CANCELLED' : (isFulfilled ? 'FULFILLED' : (isPartiallyFulfilled ? 'PARTIAL_FULFILLED' : 'CONFIRMED')),
+      fulfillment_status: isCancelled ? 'Cancelled' : fulfillmentStatus,
+      financial_status: financialStatus || (paymentMode === 'PREPAID' ? 'paid' : 'pending'),
       awb_number: rawAwb || undefined,
       courier: rawCourier || undefined,
-      fulfilled_date: isFulfilled ? orderDate : undefined
+      fulfilled_date: isFulfilled ? orderDate : undefined,
+      cancellation: isCancelled ? {
+        status: 'CANCELLED',
+        reason: cancellationInfo.cancelReason || 'Cancelled in source export (Shopify)',
+        cancelled_at: cancellationInfo.cancelledAt || new Date().toISOString(),
+        requested_at: cancellationInfo.cancelledAt || new Date().toISOString(),
+        requested_by: 'Source Upload (Shopify)',
+        confirmed_at: cancellationInfo.cancelledAt || new Date().toISOString(),
+        confirmed_by: 'Source System',
+        logistics_action: 'CONFIRMED',
+        previous_fulfillment_status: rawFulfillmentStatus || 'unfulfilled',
+        previous_shipment_status: rawAwb ? 'Dispatched' : 'Not manifested',
+        source_indicator: cancellationInfo.sourceIndicator,
+        audit_trail: [{
+          action: 'CANCELLED',
+          performed_by: 'Source Upload (Shopify)',
+          timestamp: cancellationInfo.cancelledAt || new Date().toISOString(),
+          reason: cancellationInfo.cancelReason || 'Explicit source cancellation indicator',
+          details: { source_indicator: cancellationInfo.sourceIndicator }
+        }]
+      } : undefined
     };
 
     consolidatedOrders.push(orderRecord);

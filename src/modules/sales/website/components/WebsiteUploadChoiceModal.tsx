@@ -102,7 +102,7 @@ export const WebsiteUploadChoiceModal: React.FC<WebsiteUploadChoiceModalProps> =
                     Delhivery One Upload
                   </h3>
                   <span className="px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 text-[10px] font-bold uppercase tracking-wider border border-orange-500/30">
-                    Config Later
+                    Active
                   </span>
                 </div>
                 <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
@@ -112,7 +112,7 @@ export const WebsiteUploadChoiceModal: React.FC<WebsiteUploadChoiceModalProps> =
             </div>
 
             <div className="mt-5 pt-3.5 border-t border-slate-800/80 flex items-center justify-between text-xs font-bold text-orange-400 group-hover:text-orange-300">
-              <span>Select Delhivery One</span>
+              <span>Open Delhivery Uploader</span>
               <ArrowRight size={15} className="group-hover:translate-x-1 transition-transform" />
             </div>
           </div>
@@ -122,7 +122,7 @@ export const WebsiteUploadChoiceModal: React.FC<WebsiteUploadChoiceModalProps> =
         <div className="pt-4 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
           <div className="flex items-center gap-2">
             <Layers size={14} className="text-slate-400" />
-            <span>Multiple formats supported without cross-contamination.</span>
+            <span>Multiple formats supported with separate dedicated import workflows.</span>
           </div>
           <button
             type="button"
