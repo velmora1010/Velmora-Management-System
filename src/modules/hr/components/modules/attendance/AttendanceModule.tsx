@@ -6,7 +6,6 @@ import { Badge } from '../../common/Badge';
 import {
   Calendar,
   Clock,
-  Plus,
   CheckCircle2,
   AlertTriangle,
   UserX,
@@ -340,17 +339,6 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
             <Clock className="w-4 h-4" />
             <span>Clock In / Out</span>
           </button>
-
-          {/* Manual Entry (authorized) */}
-          {canManageEmployees && (
-            <button
-              onClick={() => onOpenManualEntry()}
-              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl border border-slate-200 transition-colors cursor-pointer"
-            >
-              <Plus className="w-4 h-4 text-slate-500" />
-              <span>Manual Entry</span>
-            </button>
-          )}
         </div>
       </div>
 
