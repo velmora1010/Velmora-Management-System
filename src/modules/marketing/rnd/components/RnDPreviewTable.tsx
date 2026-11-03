@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { ResearchJob, ResearchInputProfile, ProfileResearchResult } from '../types/rndTypes';
 import { RnDExportButton } from './RnDExportButton';
 import { extractDirectCategory } from '../utils/rndExportService';
-import { Search, CheckCircle2, AlertTriangle, XCircle, FileSpreadsheet, RefreshCw, Play, AlertCircle, Activity, Loader2 } from 'lucide-react';
+import { Search, CheckCircle2, AlertTriangle, XCircle, FileSpreadsheet, RefreshCw, Play, AlertCircle, Activity, Loader2, Info } from 'lucide-react';
 
 interface RnDPreviewTableProps {
   job: ResearchJob;
@@ -202,7 +202,27 @@ export const RnDPreviewTable: React.FC<RnDPreviewTableProps> = ({
                 <th className="px-5 py-3.5">Code</th>
                 <th className="px-5 py-3.5">Username</th>
                 <th className="px-5 py-3.5">Name</th>
-                <th className="px-5 py-3.5">Category</th>
+                <th className="px-5 py-3.5">
+                  <div className="flex items-center gap-1.5">
+                    <span>Category</span>
+                    <div className="relative group inline-flex items-center">
+                      <button
+                        type="button"
+                        aria-label="Category threshold information"
+                        title="Category is based on at least 7 non-pinned Reels meeting the tier threshold. Average Views is calculated separately; viral outliers alone do not qualify a higher tier."
+                        className="text-[#64748B] hover:text-[#3B82F6] focus:text-[#3B82F6] focus:outline-none focus:ring-1 focus:ring-[#3B82F6]/50 rounded cursor-help"
+                      >
+                        <Info size={13} />
+                      </button>
+                      <div
+                        role="tooltip"
+                        className="pointer-events-none absolute left-0 top-full mt-1 hidden group-hover:block group-focus-within:block z-50 w-72 p-2.5 text-xs font-normal normal-case leading-relaxed bg-[#111827] text-[#F1F5F9] rounded-lg border border-[#293548] shadow-2xl"
+                      >
+                        Category is based on at least 7 non-pinned Reels meeting the tier threshold. Average Views is calculated separately; viral outliers alone do not qualify a higher tier.
+                      </div>
+                    </div>
+                  </div>
+                </th>
                 <th className="px-5 py-3.5">Row</th>
                 <th className="px-5 py-3.5">Validation</th>
                 <th className="px-5 py-3.5">Research</th>

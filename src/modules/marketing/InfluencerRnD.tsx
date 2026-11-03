@@ -9,6 +9,62 @@ import { RnDExportButton } from './rnd/components/RnDExportButton';
 import { parseInfluencerExcel } from './rnd/utils/excelParser';
 import { categorize, extractValidViewsFromResult } from './rnd/utils/rndExportService';
 
+function getCategoryQualifyingInfo(
+  category?: string | null,
+  rawViews?: number[] | null,
+  selectedReels?: DiscoveredReel[] | null,
+  isFailed?: boolean
+): string | null {
+  if (isFailed || !category || category === 'NotEnoughReels' || category === 'Uncategorized') {
+    return null;
+  }
+
+  let validViews: number[] = [];
+  if (Array.isArray(rawViews) && rawViews.length > 0) {
+    validViews = rawViews.filter(v => typeof v === 'number' && Number.isFinite(v) && v >= 0);
+  } else if (Array.isArray(selectedReels) && selectedReels.length > 0) {
+    validViews = selectedReels
+      .filter(r => r && !r.isPinned && typeof r.viewCount === 'number' && Number.isFinite(r.viewCount) && r.viewCount >= 0)
+      .map(r => r.viewCount as number);
+  }
+
+  if (validViews.length === 0) return null;
+
+  const totalValid = validViews.length;
+  let qualifyingCount = 0;
+
+  switch (category) {
+    case 'C1L1':
+      qualifyingCount = validViews.filter(v => v >= 1000000).length;
+      break;
+    case 'C1L2':
+      qualifyingCount = validViews.filter(v => v >= 500000).length;
+      break;
+    case 'C2L1':
+      qualifyingCount = validViews.filter(v => v >= 250000).length;
+      break;
+    case 'C2L2':
+      qualifyingCount = validViews.filter(v => v >= 100000).length;
+      break;
+    case 'C3L1':
+      qualifyingCount = validViews.filter(v => v >= 50000).length;
+      break;
+    case 'C3L2':
+      qualifyingCount = validViews.filter(v => v >= 25000).length;
+      break;
+    case 'C4L1':
+      qualifyingCount = validViews.filter(v => v >= 10000).length;
+      break;
+    case 'C4L2':
+      qualifyingCount = validViews.filter(v => v < 10000).length;
+      break;
+    default:
+      return null;
+  }
+
+  return `${qualifyingCount}/${totalValid} qualifying`;
+}
+
 interface InfluencerRnDProps {
   onBack: () => void;
 }
@@ -1380,10 +1436,29 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
                     )}
                     {activeCardData.category && (
                       <div className="flex items-center justify-between pt-2 border-t border-[#293548]/60 text-xs sm:text-sm">
-                        <span className="text-[#94A3B8]">Category:</span>
-                        <span className="px-2.5 py-0.5 rounded-md text-xs font-bold font-mono bg-[#3B82F6]/10 text-[#3B82F6] border border-[#3B82F6]/30">
-                          {activeCardData.category}
-                        </span>
+                        <div className="flex flex-col">
+                          <span className="text-[#94A3B8]">Category:</span>
+                          <span className="text-[10px] text-[#64748B]">≥7 Reels threshold rule</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="px-2.5 py-0.5 rounded-md text-xs font-bold font-mono bg-[#3B82F6]/10 text-[#3B82F6] border border-[#3B82F6]/30">
+                            {activeCardData.category}
+                          </span>
+                          {(() => {
+                            const ratio = getCategoryQualifyingInfo(
+                              activeCardData.category,
+                              activeCardData.rawViewCounts,
+                              activeCardData.selectedReels,
+                              !!activeCardData.error || activeCardData.statusText === 'Failed'
+                            );
+                            if (!ratio) return null;
+                            return (
+                              <span className="text-xs font-medium text-[#94A3B8] font-mono">
+                                · {ratio}
+                              </span>
+                            );
+                          })()}
+                        </div>
                       </div>
                     )}
                     {activeCardData.selectedReels && activeCardData.selectedReels.length > 0 && (
