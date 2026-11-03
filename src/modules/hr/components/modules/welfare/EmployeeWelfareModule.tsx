@@ -1128,9 +1128,8 @@ export const EmployeeWelfareModule: React.FC = () => {
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase tracking-wider font-bold text-[10px]">
               <tr>
-                <th className="py-3.5 px-3">Photo</th>
-                <th className="py-3.5 px-3">Employee Name</th>
-                <th className="py-3.5 px-3">Employee ID</th>
+                <th className="py-3.5 px-4">Employee Name</th>
+                <th className="py-3.5 px-4">Employee ID</th>
                 <th className="py-3.5 px-3">Department</th>
                 <th className="py-3.5 px-3">Selected Product</th>
                 <th className="py-3.5 px-3">Selection Date</th>
@@ -1145,7 +1144,7 @@ export const EmployeeWelfareModule: React.FC = () => {
             <tbody className="divide-y divide-slate-100">
               {filteredMonthlyRows.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="py-12 text-center text-slate-400">
+                  <td colSpan={11} className="py-12 text-center text-slate-400">
                     <p className="font-semibold text-slate-600">
                       No employee records match the selected filters.
                     </p>
@@ -1156,13 +1155,10 @@ export const EmployeeWelfareModule: React.FC = () => {
                   const badgeCfg = getStatusBadgeConfig(status);
                   return (
                     <tr key={emp.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-3 px-3">
-                        <Avatar src={emp.avatar} name={emp.fullName} size="sm" />
-                      </td>
-                      <td className="py-3 px-3 font-bold text-[#172B4D] whitespace-nowrap">
+                      <td className="py-3 px-4 font-bold text-[#172B4D] whitespace-nowrap">
                         {emp.fullName}
                       </td>
-                      <td className="py-3 px-3 font-mono text-slate-600 whitespace-nowrap">
+                      <td className="py-3 px-4 font-mono text-slate-600 whitespace-nowrap">
                         {emp.employeeCode}
                       </td>
                       <td className="py-3 px-3 text-slate-600">{emp.departmentName}</td>
