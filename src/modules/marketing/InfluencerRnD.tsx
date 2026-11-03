@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowLeft, UserSearch, Globe, Camera, CheckCircle2, XCircle, AlertCircle, Activity, AlertTriangle, ExternalLink, X, Code, Layers, Eye, Loader2, Clock, Info } from 'lucide-react';
 import { rndExtensionService } from './rnd/services/rndExtensionService';
 import { ExtensionConnectionState, InstagramSessionState, DiagnosticResult } from './rnd/types/extensionTypes';
@@ -7,6 +8,7 @@ import { RnDUploadArea } from './rnd/components/RnDUploadArea';
 import { RnDPreviewTable, RnDInputFileSummary } from './rnd/components/RnDPreviewTable';
 import { RnDExportButton } from './rnd/components/RnDExportButton';
 import { RnDViewProfiles } from './rnd/components/RnDViewProfiles';
+import { RnDMiniPlayer, setupMiniWindowDocument } from './rnd/components/RnDMiniPlayer';
 import { parseInfluencerExcel } from './rnd/utils/excelParser';
 import { categorize, extractValidViewsFromResult } from './rnd/utils/rndExportService';
 
@@ -94,12 +96,115 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
     failedCount: number;
   } | null>(null);
 
+  // Mini Player states
+  const [isMiniPlayerOpen, setIsMiniPlayerOpen] = useState<boolean>(false);
+  const [isPipActive, setIsPipActive] = useState<boolean>(false);
+  const miniPlayerWindowRef = useRef<Window | null>(null);
+
   // Phase 1 Diagnostic states
   const [diagnosticResult, setDiagnosticResult] = useState<DiagnosticResult | null>(null);
   const [isDiagnosing, setIsDiagnosing] = useState(false);
   const [diagTargetUser, setDiagTargetUser] = useState<string>('');
   const [isDiagModalOpen, setIsDiagModalOpen] = useState(false);
   const [manualUsernameInput, setManualUsernameInput] = useState('');
+
+  useEffect(() => {
+    return () => {
+      if (miniPlayerWindowRef.current && !miniPlayerWindowRef.current.closed) {
+        try {
+          miniPlayerWindowRef.current.close();
+        } catch (e) {
+          // Ignore
+        }
+        miniPlayerWindowRef.current = null;
+      }
+    };
+  }, []);
+
+  const handleOpenMiniPlayer = async () => {
+    if (miniPlayerWindowRef.current && !miniPlayerWindowRef.current.closed) {
+      try {
+        miniPlayerWindowRef.current.focus();
+      } catch (e) {
+        // Ignore
+      }
+      return;
+    }
+
+    let newWin: Window | null = null;
+    let isPip = false;
+
+    // 1. Try Document Picture-in-Picture first (Chrome 116+)
+    if (typeof window !== 'undefined' && 'documentPictureInPicture' in window) {
+      try {
+        const pip = (window as any).documentPictureInPicture;
+        if (typeof pip?.requestWindow === 'function') {
+          newWin = await pip.requestWindow({
+            width: 380,
+            height: 520
+          });
+          isPip = true;
+        }
+      } catch (pipErr) {
+        console.warn('Document Picture-in-Picture request failed or denied, using popup fallback:', pipErr);
+      }
+    }
+
+    // 2. Fallback to standard window.open popup
+    if (!newWin) {
+      try {
+        const left = Math.max(0, (window.screenLeft || window.screenX || 0) + (window.outerWidth || 1024) - 400);
+        const top = Math.max(0, (window.screenTop || window.screenY || 0) + 60);
+        newWin = window.open(
+          '',
+          'VelmoraRnDMiniPlayer',
+          `width=380,height=520,left=${left},top=${top},resizable=yes,scrollbars=no`
+        );
+        isPip = false;
+      } catch (openErr) {
+        console.error('Failed to open popup window for Mini Player:', openErr);
+      }
+    }
+
+    if (!newWin) {
+      alert('Unable to open Mini Player. Please allow popups for this site in your browser settings.');
+      return;
+    }
+
+    setupMiniWindowDocument(newWin.document);
+
+    const handleClosed = () => {
+      setIsMiniPlayerOpen(false);
+      miniPlayerWindowRef.current = null;
+    };
+
+    newWin.addEventListener('pagehide', handleClosed);
+    newWin.addEventListener('unload', handleClosed);
+
+    miniPlayerWindowRef.current = newWin;
+    setIsPipActive(isPip);
+    setIsMiniPlayerOpen(true);
+  };
+
+  const handleCloseMiniPlayer = () => {
+    if (miniPlayerWindowRef.current && !miniPlayerWindowRef.current.closed) {
+      try {
+        miniPlayerWindowRef.current.close();
+      } catch (e) {
+        // Ignore
+      }
+    }
+    miniPlayerWindowRef.current = null;
+    setIsMiniPlayerOpen(false);
+  };
+
+  const handleFocusMainApp = () => {
+    try {
+      window.focus();
+    } catch (e) {
+      // Ignore
+    }
+  };
 
   const checkStatus = async (mounted: { current: boolean }) => {
     // 1. Check Extension
@@ -537,6 +642,19 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
               size="sm"
             />
           )}
+          <button
+            type="button"
+            onClick={handleOpenMiniPlayer}
+            className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors border flex items-center gap-1.5 ${
+              isMiniPlayerOpen
+                ? 'bg-[#3B82F6]/10 text-[#3B82F6] border-[#3B82F6]/30'
+                : 'bg-[#171F2B] hover:bg-[#1D2736] text-[#F1F5F9] border-[#293548]'
+            }`}
+            title={isMiniPlayerOpen ? 'Mini Player is currently open' : 'Open compact monitoring window'}
+          >
+            <ExternalLink size={13} />
+            <span>{isMiniPlayerOpen ? 'Mini Player Open' : 'Open Mini Player'}</span>
+          </button>
           <button
             onClick={handleManualCheck}
             disabled={isBatchRunning}
@@ -1282,7 +1400,16 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3 self-end sm:self-auto shrink-0">
+                  <div className="flex items-center gap-2.5 self-end sm:self-auto shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleOpenMiniPlayer}
+                      className="px-2.5 py-1.5 bg-[#111827] hover:bg-[#1A2332] text-[#94A3B8] hover:text-[#3B82F6] border border-[#293548] rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5"
+                      title="Pop out Mini Player"
+                    >
+                      <ExternalLink size={12} />
+                      <span>Mini Player</span>
+                    </button>
                     <div className="flex items-center gap-2 bg-[#111827] px-3 py-1.5 rounded-lg border border-[#293548]">
                       <span className="text-xs text-[#64748B] font-medium">Progress:</span>
                       <span className="text-xs font-bold text-[#F1F5F9] font-mono">
@@ -1674,6 +1801,19 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
         </div>
       )}
 
+      {/* Document PiP / Popup Mini Player Portal */}
+      {isMiniPlayerOpen && miniPlayerWindowRef.current?.document?.body && createPortal(
+        <RnDMiniPlayer
+          isBatchRunning={isBatchRunning}
+          batchProgress={batchProgress}
+          researchState={researchState}
+          isEngineConnected={isEngineConnected}
+          isPipMode={isPipActive}
+          onFocusMainApp={handleFocusMainApp}
+          onClose={handleCloseMiniPlayer}
+        />,
+        miniPlayerWindowRef.current.document.body
+      )}
     </div>
   );
 };
