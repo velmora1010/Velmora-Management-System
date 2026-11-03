@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { ArrowLeft, UserSearch, Globe, Camera, CheckCircle2, XCircle, AlertCircle, Activity, AlertTriangle, ExternalLink, X, Code, Layers, Eye, Loader2 } from 'lucide-react';
+import { ArrowLeft, UserSearch, Globe, Camera, CheckCircle2, XCircle, AlertCircle, Activity, AlertTriangle, ExternalLink, X, Code, Layers, Eye, Loader2, Clock, Info } from 'lucide-react';
 import { rndExtensionService } from './rnd/services/rndExtensionService';
 import { ExtensionConnectionState, InstagramSessionState, DiagnosticResult } from './rnd/types/extensionTypes';
 import { ResearchJob, DiscoveredReel, ProfileResearchResult, ResearchInputProfile } from './rnd/types/rndTypes';
 import { RnDUploadArea } from './rnd/components/RnDUploadArea';
-import { RnDPreviewTable } from './rnd/components/RnDPreviewTable';
+import { RnDPreviewTable, RnDInputFileSummary } from './rnd/components/RnDPreviewTable';
 import { RnDExportButton } from './rnd/components/RnDExportButton';
+import { RnDViewProfiles } from './rnd/components/RnDViewProfiles';
 import { parseInfluencerExcel } from './rnd/utils/excelParser';
 import { categorize, extractValidViewsFromResult } from './rnd/utils/rndExportService';
 
@@ -73,7 +74,7 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
   const [extState, setExtState] = useState<ExtensionConnectionState>('CONNECTING');
   const [igState, setIgState] = useState<InstagramSessionState>('CHECKING');
   const [extVersion, setExtVersion] = useState<string | undefined>();
-  
+
   const [currentJob, setCurrentJob] = useState<ResearchJob | null>(null);
   const [isParsing, setIsParsing] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
@@ -103,9 +104,9 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
   const checkStatus = async (mounted: { current: boolean }) => {
     // 1. Check Extension
     const status = await rndExtensionService.getExtensionStatus();
-    
+
     if (!mounted.current) return;
-    
+
     if (!status.connected) {
       setExtState('NOT_DETECTED');
       setIgState('NOT_AVAILABLE');
@@ -187,7 +188,7 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
     setResearchResults({});
     setSelectedProfileCode(null);
     setResearchState(null);
-    
+
     try {
       const job = await parseInfluencerExcel(file);
       setCurrentJob(job);
@@ -250,7 +251,7 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
 
   const handleStartResearch = async () => {
     if (!currentJob || isBatchRunning) return;
-    
+
     // Eligible profiles: all rows that are not invalid (preserves Excel order)
     const eligibleProfiles = currentJob.profiles.filter(p => p.validationStatus !== 'invalid');
     if (eligibleProfiles.length === 0) {
@@ -526,7 +527,7 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
             </div>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-2.5">
           {currentJob && (
             <RnDExportButton
@@ -537,14 +538,6 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
             />
           )}
           <button
-            onClick={handleOpenDiagModal}
-            disabled={isDiagnosing || isBatchRunning}
-            className="px-3.5 py-2 bg-[#3B82F6] hover:bg-blue-600 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-2 shadow-sm shadow-blue-500/20 disabled:opacity-50"
-          >
-            <Activity size={15} className={isDiagnosing ? 'animate-spin' : ''} />
-            <span>{isDiagnosing ? 'Diagnosing...' : 'Run Reel Diagnostic'}</span>
-          </button>
-          <button
             onClick={handleManualCheck}
             disabled={isBatchRunning}
             className="px-3.5 py-2 bg-[#171F2B] hover:bg-[#1D2736] text-[#F1F5F9] text-xs font-semibold rounded-lg transition-colors border border-[#293548] disabled:opacity-50"
@@ -553,7 +546,7 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
           </button>
         </div>
       </div>
-      
+
       {/* Status Cards Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-6xl mx-auto">
         {/* Extension Status Card */}
@@ -586,8 +579,8 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
               )}
             </div>
             <p className="text-xs text-[#94A3B8] leading-relaxed mb-2">
-              {extState === 'CONNECTED' 
-                ? 'Connected to Velmora R&D browser extension.' 
+              {extState === 'CONNECTED'
+                ? 'Connected to Velmora R&D browser extension.'
                 : 'Velmora Influencer R&D extension is not connected. Please ensure the extension is installed and enabled in your browser.'}
             </p>
           </div>
@@ -628,19 +621,19 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
               )}
             </div>
             <p className="text-xs text-[#94A3B8] leading-relaxed">
-              {igState === 'SESSION_DETECTED' 
-                ? 'Your Instagram browser session appears authenticated.' 
-                : igState === 'LOGIN_REQUIRED' 
-                  ? 'An Instagram tab was found, but login is required.' 
+              {igState === 'SESSION_DETECTED'
+                ? 'Your Instagram browser session appears authenticated.'
+                : igState === 'LOGIN_REQUIRED'
+                  ? 'An Instagram tab was found, but login is required.'
                   : igState === 'NOT_AVAILABLE'
                     ? 'Instagram tab is not open or extension cannot reach it.'
                     : 'Waiting for Chrome extension connection...'}
             </p>
           </div>
-          
+
           {(igState === 'LOGIN_REQUIRED' || igState === 'NOT_AVAILABLE') && extState === 'CONNECTED' && (
             <div className="mt-3">
-              <button 
+              <button
                 onClick={handleOpenInstagram}
                 className="px-3.5 py-1.5 bg-[#1D2736] hover:bg-[#253245] text-[#F1F5F9] text-xs font-medium rounded-lg transition-colors border border-[#293548]"
               >
@@ -1203,7 +1196,7 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
             )}
           </div>
         )}
-        
+
         {!currentJob && (
           <div className="bg-[#171F2B] p-6 sm:p-8 rounded-xl border border-[#293548] shadow-sm">
             {isParsing ? (
@@ -1214,7 +1207,7 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
             ) : (
               <RnDUploadArea onFileSelect={handleFileSelect} />
             )}
-            
+
             {parseError && (
               <div className="mt-4 p-3.5 bg-[#EF4444]/10 border border-[#EF4444]/20 rounded-lg text-[#EF4444] text-xs flex items-start gap-2.5">
                 <AlertCircle size={16} className="mt-0.5 shrink-0" />
@@ -1225,351 +1218,10 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
         )}
 
         {currentJob && (
-          <div className="flex flex-col gap-4">
-            {researchMessage && (
-              <div className="p-3.5 bg-[#3B82F6]/10 border border-[#3B82F6]/20 rounded-lg text-[#3B82F6] text-xs flex items-center justify-center font-medium animate-fade-in">
-                {researchMessage}
-              </div>
-            )}
-
-            {/* Batch Research Progress Banner / Card */}
-            {batchProgress && (
-              <div className="bg-[#171F2B] p-5 rounded-xl border border-[#293548] shadow-sm flex flex-col gap-4 animate-fade-in">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#293548] pb-3">
-                  <div className="flex items-center gap-3">
-                    {isBatchRunning ? (
-                      <div className="p-2 bg-[#3B82F6]/10 text-[#3B82F6] rounded-lg border border-[#3B82F6]/20">
-                        <Loader2 size={18} className="animate-spin" />
-                      </div>
-                    ) : (
-                      <div className="p-2 bg-[#10B981]/10 text-[#10B981] rounded-lg border border-[#10B981]/20">
-                        <CheckCircle2 size={18} />
-                      </div>
-                    )}
-                    <div>
-                      <h3 className="text-sm font-bold text-[#F1F5F9] flex items-center gap-2">
-                        <span>{isBatchRunning ? 'Batch Research in Progress' : 'Batch Research Complete'}</span>
-                        <span className="text-xs font-mono font-medium text-[#94A3B8] bg-[#111827] px-2 py-0.5 rounded border border-[#293548]">
-                          {batchProgress.currentIndex} / {batchProgress.totalEligible}
-                        </span>
-                      </h3>
-                      <p className="text-xs text-[#94A3B8] mt-0.5">
-                        {isBatchRunning ? (
-                          <span>Currently researching: <strong className="text-[#3B82F6] font-mono">{batchProgress.currentProfileCode}</strong> (@{batchProgress.currentUsername})</span>
-                        ) : (
-                          <span>Finished processing {batchProgress.totalEligible} eligible profile{batchProgress.totalEligible !== 1 ? 's' : ''}.</span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <RnDExportButton
-                      job={currentJob}
-                      researchResults={researchResults}
-                      isBatchRunning={isBatchRunning}
-                      size="sm"
-                    />
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-[#64748B] font-medium">Progress:</span>
-                      <span className="text-xs font-bold text-[#F1F5F9]">
-                        {Math.round((((batchProgress.completedCount + batchProgress.partialCount + batchProgress.failedCount) / batchProgress.totalEligible) * 100))}%
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Progress Bar */}
-                <div className="w-full bg-[#111827] rounded-full h-2 overflow-hidden border border-[#293548]">
-                  <div
-                    className="bg-[#3B82F6] h-2 rounded-full transition-all duration-300 ease-out"
-                    style={{
-                      width: `${Math.min(100, Math.round((((batchProgress.completedCount + batchProgress.partialCount + batchProgress.failedCount) / batchProgress.totalEligible) * 100)))}%`
-                    }}
-                  />
-                </div>
-
-                {/* Stats Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div className="bg-[#111827] p-3 rounded-lg border border-[#293548] flex flex-col gap-1">
-                    <span className="text-[11px] font-medium text-[#64748B] uppercase tracking-wider">Completed</span>
-                    <span className="text-lg font-bold text-[#10B981]">{batchProgress.completedCount}</span>
-                  </div>
-                  <div className="bg-[#111827] p-3 rounded-lg border border-[#293548] flex flex-col gap-1">
-                    <span className="text-[11px] font-medium text-[#64748B] uppercase tracking-wider">Partial</span>
-                    <span className="text-lg font-bold text-[#F59E0B]">{batchProgress.partialCount}</span>
-                  </div>
-                  <div className="bg-[#111827] p-3 rounded-lg border border-[#293548] flex flex-col gap-1">
-                    <span className="text-[11px] font-medium text-[#64748B] uppercase tracking-wider">Failed</span>
-                    <span className="text-lg font-bold text-[#EF4444]">{batchProgress.failedCount}</span>
-                  </div>
-                  <div className="bg-[#111827] p-3 rounded-lg border border-[#293548] flex flex-col gap-1">
-                    <span className="text-[11px] font-medium text-[#64748B] uppercase tracking-wider">Remaining</span>
-                    <span className="text-lg font-bold text-[#F1F5F9]">
-                      {Math.max(0, batchProgress.totalEligible - (batchProgress.completedCount + batchProgress.partialCount + batchProgress.failedCount))}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Profile Result / Inspection Card */}
-            {activeCardData && (
-              <div className="bg-[#171F2B] p-5 sm:p-6 rounded-xl border border-[#293548] shadow-sm flex flex-col gap-4 animate-fade-in">
-                {/* Profile switcher pills if results exist */}
-                {Object.keys(researchResults).length > 0 && (
-                  <div className="flex flex-wrap items-center gap-2 pb-3 border-b border-[#293548]">
-                    <span className="text-xs font-semibold text-[#64748B] uppercase tracking-wider mr-1">
-                      View Profile:
-                    </span>
-                    {currentJob.profiles
-                      .filter(p => researchResults[p.influencerCode] || p.influencerCode === researchState?.profileCode)
-                      .map(p => {
-                        const isSelected = (selectedProfileCode || researchState?.profileCode) === p.influencerCode;
-                        const res = researchResults[p.influencerCode];
-                        const isRunning = isBatchRunning && batchProgress?.currentProfileCode === p.influencerCode;
-
-                        return (
-                          <button
-                            key={p.influencerCode}
-                            onClick={() => setSelectedProfileCode(p.influencerCode)}
-                            className={`px-3 py-1 rounded-lg text-xs font-medium font-mono flex items-center gap-1.5 transition-colors border ${
-                              isSelected
-                                ? 'bg-[#3B82F6] text-white border-[#3B82F6] shadow-sm shadow-blue-500/25'
-                                : 'bg-[#111827] hover:bg-[#1D2736] text-[#94A3B8] hover:text-[#F1F5F9] border-[#293548]'
-                            }`}
-                          >
-                            {isRunning && <Loader2 size={12} className="animate-spin text-[#3B82F6]" />}
-                            {!isRunning && res?.status === 'completed' && <CheckCircle2 size={12} className="text-[#10B981]" />}
-                            {!isRunning && (res?.status === 'partial' || res?.status === 'reels_not_enough') && <AlertTriangle size={12} className="text-[#F59E0B]" />}
-                            {!isRunning && (res?.status === 'failed' || res?.status === 'reels_not_found') && <XCircle size={12} className="text-[#EF4444]" />}
-                            <span>{p.influencerCode}</span>
-                            <span className="text-[10px] text-[#94A3B8] font-sans">(@{p.username})</span>
-                          </button>
-                        );
-                      })}
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between border-b border-[#293548] pb-3">
-                  <div>
-                    <h3 className="text-base font-bold text-[#F1F5F9] flex items-center gap-2">
-                      <span>Research:</span>
-                      <span className="text-[#3B82F6] font-mono">{activeCardData.profileCode}</span>
-                      <span className="text-[#94A3B8] font-normal text-xs sm:text-sm">(@{activeCardData.username})</span>
-                    </h3>
-                    <p className="text-xs text-[#94A3B8] mt-0.5">
-                      Status: <span className="font-semibold text-[#F1F5F9]">{activeCardData.statusText}</span>
-                    </p>
-                  </div>
-                  {activeCardData.isComplete ? (
-                    <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-[#111827] border border-[#293548]">
-                      {activeCardData.error ? (
-                        <>
-                          <XCircle size={15} className="text-[#EF4444]" />
-                          <span className="text-xs font-semibold text-[#EF4444]">Failed</span>
-                        </>
-                      ) : (typeof activeCardData.validViewCountsCount === 'number' && activeCardData.validViewCountsCount < 15) ? (
-                        <>
-                          <AlertTriangle size={15} className="text-[#F59E0B]" />
-                          <span className="text-xs font-semibold text-[#F59E0B]">
-                            Partial ({activeCardData.validViewCountsCount}/15)
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 size={15} className="text-[#10B981]" />
-                          <span className="text-xs font-semibold text-[#10B981]">Completed</span>
-                        </>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-4 h-4 border-2 border-[#293548] border-t-[#3B82F6] rounded-full animate-spin"></div>
-                      <span className="text-xs font-medium text-[#94A3B8]">{activeCardData.statusText}</span>
-                    </div>
-                  )}
-                </div>
-                
-                {activeCardData.isComplete && !activeCardData.error && (
-                  <div className="flex flex-col gap-3 bg-[#111827] p-4 rounded-xl border border-[#293548]">
-                    <div className="flex items-center justify-between text-xs sm:text-sm">
-                      <span className="text-[#94A3B8]">Followers:</span>
-                      <span className="text-base font-bold text-[#F1F5F9]">{activeCardData.followerDisplay || 'N/A'}</span>
-                    </div>
-                    {activeCardData.reelsDiscovered !== null && (
-                      <div className="flex items-center justify-between pt-2 border-t border-[#293548]/60 text-xs sm:text-sm">
-                        <span className="text-[#94A3B8]">Reels discovered:</span>
-                        <span className="font-semibold text-[#F1F5F9]">{activeCardData.reelsDiscovered}</span>
-                      </div>
-                    )}
-                    {activeCardData.pinnedReelsExcluded !== null && (
-                      <div className="flex items-center justify-between text-xs sm:text-sm">
-                        <span className="text-[#94A3B8]">Pinned excluded:</span>
-                        <span className="font-semibold text-[#F1F5F9]">{activeCardData.pinnedReelsExcluded}</span>
-                      </div>
-                    )}
-                    {activeCardData.selectedReelCount !== null && (
-                      <div className="flex items-center justify-between text-xs sm:text-sm">
-                        <span className="text-[#94A3B8]">Non-pinned selected:</span>
-                        <span className="font-semibold text-[#F1F5F9]">{activeCardData.selectedReelCount} / 15</span>
-                      </div>
-                    )}
-                    {typeof activeCardData.averageViews === 'number' && (
-                      <div className="flex items-center justify-between pt-2 border-t border-[#293548]/60 text-xs sm:text-sm">
-                        <span className="text-[#94A3B8]">
-                          Average Views ({activeCardData.validViewCountsCount ?? activeCardData.selectedReelCount ?? 15} non-pinned):
-                        </span>
-                        <span className="text-base font-bold text-[#10B981]">{activeCardData.averageViews.toLocaleString()}</span>
-                      </div>
-                    )}
-                    {typeof activeCardData.validViewCountsCount === 'number' && (
-                      <div className="flex items-center justify-between text-xs sm:text-sm">
-                        <span className="text-[#94A3B8]">Valid View Counts:</span>
-                        <span className="font-semibold text-[#F1F5F9]">
-                          {activeCardData.validViewCountsCount} / 15
-                          {activeCardData.missingViewCountsCount && activeCardData.missingViewCountsCount > 0 ? (
-                            <span className="text-xs text-[#F59E0B] ml-2">({activeCardData.missingViewCountsCount} missing)</span>
-                          ) : null}
-                        </span>
-                      </div>
-                    )}
-                    {activeCardData.category && (
-                      <div className="flex items-center justify-between pt-2 border-t border-[#293548]/60 text-xs sm:text-sm">
-                        <div className="flex flex-col">
-                          <span className="text-[#94A3B8]">Category:</span>
-                          <span className="text-[10px] text-[#64748B]">≥7 Reels threshold rule</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="px-2.5 py-0.5 rounded-md text-xs font-bold font-mono bg-[#3B82F6]/10 text-[#3B82F6] border border-[#3B82F6]/30">
-                            {activeCardData.category}
-                          </span>
-                          {(() => {
-                            const ratio = getCategoryQualifyingInfo(
-                              activeCardData.category,
-                              activeCardData.rawViewCounts,
-                              activeCardData.selectedReels,
-                              !!activeCardData.error || activeCardData.statusText === 'Failed'
-                            );
-                            if (!ratio) return null;
-                            return (
-                              <span className="text-xs font-medium text-[#94A3B8] font-mono">
-                                · {ratio}
-                              </span>
-                            );
-                          })()}
-                        </div>
-                      </div>
-                    )}
-                    {activeCardData.selectedReels && activeCardData.selectedReels.length > 0 && (
-                      <div className="pt-2 border-t border-[#293548]/60 space-y-2">
-                        <span className="text-xs font-semibold text-[#94A3B8] uppercase tracking-wider block">
-                          Selected Reels & Extracted View Counts ({activeCardData.selectedReels.length})
-                        </span>
-                        <div className="max-h-52 overflow-y-auto space-y-1.5 pr-1 custom-scrollbar">
-                          {activeCardData.selectedReels.map((reel, rIdx) => (
-                            <div key={rIdx} className="flex items-center justify-between gap-2 text-xs bg-[#141A22] px-3 py-2 rounded-lg border border-[#293548] hover:border-[#3B82F6]/30 transition-colors">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className="text-[#64748B] font-mono text-[10px]">#{reel.discoveryIndex}</span>
-                                <span className="font-mono text-[#F1F5F9] truncate max-w-[200px] sm:max-w-xs">{reel.reelUrl}</span>
-                                <a
-                                  href={reel.reelUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-[#3B82F6] hover:text-blue-400 shrink-0"
-                                  title="Open Reel"
-                                >
-                                  <ExternalLink size={12} />
-                                </a>
-                              </div>
-                              <div className="flex items-center gap-2 shrink-0">
-                                {reel.rawViewText && (
-                                  <span className="text-[10px] text-[#94A3B8] font-mono">({reel.rawViewText})</span>
-                                )}
-                                <span className={`px-2 py-0.5 rounded font-mono font-bold text-[11px] ${
-                                  typeof reel.viewCount === 'number'
-                                    ? 'bg-[#10B981]/15 text-[#10B981] border border-[#10B981]/30'
-                                    : 'bg-[#F59E0B]/15 text-[#F59E0B] border border-[#F59E0B]/30'
-                                }`}>
-                                  {typeof reel.viewCount === 'number' ? reel.viewCount.toLocaleString() : 'Missing View'}
-                                </span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    <div className="flex items-center justify-between pt-2 border-t border-[#293548]/60 text-xs">
-                      <span className="text-[#94A3B8]">Status:</span>
-                      {typeof activeCardData.validViewCountsCount === 'number' && activeCardData.validViewCountsCount < 15 ? (
-                        <span className="font-medium text-[#F59E0B] flex items-center gap-1">
-                          <AlertTriangle size={14} /> Partial sample ({activeCardData.validViewCountsCount}/15 counts collected, {typeof activeCardData.missingViewCountsCount === 'number' ? activeCardData.missingViewCountsCount : (15 - activeCardData.validViewCountsCount)} missing)
-                        </span>
-                      ) : (
-                        <span className="font-medium text-[#10B981] flex items-center gap-1">
-                          <CheckCircle2 size={14} /> Reel view extraction complete
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Batch Diagnostic Evidence Section */}
-                    {(activeCardData.finalUrl || activeCardData.pageReadiness || activeCardData.failureStage) && (
-                      <div className="pt-2 border-t border-[#293548]/60 space-y-1 text-xs text-[#94A3B8]">
-                        <span className="text-[10px] font-semibold text-[#64748B] uppercase tracking-wider block mb-1">
-                          Diagnostic Evidence
-                        </span>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 bg-[#141A22] p-2.5 rounded-lg border border-[#293548] text-[11px]">
-                          {activeCardData.finalUrl && (
-                            <div className="truncate sm:col-span-2">
-                              <span className="text-[#64748B]">Final URL:</span> <code className="text-[#F1F5F9] font-mono text-[10px]">{activeCardData.finalUrl}</code>
-                            </div>
-                          )}
-                          <div>
-                            <span className="text-[#64748B]">Readiness:</span> <strong className="text-[#F1F5F9] font-mono">{activeCardData.pageReadiness || 'complete'}</strong>
-                          </div>
-                          <div>
-                            <span className="text-[#64748B]">Initial Reel Anchors:</span> <strong className="text-[#F1F5F9] font-mono">{activeCardData.reelAnchorsAtStart ?? 0}</strong>
-                          </div>
-                          {activeCardData.failureStage && (
-                            <div className="sm:col-span-2">
-                              <span className="text-[#64748B]">Stage:</span> <span className="text-[#F59E0B] font-mono font-medium">{activeCardData.failureStage}</span>
-                            </div>
-                          )}
-                          {activeCardData.failureReason && (
-                            <div className="sm:col-span-2 text-[#94A3B8]">
-                              <span className="text-[#64748B]">Details:</span> {activeCardData.failureReason}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-                
-                {activeCardData.error && (
-                  <div className="bg-[#EF4444]/10 border border-[#EF4444]/20 p-4 rounded-xl flex flex-col gap-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-[#EF4444] uppercase tracking-wider">Failure Details</span>
-                      {activeCardData.failureStage && (
-                        <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-[#EF4444]/20 text-[#EF4444] border border-[#EF4444]/30">
-                          Stage: {activeCardData.failureStage}
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-xs sm:text-sm text-[#EF4444]">{activeCardData.error}</span>
-                    {activeCardData.finalUrl && (
-                      <div className="text-xs text-[#94A3B8] pt-2 border-t border-[#EF4444]/20 truncate">
-                        <span className="text-[#64748B]">Attempted URL:</span> <code className="font-mono text-[#F1F5F9] text-[10px]">{activeCardData.finalUrl}</code>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            <RnDPreviewTable 
+          <div className="flex flex-col gap-5">
+            {/* 3 & 4. Input File Card (with Replace File, Run Reel Diagnostic, Start Research) & Validation Summary Cards */}
+            <RnDInputFileSummary
               job={currentJob}
-              researchResults={researchResults}
               onReplaceFile={() => {
                 setCurrentJob(null);
                 setBatchProgress(null);
@@ -1587,9 +1239,369 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
                   handleOpenDiagModal();
                 }
               }}
-              isDiagnosing={isDiagnosing}
               isEngineConnected={isEngineConnected}
+              isDiagnosing={isDiagnosing}
               isBatchRunning={isBatchRunning}
+            />
+            {researchMessage && (
+              <div className="p-3.5 bg-[#3B82F6]/10 border border-[#3B82F6]/20 rounded-lg text-[#3B82F6] text-xs flex items-center justify-center font-medium animate-fade-in">
+                {researchMessage}
+              </div>
+            )}
+
+            {/* 1. New Research Run / Batch Progress Banner */}
+            {batchProgress && (
+              <div className="bg-[#171F2B] p-5 sm:p-6 rounded-xl border border-[#293548] shadow-sm flex flex-col gap-5 animate-fade-in">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#293548] pb-4">
+                  <div className="flex items-center gap-3.5">
+                    {isBatchRunning ? (
+                      <div className="p-2.5 bg-[#3B82F6]/10 text-[#3B82F6] rounded-xl border border-[#3B82F6]/20 shrink-0">
+                        <Loader2 size={20} className="animate-spin" />
+                      </div>
+                    ) : (
+                      <div className="p-2.5 bg-[#10B981]/10 text-[#10B981] rounded-xl border border-[#10B981]/20 shrink-0">
+                        <CheckCircle2 size={20} />
+                      </div>
+                    )}
+                    <div>
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <h3 className="text-base font-bold text-[#F1F5F9]">
+                          {isBatchRunning ? 'Batch Research in Progress' : 'Batch Research Complete'}
+                        </h3>
+                        <span className="text-xs font-mono font-semibold text-[#94A3B8] bg-[#111827] px-2.5 py-0.5 rounded-md border border-[#293548]">
+                          {batchProgress.currentIndex} / {batchProgress.totalEligible}
+                        </span>
+                      </div>
+                      <p className="text-xs text-[#94A3B8] mt-1">
+                        {isBatchRunning ? (
+                          <span>Currently researching: <strong className="text-[#3B82F6] font-mono">{batchProgress.currentProfileCode}</strong> (@{batchProgress.currentUsername})</span>
+                        ) : (
+                          <span>Finished processing all {batchProgress.totalEligible} eligible profile{batchProgress.totalEligible !== 1 ? 's' : ''}.</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 self-end sm:self-auto shrink-0">
+                    <div className="flex items-center gap-2 bg-[#111827] px-3 py-1.5 rounded-lg border border-[#293548]">
+                      <span className="text-xs text-[#64748B] font-medium">Progress:</span>
+                      <span className="text-xs font-bold text-[#F1F5F9] font-mono">
+                        {Math.round((((batchProgress.completedCount + batchProgress.partialCount + batchProgress.failedCount) / batchProgress.totalEligible) * 100))}%
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Progress Bar & Sub-indicators */}
+                <div className="space-y-1.5">
+                  <div className="w-full bg-[#111827] rounded-full h-2.5 overflow-hidden border border-[#293548]">
+                    <div
+                      className="bg-[#3B82F6] h-2.5 rounded-full transition-all duration-300 ease-out"
+                      style={{
+                        width: `${Math.min(100, Math.round((((batchProgress.completedCount + batchProgress.partialCount + batchProgress.failedCount) / batchProgress.totalEligible) * 100)))}%`
+                      }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-[#64748B] font-mono">
+                    <span>Processed {batchProgress.completedCount + batchProgress.partialCount + batchProgress.failedCount} of {batchProgress.totalEligible}</span>
+                    <span>{Math.round((((batchProgress.completedCount + batchProgress.partialCount + batchProgress.failedCount) / batchProgress.totalEligible) * 100))}% completed</span>
+                  </div>
+                </div>
+
+                {/* Stats Grid */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="bg-[#111827] p-3.5 rounded-xl border border-[#10B981]/25 hover:border-[#10B981]/40 transition-colors flex items-center justify-between">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] font-semibold text-[#94A3B8] uppercase tracking-wider">Completed</span>
+                      <span className="text-xl font-bold font-mono text-[#10B981]">{batchProgress.completedCount}</span>
+                    </div>
+                    <CheckCircle2 size={18} className="text-[#10B981]/60 shrink-0" />
+                  </div>
+
+                  <div className="bg-[#111827] p-3.5 rounded-xl border border-[#F59E0B]/25 hover:border-[#F59E0B]/40 transition-colors flex items-center justify-between">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] font-semibold text-[#94A3B8] uppercase tracking-wider">Partial</span>
+                      <span className="text-xl font-bold font-mono text-[#F59E0B]">{batchProgress.partialCount}</span>
+                    </div>
+                    <AlertTriangle size={18} className="text-[#F59E0B]/60 shrink-0" />
+                  </div>
+
+                  <div className="bg-[#111827] p-3.5 rounded-xl border border-[#EF4444]/25 hover:border-[#EF4444]/40 transition-colors flex items-center justify-between">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] font-semibold text-[#94A3B8] uppercase tracking-wider">Failed</span>
+                      <span className="text-xl font-bold font-mono text-[#EF4444]">{batchProgress.failedCount}</span>
+                    </div>
+                    <XCircle size={18} className="text-[#EF4444]/60 shrink-0" />
+                  </div>
+
+                  <div className="bg-[#111827] p-3.5 rounded-xl border border-[#293548] hover:border-[#3B82F6]/30 transition-colors flex items-center justify-between">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] font-semibold text-[#94A3B8] uppercase tracking-wider">Remaining</span>
+                      <span className="text-xl font-bold font-mono text-[#F1F5F9]">
+                        {Math.max(0, batchProgress.totalEligible - (batchProgress.completedCount + batchProgress.partialCount + batchProgress.failedCount))}
+                      </span>
+                    </div>
+                    <Clock size={18} className="text-[#64748B] shrink-0" />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* View Profiles Section */}
+            {currentJob && (Object.keys(researchResults).length > 0 || isBatchRunning) && (
+              <RnDViewProfiles
+                profiles={currentJob.profiles}
+                researchResults={researchResults}
+                selectedProfileCode={selectedProfileCode || researchState?.profileCode || null}
+                onSelectProfile={(code) => setSelectedProfileCode(code)}
+                currentRunningCode={isBatchRunning ? batchProgress?.currentProfileCode : undefined}
+              />
+            )}
+
+            {/* 2. Research Details / Selected Influencer Result Card */}
+            {activeCardData && (
+              <div className="bg-[#171F2B] p-5 sm:p-6 rounded-xl border border-[#293548] shadow-sm flex flex-col gap-5 animate-fade-in">
+                {/* Header: Selected Influencer Code, Username, Status */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#293548] pb-4">
+                  <div className="flex items-center gap-3">
+                    <span className="px-3 py-1.5 rounded-lg text-sm font-bold font-mono bg-[#3B82F6]/10 text-[#3B82F6] border border-[#3B82F6]/30 shrink-0">
+                      {activeCardData.profileCode}
+                    </span>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-base font-bold text-[#F1F5F9]">@{activeCardData.username}</h3>
+                        <a
+                          href={`https://www.instagram.com/${activeCardData.username}/`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[#64748B] hover:text-[#3B82F6] transition-colors"
+                          title="View on Instagram"
+                        >
+                          <ExternalLink size={13} />
+                        </a>
+                      </div>
+                      <p className="text-xs text-[#94A3B8] mt-0.5">
+                        Research Details & Reel Metrics
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 self-start sm:self-auto">
+                    {activeCardData.isComplete ? (
+                      activeCardData.error ? (
+                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/25 text-[#EF4444] text-xs font-semibold">
+                          <XCircle size={14} />
+                          <span>Failed</span>
+                        </div>
+                      ) : (typeof activeCardData.validViewCountsCount === 'number' && activeCardData.validViewCountsCount < 15) ? (
+                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F59E0B]/10 border border-[#F59E0B]/25 text-[#F59E0B] text-xs font-semibold">
+                          <AlertTriangle size={14} />
+                          <span>Partial ({activeCardData.validViewCountsCount}/15)</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#10B981]/10 border border-[#10B981]/25 text-[#10B981] text-xs font-semibold">
+                          <CheckCircle2 size={14} />
+                          <span>Completed</span>
+                        </div>
+                      )
+                    ) : (
+                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#3B82F6]/10 border border-[#3B82F6]/25 text-[#3B82F6] text-xs font-medium">
+                        <Loader2 size={14} className="animate-spin" />
+                        <span>{activeCardData.statusText}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {activeCardData.isComplete && !activeCardData.error && (
+                  <div className="flex flex-col gap-4">
+                    {/* Key Metrics Grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+                      <div className="bg-[#111827] p-3 rounded-lg border border-[#293548] flex flex-col gap-1">
+                        <span className="text-[10px] font-semibold text-[#64748B] uppercase tracking-wider">Followers</span>
+                        <span className="text-sm sm:text-base font-bold font-mono text-[#F1F5F9] truncate">
+                          {activeCardData.followerDisplay || 'N/A'}
+                        </span>
+                      </div>
+
+                      <div className="bg-[#111827] p-3 rounded-lg border border-[#293548] flex flex-col gap-1">
+                        <span className="text-[10px] font-semibold text-[#64748B] uppercase tracking-wider">Discovered</span>
+                        <span className="text-sm sm:text-base font-bold font-mono text-[#F1F5F9]">
+                          {activeCardData.reelsDiscovered ?? '—'}
+                        </span>
+                      </div>
+
+                      <div className="bg-[#111827] p-3 rounded-lg border border-[#293548] flex flex-col gap-1">
+                        <span className="text-[10px] font-semibold text-[#64748B] uppercase tracking-wider">Pinned Excluded</span>
+                        <span className="text-sm sm:text-base font-bold font-mono text-[#94A3B8]">
+                          {activeCardData.pinnedReelsExcluded ?? '—'}
+                        </span>
+                      </div>
+
+                      <div className="bg-[#111827] p-3 rounded-lg border border-[#293548] flex flex-col gap-1">
+                        <span className="text-[10px] font-semibold text-[#64748B] uppercase tracking-wider">Non-Pinned</span>
+                        <span className="text-sm sm:text-base font-bold font-mono text-[#F1F5F9]">
+                          {activeCardData.selectedReelCount !== null ? `${activeCardData.selectedReelCount} / 15` : '—'}
+                        </span>
+                      </div>
+
+                      <div className="bg-[#111827] p-3 rounded-lg border border-[#293548] flex flex-col gap-1">
+                        <span className="text-[10px] font-semibold text-[#64748B] uppercase tracking-wider">Valid Views</span>
+                        <span className={`text-sm sm:text-base font-bold font-mono ${activeCardData.missingViewCountsCount ? 'text-[#F59E0B]' : 'text-[#10B981]'}`}>
+                          {typeof activeCardData.validViewCountsCount === 'number' ? `${activeCardData.validViewCountsCount} / 15` : '—'}
+                        </span>
+                      </div>
+
+                      <div className="bg-[#111827] p-3 rounded-lg border border-[#293548] flex flex-col gap-1">
+                        <span className="text-[10px] font-semibold text-[#64748B] uppercase tracking-wider">Avg Views</span>
+                        <span className="text-sm sm:text-base font-bold font-mono text-[#10B981] truncate">
+                          {typeof activeCardData.averageViews === 'number' ? activeCardData.averageViews.toLocaleString() : '—'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Category & Qualifying Rule Banner */}
+                    {activeCardData.category && (
+                      <div className="bg-[#111827] p-3.5 rounded-xl border border-[#293548] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5">
+                          <span className="px-3 py-1 rounded-md text-xs font-bold font-mono bg-[#3B82F6]/15 text-[#3B82F6] border border-[#3B82F6]/30">
+                            {activeCardData.category}
+                          </span>
+                          {(() => {
+                            const ratio = getCategoryQualifyingInfo(
+                              activeCardData.category,
+                              activeCardData.rawViewCounts,
+                              activeCardData.selectedReels,
+                              !!activeCardData.error || activeCardData.statusText === 'Failed'
+                            );
+                            if (!ratio) return null;
+                            return (
+                              <span className="text-xs font-semibold text-[#F1F5F9] font-mono">
+                                · {ratio}
+                              </span>
+                            );
+                          })()}
+                        </div>
+                        <div className="flex items-center gap-1.5 text-xs text-[#94A3B8]">
+                          <Info size={13} className="text-[#64748B] shrink-0" />
+                          <span>≥7 non-pinned Reels threshold rule · outliers alone do not qualify higher tiers</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Selected Reels List */}
+                    {activeCardData.selectedReels && activeCardData.selectedReels.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-semibold text-[#94A3B8] uppercase tracking-wider">
+                            Selected Reels & Extracted View Counts ({activeCardData.selectedReels.length})
+                          </span>
+                          <span className="text-[#64748B] text-[11px] font-mono">Max 15 non-pinned</span>
+                        </div>
+                        <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1.5 custom-scrollbar">
+                          {activeCardData.selectedReels.map((reel, rIdx) => (
+                            <div
+                              key={rIdx}
+                              className="flex items-center justify-between gap-3 text-xs bg-[#111827] px-3.5 py-2 rounded-lg border border-[#293548] hover:border-[#3B82F6]/30 transition-colors"
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <span className="text-[#64748B] font-mono text-[10px] w-5 shrink-0">#{reel.discoveryIndex}</span>
+                                <span className="font-mono text-[#F1F5F9] truncate max-w-[200px] sm:max-w-md">{reel.reelUrl}</span>
+                                <a
+                                  href={reel.reelUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-[#64748B] hover:text-[#3B82F6] shrink-0 transition-colors"
+                                  title="Open Reel"
+                                >
+                                  <ExternalLink size={12} />
+                                </a>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                {reel.rawViewText && (
+                                  <span className="text-[10px] text-[#94A3B8] font-mono">({reel.rawViewText})</span>
+                                )}
+                                <span className={`px-2.5 py-0.5 rounded font-mono font-bold text-xs border ${
+                                  typeof reel.viewCount === 'number'
+                                    ? 'bg-[#10B981]/15 text-[#10B981] border-[#10B981]/30'
+                                    : 'bg-[#F59E0B]/15 text-[#F59E0B] border-[#F59E0B]/30'
+                                }`}>
+                                  {typeof reel.viewCount === 'number' ? reel.viewCount.toLocaleString() : 'Missing View'}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Diagnostic Evidence (Secondary Accordion / Panel) */}
+                    {(activeCardData.finalUrl || activeCardData.pageReadiness || activeCardData.failureStage) && (
+                      <details className="group rounded-xl border border-[#293548] bg-[#111827]/60 overflow-hidden text-xs">
+                        <summary className="px-3.5 py-2.5 cursor-pointer flex items-center justify-between text-[#94A3B8] hover:text-[#F1F5F9] transition-colors select-none">
+                          <span className="text-[11px] font-semibold uppercase tracking-wider text-[#64748B]">
+                            Diagnostic & Verification Evidence
+                          </span>
+                          <span className="text-[10px] font-mono text-[#64748B] group-open:rotate-180 transition-transform">▼</span>
+                        </summary>
+                        <div className="p-3.5 pt-0 border-t border-[#293548]/40 space-y-2 mt-2">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] bg-[#141A22] p-3 rounded-lg border border-[#293548]">
+                            {activeCardData.finalUrl && (
+                              <div className="truncate sm:col-span-2">
+                                <span className="text-[#64748B]">Final URL:</span> <code className="text-[#F1F5F9] font-mono text-[10px] ml-1">{activeCardData.finalUrl}</code>
+                              </div>
+                            )}
+                            <div>
+                              <span className="text-[#64748B]">Page Readiness:</span> <strong className="text-[#F1F5F9] font-mono ml-1">{activeCardData.pageReadiness || 'complete'}</strong>
+                            </div>
+                            <div>
+                              <span className="text-[#64748B]">Initial Reel Anchors:</span> <strong className="text-[#F1F5F9] font-mono ml-1">{activeCardData.reelAnchorsAtStart ?? 0}</strong>
+                            </div>
+                            {activeCardData.failureStage && (
+                              <div className="sm:col-span-2">
+                                <span className="text-[#64748B]">Stage:</span> <span className="text-[#F59E0B] font-mono font-medium ml-1">{activeCardData.failureStage}</span>
+                              </div>
+                            )}
+                            {activeCardData.failureReason && (
+                              <div className="sm:col-span-2 text-[#94A3B8]">
+                                <span className="text-[#64748B]">Details:</span> {activeCardData.failureReason}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </details>
+                    )}
+                  </div>
+                )}
+
+                {activeCardData.error && (
+                  <div className="bg-[#EF4444]/10 border border-[#EF4444]/25 p-4 rounded-xl flex flex-col gap-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-[#EF4444] uppercase tracking-wider">
+                        <XCircle size={14} />
+                        <span>Research Failure Details</span>
+                      </div>
+                      {activeCardData.failureStage && (
+                        <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-[#EF4444]/20 text-[#EF4444] border border-[#EF4444]/30">
+                          Stage: {activeCardData.failureStage}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-xs sm:text-sm text-[#EF4444] font-medium">{activeCardData.error}</span>
+                    {activeCardData.finalUrl && (
+                      <div className="text-xs text-[#94A3B8] pt-2 border-t border-[#EF4444]/20 truncate">
+                        <span className="text-[#64748B]">Attempted URL:</span> <code className="font-mono text-[#F1F5F9] text-[10px] ml-1">{activeCardData.finalUrl}</code>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 9. Profile Queue Table */}
+            <RnDPreviewTable
+              job={currentJob}
+              researchResults={researchResults}
               onSelectProfile={(profile) => setSelectedProfileCode(profile.influencerCode)}
               selectedProfileCode={selectedProfileCode}
             />
