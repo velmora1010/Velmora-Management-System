@@ -97,10 +97,11 @@ export const mapToUnifiedWorkflowStage = (
 
   // 1. Fulfilled orders (source fulfillment status = 'fulfilled' or stage = 'fulfilled')
   if (currentStage === 'fulfilled' || fStatus === 'fulfilled') {
-    const trackingStatus = hasAwb ? resolveTrackingStatus(s, hasAwb) : 'Delivered';
+    const isReturn = s.includes('rto') || s.includes('return');
+    const trackingStatus = hasAwb || isReturn ? resolveTrackingStatus(s, true) : 'Delivered';
     return {
       status: trackingStatus || 'Delivered',
-      workflowStage: 'fulfilled'
+      workflowStage: isReturn ? 'tracking' : 'fulfilled'
     };
   }
 
@@ -257,7 +258,7 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
   );
 
   const { status, workflowStage } = mapToUnifiedWorkflowStage(
-    order.status,
+    (order as any).rawStatus || order.status,
     order.stage,
     order.awbNumber,
     hasRequiredInfo,
@@ -315,7 +316,8 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
     stage: order.stage || 'order_data',
     workflowStage,
     status,
-    rawStatus: order.status,
+    rawStatus: (order as any).rawStatus || order.status,
+    lastLocation: (order as any).lastLocation,
     lastEvent: order.lastEvent,
     syncedAt: order.syncedAt,
     trackingError: order.trackingError,
@@ -857,9 +859,26 @@ export const syncSalesUploadToLogistics = async (
                                    order.cancellationStatus === 'Completed' ||
                                    (order as any).isCancelled;
 
+      const isRtoOrder = (order.rawStatus || (order as any).raw_status || '').toLowerCase().includes('return') ||
+                         (order.rawStatus || (order as any).raw_status || '').toLowerCase().includes('rto') ||
+                         (order.status || '').toLowerCase().includes('rto') ||
+                         (order.status || '').toLowerCase().includes('return');
+
+      const isDeliveredOrder = !isRtoOrder && (
+        (order.status || '').toLowerCase() === 'delivered' ||
+        (order.rawStatus || (order as any).raw_status || '').toLowerCase() === 'delivered'
+      );
+
       if (isConfirmedCancelled) {
         stage = 'order_data';
         status = 'Cancelled';
+      } else if (isRtoOrder) {
+        stage = 'tracking';
+        status = order.status || 'RTO';
+      } else if (isDeliveredOrder) {
+        stage = 'fulfilled';
+        status = 'Delivered';
+        fulfilledCount++;
       } else if (isFulfilled) {
         stage = 'fulfilled';
         status = 'Fulfilled';
@@ -893,6 +912,10 @@ export const syncSalesUploadToLogistics = async (
         dispatchDate: order.dispatch_date,
         stage,
         status,
+        rawStatus: (order as any).rawStatus || (order as any).raw_status || status,
+        sourceStatus: (order as any).sourceStatus || status,
+        lastLocation: (order as any).lastLocation || (order as any).last_location,
+        remarks: order.remarks,
         uploadedAt: new Date().toISOString(),
         orderDate,
         orderDateDisplay,
@@ -954,11 +977,41 @@ export const syncSalesUploadToLogistics = async (
         patch.cancellationStatus = 'Completed';
       }
 
+      const isIncomingRto = (order.rawStatus || (order as any).raw_status || '').toLowerCase().includes('return') ||
+                            (order.rawStatus || (order as any).raw_status || '').toLowerCase().includes('rto') ||
+                            (order.status || '').toLowerCase().includes('rto') ||
+                            (order.status || '').toLowerCase().includes('return');
+
+      const isIncomingDelivered = !isIncomingRto && (
+        (order.status || '').toLowerCase() === 'delivered' ||
+        (order.rawStatus || (order as any).raw_status || '').toLowerCase() === 'delivered'
+      );
+
       const inWorkflow = existing.stage === 'prepare_dispatch' || 
                          existing.stage === 'dispatched' || 
                          existing.stage === 'tracking';
 
-      if (inWorkflow) {
+      if (isIncomingRto) {
+        patch.stage = 'tracking';
+        patch.status = order.status || 'RTO';
+        patch.rawStatus = order.rawStatus || (order as any).raw_status || 'RETURNED_TO_ORIGIN';
+        if (order.awb_number) patch.awbNumber = order.awb_number;
+        if (order.courier) patch.courier = normalizeCourier(order.courier);
+        if (order.dispatch_date) patch.dispatchDate = order.dispatch_date;
+        if (isFulfilled) {
+          patch.fulfillmentStatus = 'Fulfilled';
+          patch.sourceFulfillmentStatus = 'Fulfilled';
+        }
+      } else if (isIncomingDelivered) {
+        patch.stage = 'fulfilled';
+        patch.status = 'Delivered';
+        patch.rawStatus = order.rawStatus || (order as any).raw_status || 'DELIVERED';
+        if (order.awb_number) patch.awbNumber = order.awb_number;
+        if (order.courier) patch.courier = normalizeCourier(order.courier);
+        if (order.dispatch_date) patch.dispatchDate = order.dispatch_date;
+        patch.fulfillmentStatus = 'Fulfilled';
+        patch.sourceFulfillmentStatus = 'Fulfilled';
+      } else if (inWorkflow) {
         // STRICT RULE: Preserve dispatch preparation and tracking stages!
         preservedWorkflowCount++;
         if (isFulfilled) {
@@ -986,6 +1039,16 @@ export const syncSalesUploadToLogistics = async (
         patch.stage = 'active';
         patch.status = 'Unfulfilled';
         activeCount++;
+      }
+
+      if ((order.rawStatus || (order as any).raw_status) && !patch.rawStatus) {
+        patch.rawStatus = order.rawStatus || (order as any).raw_status;
+      }
+      if (order.remarks && !existing.remarks) {
+        patch.remarks = order.remarks;
+      }
+      if (((order as any).lastLocation || (order as any).last_location) && !(existing as any).lastLocation) {
+        (patch as any).lastLocation = (order as any).lastLocation || (order as any).last_location;
       }
 
       // Safe field updates: never overwrite valid existing values with blanks/empty
@@ -1124,7 +1187,7 @@ export const syncSalesOrdersFromSupabase = async (options?: { force?: boolean })
     while (sHasMore) {
       const { data: sData, error: sErr } = await supabase
         .from('customer_tracking_shipments')
-        .select('order_id, display_order_id, status, address, awb_number, courier, dispatch_date')
+        .select('order_id, display_order_id, status, raw_status, remarks, last_location, tracking_date_time, address, awb_number, courier, dispatch_date')
         .neq('status', 'Order Deleted')
         .neq('raw_status', 'DELETED')
         .range(sPage * sPageSize, (sPage + 1) * sPageSize - 1);
@@ -1214,7 +1277,11 @@ export const syncSalesOrdersFromSupabase = async (options?: { force?: boolean })
         }
       } else {
         const salesInfo = salesOrderFulfillmentMap.get(cId) || (bId ? salesOrderFulfillmentMap.get(bId) : undefined);
-        if (salesInfo?.isFulfilled && (rec.stage === 'active' || (rec.status || '').toLowerCase() === 'unfulfilled')) {
+        const isRtoRec = (rec.status || '').toLowerCase().includes('rto') ||
+                         (rec.status || '').toLowerCase().includes('return') ||
+                         ((rec as any).rawStatus || '').toLowerCase().includes('rto') ||
+                         ((rec as any).rawStatus || '').toLowerCase().includes('return');
+        if (!isRtoRec && salesInfo?.isFulfilled && (rec.stage === 'active' || (rec.status || '').toLowerCase() === 'unfulfilled')) {
           dexieUpdates.push({
             ...rec,
             stage: 'fulfilled',
@@ -1278,17 +1345,59 @@ export const syncSalesOrdersFromSupabase = async (options?: { force?: boolean })
       const hasShipment = !isConfirmedCancelled && !!existingShipment;
       const isDispatched = !isConfirmedCancelled && (hasShipment || (so.dispatch_status === 'DISPATCHED' && !!extra.awb_number));
 
+      const isShipmentRto = existingShipment && (
+        (existingShipment.raw_status || '').toLowerCase().includes('return') ||
+        (existingShipment.raw_status || '').toLowerCase().includes('rto') ||
+        (existingShipment.status || '').toLowerCase().includes('rto') ||
+        (existingShipment.status || '').toLowerCase().includes('return')
+      );
+
+      const isShipmentDelivered = existingShipment && !isShipmentRto && (
+        (existingShipment.status || '').toLowerCase() === 'delivered' ||
+        (existingShipment.raw_status || '').toLowerCase() === 'delivered'
+      );
+
       const fStatus = isConfirmedCancelled 
         ? 'cancelled' 
         : (isSourceFulfilled ? 'Fulfilled' : (normExtraFStatus === 'Partially Fulfilled' ? 'Partially Fulfilled' : (isDispatched ? 'dispatched' : 'Unfulfilled')));
 
-      const status = isConfirmedCancelled 
-        ? 'Cancelled' 
-        : (isSourceFulfilled ? 'Fulfilled' : (existingShipment?.status || (isDispatched ? 'Awaiting Tracking Update' : 'Unfulfilled')));
+      let status = 'Unfulfilled';
+      let rawStatus = 'Unfulfilled';
+
+      if (isConfirmedCancelled) {
+        status = 'Cancelled';
+        rawStatus = 'CANCELLED';
+      } else if (isShipmentRto) {
+        const rawUpper = (existingShipment.raw_status || '').toUpperCase();
+        if (rawUpper === 'RETURNED_TO_ORIGIN' || (existingShipment.status || '').toLowerCase().includes('delivered to seller')) {
+          status = 'RTO Delivered to Seller';
+        } else if (rawUpper === 'RETURNING_TO_ORIGIN' || (existingShipment.status || '').toLowerCase().includes('transit')) {
+          status = 'RTO - In Transit';
+        } else {
+          status = existingShipment.status || 'RTO Initiated';
+        }
+        rawStatus = existingShipment.raw_status || 'RETURNED_TO_ORIGIN';
+      } else if (isShipmentDelivered) {
+        status = 'Delivered';
+        rawStatus = existingShipment.raw_status || 'DELIVERED';
+      } else if (existingShipment?.status) {
+        status = existingShipment.status;
+        rawStatus = existingShipment.raw_status || existingShipment.status;
+      } else if (isSourceFulfilled) {
+        status = 'Fulfilled';
+        rawStatus = 'Fulfilled';
+      } else if (isDispatched) {
+        status = 'Awaiting Tracking Update';
+        rawStatus = 'Awaiting Tracking Update';
+      }
 
       const stage = isConfirmedCancelled
         ? 'order_data'
-        : (isSourceFulfilled ? (hasShipment ? 'tracking' : 'fulfilled') : (isDispatched ? 'tracking' : undefined));
+        : (isShipmentRto
+            ? 'tracking'
+            : (isShipmentDelivered
+                ? 'fulfilled'
+                : (isSourceFulfilled ? (hasShipment ? 'tracking' : 'fulfilled') : (isDispatched ? 'tracking' : undefined))));
 
       const cancellationStatus = isConfirmedCancelled 
         ? 'Completed' 
@@ -1313,6 +1422,11 @@ export const syncSalesOrdersFromSupabase = async (options?: { force?: boolean })
         courier: existingShipment?.courier || extra.courier,
         stage,
         status,
+        rawStatus,
+        raw_status: rawStatus,
+        sourceStatus: existingShipment?.status,
+        lastLocation: existingShipment?.last_location,
+        last_location: existingShipment?.last_location,
         dispatch_date: existingShipment?.dispatch_date || (isDispatched ? so.dispatch_date : undefined),
         fulfilled_date: extra.fulfilled_date || (isSourceFulfilled ? so.order_date : undefined),
         batchId: so.upload_id,
@@ -1325,7 +1439,8 @@ export const syncSalesOrdersFromSupabase = async (options?: { force?: boolean })
         cancellationConfirmedBy: cData.confirmed_by || 'Source System',
         cancellationDate: cData.cancelled_at || cData.confirmed_at || so.updated_at,
         previousShipmentStatus: cData.previous_shipment_status || (hasShipment ? 'Dispatched' : 'Not manifested'),
-        cancellation: cData
+        cancellation: cData,
+        remarks: existingShipment?.remarks || extra.cancellation_notes
       };
     });
 

@@ -267,10 +267,14 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
             needsUpdate = true;
           }
 
-          // If record has source status fulfilled but is in active stage, promote to fulfilled
+          // If record has source status fulfilled but is in active stage, promote to fulfilled (unless RTO)
+          const isRecRto = (rec.status || '').toLowerCase().includes('rto') ||
+                           (rec.status || '').toLowerCase().includes('return') ||
+                           ((rec as any).rawStatus || '').toLowerCase().includes('rto') ||
+                           ((rec as any).rawStatus || '').toLowerCase().includes('return');
           const isRecFulfilled = (rec.fulfillmentStatus || '').toLowerCase() === 'fulfilled' ||
                                  (rec.sourceFulfillmentStatus || '').toLowerCase() === 'fulfilled';
-          if (isRecFulfilled && rec.stage === 'active') {
+          if (!isRecRto && isRecFulfilled && rec.stage === 'active') {
             patch.stage = 'fulfilled';
             patch.status = 'Fulfilled';
             patch.fulfillmentStatus = 'Fulfilled';
