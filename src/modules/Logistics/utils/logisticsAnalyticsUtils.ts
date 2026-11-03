@@ -160,6 +160,7 @@ export function getCanonicalStatus(order: UnifiedLogisticsOrder): CanonicalLogis
   const statusStr = (order.status || '').toLowerCase().trim();
   const rawStatusStr = (order.rawStatus || '').toLowerCase().trim();
   const eventStr = (order.lastEvent || '').toLowerCase().trim();
+  const remarksStr = (order.remarks || '').toLowerCase().trim();
   const finStr = (order.financialStatus || '').toLowerCase().trim();
   const todayStr = formatLocalYMD(new Date());
 
@@ -181,23 +182,33 @@ export function getCanonicalStatus(order: UnifiedLogisticsOrder): CanonicalLogis
     rawStatusStr.includes('rto') || 
     rawStatusStr.includes('return') ||
     eventStr.includes('rto') ||
-    eventStr.includes('return to origin');
+    eventStr.includes('return to origin') ||
+    remarksStr.includes('rto') ||
+    remarksStr.includes('return to origin');
 
   if (isRto) {
     if (
       statusStr.includes('delivered to seller') || 
       statusStr.includes('delivered to sender') || 
       statusStr === 'returned' ||
+      statusStr.includes('returned to origin') ||
       rawStatusStr.includes('delivered to seller') || 
-      eventStr.includes('delivered to seller')
+      rawStatusStr.includes('returned_to_origin') ||
+      rawStatusStr.includes('returned to origin') ||
+      rawStatusStr === 'returned' ||
+      eventStr.includes('delivered to seller') ||
+      remarksStr.includes('delivered to seller')
     ) {
       return 'RTO Delivered to Seller';
     }
     if (
       statusStr.includes('in transit') || 
       rawStatusStr.includes('transit') || 
+      rawStatusStr.includes('returning_to_origin') ||
+      rawStatusStr.includes('returning to origin') ||
       eventStr.includes('in transit') ||
-      eventStr.includes('dispatched')
+      eventStr.includes('dispatched') ||
+      remarksStr.includes('transit')
     ) {
       return 'RTO In Transit';
     }

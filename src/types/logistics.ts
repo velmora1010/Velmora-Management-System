@@ -50,6 +50,8 @@ export interface LogisticsOrder {
   trackingError?: string;
   lastFailedAt?: string;
   // Source tracking file fields
+  rawStatus?: string;
+  lastLocation?: string;
   sourceStatus?: string;
   sourceSubStatus?: string;
   lastEvent?: string;

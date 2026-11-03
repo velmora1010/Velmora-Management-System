@@ -77,17 +77,8 @@ export function mapDelhiveryStatus(currentStatus?: string, statusType?: string) 
   const cs = (currentStatus || '').toUpperCase().trim();
   const st = (statusType || '').toUpperCase().trim();
 
-  if (cs === 'DELIVERED' || st === 'DELIVERED') {
-    return {
-      canonicalStatus: 'Delivered',
-      logisticsStage: 'fulfilled' as const,
-      salesDispatchStatus: 'DELIVERED' as const,
-      fulfillmentStatus: 'fulfilled' as const,
-      priorityRank: 100
-    };
-  }
-
-  if (cs === 'RETURNED_TO_ORIGIN') {
+  // Return to origin must take precedence over statusType === 'DELIVERED'
+  if (cs === 'RETURNED_TO_ORIGIN' || cs.includes('RETURNED_TO_ORIGIN') || cs.includes('RETURN TO ORIGIN')) {
     return {
       canonicalStatus: 'Returned to Origin',
       logisticsStage: 'fulfilled' as const,
@@ -97,13 +88,23 @@ export function mapDelhiveryStatus(currentStatus?: string, statusType?: string) 
     };
   }
 
-  if (cs === 'RETURNING_TO_ORIGIN' || st === 'RETURNED') {
+  if (cs === 'RETURNING_TO_ORIGIN' || cs.includes('RETURNING') || st === 'RETURNED' || st.includes('RTO')) {
     return {
       canonicalStatus: 'RTO - In Transit',
       logisticsStage: 'tracking' as const,
       salesDispatchStatus: 'RTO' as const,
       fulfillmentStatus: 'unfulfilled' as const,
       priorityRank: 80
+    };
+  }
+
+  if (cs === 'DELIVERED' || st === 'DELIVERED') {
+    return {
+      canonicalStatus: 'Delivered',
+      logisticsStage: 'fulfilled' as const,
+      salesDispatchStatus: 'DELIVERED' as const,
+      fulfillmentStatus: 'fulfilled' as const,
+      priorityRank: 100
     };
   }
 
