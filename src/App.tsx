@@ -67,6 +67,7 @@ const WebsiteSales = lazy(() => import('./modules/sales/WebsiteSales').then(modu
 const AmazonSales = lazy(() => import('./modules/sales/AmazonSales').then(module => ({ default: module.AmazonSales })));
 const FlipkartSales = lazy(() => import('./modules/sales/FlipkartSales').then(module => ({ default: module.FlipkartSales })));
 const MeeshoSales = lazy(() => import('./modules/sales/MeeshoSales').then(module => ({ default: module.MeeshoSales })));
+const HRModule = lazy(() => import('./modules/hr/HRModule'));
 
 // Fallback loader
 const RouteLoader = () => (
@@ -174,7 +175,7 @@ function App() {
                   <Route path="/tasks" element={<TaskManager />} />
                   <Route path="/archive" element={<ArchivePage />} />
                   <Route path="/research" element={<PlaceholderPage title="Research & Development" icon={<Lightbulb size={32} />} />} />
-                  <Route path="/hr" element={<PlaceholderPage title="Human Resources" icon={<Users size={32} />} />} />
+                  <Route path="/hr/*" element={<HRModule />} />
                   <Route path="/brand" element={<PlaceholderPage title="Brand Management" icon={<Tag size={32} />} />} />
                   <Route path="/settings" element={<SettingsPage />} />
 

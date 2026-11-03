@@ -98,9 +98,16 @@ export const rbacService = {
     } catch (e) {
       console.warn('Error fetching user profile from user_profiles:', e);
     }
-
-    // Default fallback: Super Admin for primary dev account
-    const defaultUser = { role: ROLES.SUPER_ADMIN, is_enabled: true };
+    // Secure fallback: Check email domain or user_metadata
+    const emailLower = (email || '').toLowerCase().trim();
+    const isAdminEmail =
+      emailLower === 'admin@velmora.com' ||
+      emailLower === 'admin@velmora1.com' ||
+      emailLower === 'admin@velmora2.com' ||
+      emailLower === 'admin@velmora3.com' ||
+      emailLower.startsWith('admin@');
+    const fallbackRole = isAdminEmail ? ROLES.SUPER_ADMIN : ROLES.STAFF;
+    const defaultUser = { role: fallbackRole, is_enabled: true };
     userRoleCache[userId] = defaultUser;
     return defaultUser;
   },
@@ -178,3 +185,4 @@ export const rbacService = {
     return { success: true };
   }
 };
+

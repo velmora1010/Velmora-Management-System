@@ -1,0 +1,12 @@
+{
+  "backupDate": "2026-10-15T16:30:00.000Z",
+  "description": "Backup of initial demo records before system reset to clean state",
+  "employeeCount": 16,
+  "departmentCount": 6,
+  "attendanceCount": 16,
+  "leaveCount": 6,
+  "shiftCount": 4,
+  "payrollCount": 8,
+  "activityCount": 5,
+  "notificationCount": 4
+}

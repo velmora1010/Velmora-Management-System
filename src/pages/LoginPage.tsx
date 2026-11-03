@@ -10,6 +10,7 @@ export const LoginPage = () => {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   // If user was redirected here from a deep link, restore it after login; otherwise land on Dashboard ('/')
@@ -25,19 +26,36 @@ export const LoginPage = () => {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoading) return; // Prevent duplicate concurrent submissions
+
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !password) {
+      const msg = 'Please enter both email and password';
+      setError(msg);
+      toast.error(msg, { id: 'login-error' });
+      return;
+    }
+
     setIsLoading(true);
+    setError(null);
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: email.trim().toLowerCase(),
+      const { data, error: authError } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
         password,
       });
 
-      if (error) throw error;
-      navigate(targetPath, { replace: true });
+      if (authError) throw authError;
+
+      if (data?.session) {
+        toast.dismiss('login-error');
+        navigate(targetPath, { replace: true });
+      }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to sign in';
-      toast.error(message);
+      const message = err instanceof Error ? err.message : 'Invalid login credentials';
+      setError(message);
+      // Guarantee exactly one deduplicated notification
+      toast.error(message, { id: 'login-error' });
     } finally {
       setIsLoading(false);
     }
@@ -61,6 +79,15 @@ export const LoginPage = () => {
         
         <div className="p-8">
           <form onSubmit={handleLogin} className="space-y-6">
+            {error && (
+              <div
+                role="alert"
+                className="p-3.5 bg-red-500/10 border border-red-500/25 rounded-xl text-red-400 text-xs sm:text-sm font-medium flex items-center justify-center gap-2 text-center"
+              >
+                <span>✕</span>
+                <span>{error}</span>
+              </div>
+            )}
             
             <div className="space-y-2">
               <label htmlFor="login-username" className="text-sm font-medium text-white block">Email Address</label>
@@ -70,9 +97,13 @@ export const LoginPage = () => {
                 id="login-username"
                 autoComplete="username"
                 required
+                disabled={isLoading}
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-background border border-border text-white text-sm rounded-lg focus:ring-primary focus:border-primary block p-3 transition-colors"
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (error) setError(null);
+                }}
+                className="w-full bg-background border border-border text-white text-sm rounded-lg focus:ring-primary focus:border-primary block p-3 transition-colors disabled:opacity-50"
                 placeholder="name@company.com"
               />
             </div>
@@ -85,9 +116,13 @@ export const LoginPage = () => {
                 id="login-password"
                 autoComplete="current-password"
                 required
+                disabled={isLoading}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-background border border-border text-white text-sm rounded-lg focus:ring-primary focus:border-primary block p-3 transition-colors"
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (error) setError(null);
+                }}
+                className="w-full bg-background border border-border text-white text-sm rounded-lg focus:ring-primary focus:border-primary block p-3 transition-colors disabled:opacity-50"
                 placeholder="••••••••"
               />
             </div>

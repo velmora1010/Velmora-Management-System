@@ -19,6 +19,7 @@ export const MODULES = {
   INVENTORY: 'inventory',
   PRODUCTION: 'production',
   QUALITY_CONTROL: 'quality_control',
+  HR: 'hr',
   SETTINGS: 'settings',
 } as const;
 

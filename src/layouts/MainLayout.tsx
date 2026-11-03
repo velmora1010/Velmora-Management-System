@@ -215,7 +215,7 @@ export const MainLayout = () => {
                 {user?.email || 'admin@velmora.com'}
               </div>
               <div className="text-[11px] text-muted font-medium mt-0.5">
-                {user?.email === 'admin@velmora.com' ? 'Main Admin' : 'User'}
+                {user?.email?.startsWith('admin@') ? 'Administrator' : 'Staff / Employee'}
               </div>
             </div>
           </div>
