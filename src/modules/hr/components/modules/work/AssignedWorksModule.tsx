@@ -235,27 +235,27 @@ export const AssignedWorksModule: React.FC = () => {
   if (!canManageEmployees) {
     if (!loggedInEmployee) {
       return (
-        <div className="space-y-6 animate-fade-in text-[#172B4D]">
+        <div className="space-y-6 animate-fade-in text-white">
           <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-[#206DA6]/10 text-[#206DA6] flex items-center justify-center font-bold">
+            <div className="w-10 h-10 rounded-2xl bg-blue-500/10 text-[#60A5FA] flex items-center justify-center font-bold border border-blue-500/20">
               <ClipboardCheck className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#172B4D]">
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
                 Assigned Works
               </h1>
-              <p className="text-xs sm:text-sm text-[#64748B] mt-0.5">
+              <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
                 View your assigned tasks, acknowledge instructions, and update completion.
               </p>
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-rose-200 p-8 text-center shadow-xs max-w-xl mx-auto my-8">
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto mb-3">
+          <div className="bg-[#1E293B] rounded-2xl border border-rose-500/30 p-8 text-center shadow-xs max-w-xl mx-auto my-8">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center justify-center mx-auto mb-3">
               <AlertCircle className="w-6 h-6" />
             </div>
-            <h2 className="text-base font-bold text-[#172B4D]">Profile Link Required</h2>
-            <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
+            <h2 className="text-base font-bold text-white">Profile Link Required</h2>
+            <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
               Your account is not linked to an employee profile. Please contact HR.
             </p>
           </div>
@@ -264,56 +264,56 @@ export const AssignedWorksModule: React.FC = () => {
     }
 
     return (
-      <div className="space-y-6 animate-fade-in text-[#172B4D]">
+      <div className="space-y-6 animate-fade-in text-white">
         {/* ================= 1. PAGE HEADER ================= */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-[#206DA6]/10 text-[#206DA6] flex items-center justify-center font-bold">
+            <div className="w-10 h-10 rounded-2xl bg-blue-500/10 text-[#60A5FA] flex items-center justify-center font-bold border border-blue-500/20">
               <ClipboardCheck className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#172B4D]">
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
                 Assigned Works
               </h1>
-              <p className="text-xs sm:text-sm text-[#64748B] mt-0.5">
+              <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
                 View your assigned tasks, acknowledge instructions, and update completion.
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-xl border border-emerald-200 text-xs font-semibold self-start md:self-auto">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          <div className="flex items-center gap-2 bg-emerald-500/10 text-emerald-400 px-3 py-1.5 rounded-xl border border-emerald-500/20 text-xs font-semibold self-start md:self-auto">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span>Personal Work Workspace</span>
           </div>
         </div>
 
         {/* ================= 2. TOP PERSONAL PROFILE SUMMARY ================= */}
-        <div className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs">
+        <div className="bg-[#1E293B] rounded-2xl border border-[#334155] p-5 shadow-xs">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-4">
               <Avatar
                 src={loggedInEmployee.avatar}
                 name={loggedInEmployee.fullName}
                 size="lg"
-                className="ring-2 ring-[#206DA6]/15 shadow-xs rounded-2xl"
+                className="ring-2 ring-blue-500/30 shadow-xs rounded-2xl"
               />
               <div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-base sm:text-lg font-bold text-[#172B4D]">
+                  <h2 className="text-base sm:text-lg font-bold text-white">
                     {loggedInEmployee.fullName}
                   </h2>
-                  <span className="px-2.5 py-0.5 rounded-md text-xs font-mono font-bold bg-blue-50 text-[#206DA6] border border-blue-200">
+                  <span className="px-2.5 py-0.5 rounded-md text-xs font-mono font-bold bg-[#0F172A] text-[#60A5FA] border border-[#334155]">
                     {loggedInEmployee.employeeCode}
                   </span>
                 </div>
-                <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 mt-1">
-                  <span className="flex items-center gap-1.5 font-medium text-slate-700">
-                    <Briefcase className="w-3.5 h-3.5 text-[#206DA6]" />
+                <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400 mt-1">
+                  <span className="flex items-center gap-1.5 font-medium text-slate-300">
+                    <Briefcase className="w-3.5 h-3.5 text-[#60A5FA]" />
                     {loggedInEmployee.designation || 'Employee'}
                   </span>
-                  <span className="text-slate-300">•</span>
-                  <span className="flex items-center gap-1.5 text-slate-600">
-                    <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                  <span className="text-slate-600">•</span>
+                  <span className="flex items-center gap-1.5 text-slate-400">
+                    <Building2 className="w-3.5 h-3.5 text-slate-500" />
                     {loggedInEmployee.departmentName || 'General Department'}
                   </span>
                 </div>
@@ -322,37 +322,37 @@ export const AssignedWorksModule: React.FC = () => {
           </div>
 
           {/* ================= 3. PERSONAL TASK COUNTS ================= */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mt-5 pt-5 border-t border-slate-100">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mt-5 pt-5 border-t border-[#334155]">
             {/* Total Assigned */}
-            <div className="bg-slate-50/80 rounded-xl p-3.5 border border-slate-200/70">
+            <div className="bg-[#151D2B] rounded-xl p-3.5 border border-[#334155]">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                   Total Assigned
                 </span>
-                <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                <div className="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center">
                   <ClipboardList className="w-3.5 h-3.5" />
                 </div>
               </div>
               <div className="mt-2">
-                <span className="text-xl font-black text-[#172B4D]">{personalCounts.totalAssigned}</span>
+                <span className="text-xl font-black text-white">{personalCounts.totalAssigned}</span>
                 <span className="text-[10px] text-slate-400 block mt-0.5">Your assigned tasks</span>
               </div>
             </div>
 
             {/* Not Seen */}
-            <div className="bg-slate-50/80 rounded-xl p-3.5 border border-slate-200/70">
+            <div className="bg-[#151D2B] rounded-xl p-3.5 border border-[#334155]">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                   Not Seen
                 </span>
-                <div className="w-7 h-7 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center">
+                <div className="w-7 h-7 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center justify-center">
                   <EyeOff className="w-3.5 h-3.5" />
                 </div>
               </div>
               <div className="mt-2">
                 <span
                   className={`text-xl font-black ${
-                    personalCounts.notSeen > 0 ? 'text-rose-600' : 'text-slate-700'
+                    personalCounts.notSeen > 0 ? 'text-rose-400' : 'text-slate-300'
                   }`}
                 >
                   {personalCounts.notSeen}
@@ -362,49 +362,49 @@ export const AssignedWorksModule: React.FC = () => {
             </div>
 
             {/* Acknowledged */}
-            <div className="bg-slate-50/80 rounded-xl p-3.5 border border-slate-200/70">
+            <div className="bg-[#151D2B] rounded-xl p-3.5 border border-[#334155]">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                   Acknowledged
                 </span>
-                <div className="w-7 h-7 rounded-lg bg-blue-50 text-[#206DA6] flex items-center justify-center">
+                <div className="w-7 h-7 rounded-lg bg-blue-500/10 text-[#60A5FA] border border-blue-500/20 flex items-center justify-center">
                   <CheckCheck className="w-3.5 h-3.5" />
                 </div>
               </div>
               <div className="mt-2">
-                <span className="text-xl font-black text-[#206DA6]">{personalCounts.acknowledged}</span>
+                <span className="text-xl font-black text-[#60A5FA]">{personalCounts.acknowledged}</span>
                 <span className="text-[10px] text-slate-400 block mt-0.5">Confirmed Seen ✓</span>
               </div>
             </div>
 
             {/* Pending */}
-            <div className="bg-slate-50/80 rounded-xl p-3.5 border border-slate-200/70">
+            <div className="bg-[#151D2B] rounded-xl p-3.5 border border-[#334155]">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                   Pending
                 </span>
-                <div className="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
+                <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center">
                   <Clock className="w-3.5 h-3.5" />
                 </div>
               </div>
               <div className="mt-2">
-                <span className="text-xl font-black text-amber-600">{personalCounts.pending}</span>
+                <span className="text-xl font-black text-amber-400">{personalCounts.pending}</span>
                 <span className="text-[10px] text-slate-400 block mt-0.5">In progress / pending</span>
               </div>
             </div>
 
             {/* Completed */}
-            <div className="bg-slate-50/80 rounded-xl p-3.5 border border-slate-200/70 col-span-2 sm:col-span-1">
+            <div className="bg-[#151D2B] rounded-xl p-3.5 border border-[#334155] col-span-2 sm:col-span-1">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                   Completed
                 </span>
-                <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center">
                   <CheckCircle2 className="w-3.5 h-3.5" />
                 </div>
               </div>
               <div className="mt-2">
-                <span className="text-xl font-black text-emerald-600">{personalCounts.completed}</span>
+                <span className="text-xl font-black text-emerald-400">{personalCounts.completed}</span>
                 <span className="text-[10px] text-slate-400 block mt-0.5">Finished tasks</span>
               </div>
             </div>
@@ -430,14 +430,14 @@ export const AssignedWorksModule: React.FC = () => {
                   onClick={() => setPersonalFilter(tab.id)}
                   className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
                     isActive
-                      ? 'bg-[#206DA6] text-white shadow-xs'
-                      : 'bg-white text-slate-600 hover:text-[#172B4D] border border-slate-200/90 hover:bg-slate-50'
+                      ? 'bg-[#2563EB] text-white shadow-xs'
+                      : 'bg-[#1E293B] text-slate-400 hover:text-white border border-[#334155] hover:bg-[#151D2B]'
                   }`}
                 >
                   <span>{tab.label}</span>
                   <span
                     className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
-                      isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+                      isActive ? 'bg-white/20 text-white' : 'bg-[#0F172A] text-slate-400 border border-[#334155]'
                     }`}
                   >
                     {tab.count}
@@ -450,23 +450,23 @@ export const AssignedWorksModule: React.FC = () => {
 
         {/* ================= 5. PERSONAL TASK CARDS LIST ================= */}
         {personalAssignments.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-slate-200/90 p-12 text-center shadow-xs">
-            <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
+          <div className="bg-[#1E293B] rounded-2xl border border-[#334155] p-12 text-center shadow-xs">
+            <div className="w-12 h-12 rounded-2xl bg-[#0F172A] border border-[#334155] text-slate-400 flex items-center justify-center mx-auto mb-3">
               <ClipboardList className="w-6 h-6" />
             </div>
-            <p className="text-sm font-bold text-[#172B4D]">No work assigned to you yet.</p>
+            <p className="text-sm font-bold text-white">No work assigned to you yet.</p>
             <p className="text-xs text-slate-400 mt-1">
               Tasks assigned to your profile by HR will appear directly on this page.
             </p>
           </div>
         ) : filteredPersonalAssignments.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-slate-200/90 p-10 text-center shadow-xs">
-            <ClipboardList className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-            <p className="text-sm font-bold text-[#172B4D]">No tasks match the selected filter.</p>
+          <div className="bg-[#1E293B] rounded-2xl border border-[#334155] p-10 text-center shadow-xs">
+            <ClipboardList className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+            <p className="text-sm font-bold text-white">No tasks match the selected filter.</p>
             <button
               type="button"
               onClick={() => setPersonalFilter('all')}
-              className="mt-3 px-4 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-[#206DA6] transition-colors cursor-pointer"
+              className="mt-3 px-4 py-1.5 rounded-xl bg-[#0F172A] hover:bg-[#151D2B] border border-[#334155] text-xs font-bold text-[#60A5FA] transition-colors cursor-pointer"
             >
               Show All Tasks
             </button>
@@ -503,40 +503,40 @@ export const AssignedWorksModule: React.FC = () => {
               return (
                 <div
                   key={assignment.id}
-                  className="bg-white rounded-2xl border border-slate-200/90 hover:border-[#206DA6]/40 shadow-xs transition-all overflow-hidden"
+                  className="bg-[#1E293B] rounded-2xl border border-[#334155] hover:border-blue-500/40 shadow-xs transition-all overflow-hidden"
                 >
                   {/* Top Bar: Task Number, ID, Title & Status Badges */}
-                  <div className="px-5 py-3.5 bg-slate-50/70 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-3">
+                  <div className="px-5 py-3.5 bg-[#151D2B] border-b border-[#334155] flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-slate-200/80 text-slate-700 shrink-0">
+                      <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-[#0F172A] border border-[#334155] text-slate-300 shrink-0">
                         Task #{taskNumber}
                       </span>
-                      <span className="px-2.5 py-0.5 rounded-md text-xs font-mono font-bold bg-[#206DA6] text-white shrink-0">
+                      <span className="px-2.5 py-0.5 rounded-md text-xs font-mono font-bold bg-[#2563EB] text-white shrink-0">
                         {taskCode}
                       </span>
-                      <h3 className="text-sm font-bold text-[#172B4D] truncate">{title}</h3>
+                      <h3 className="text-sm font-bold text-white truncate">{title}</h3>
                     </div>
 
                     <div className="flex items-center gap-2 flex-wrap">
                       {/* Seen Status Badge */}
                       {isAck ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
                           <span>Seen ✓</span>
                           {isAckRecordedByHR && (
-                            <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                            <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30">
                               Recorded by HR
                             </span>
                           )}
                         </span>
                       ) : assignment.firstViewedAt ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                          <Eye className="w-3.5 h-3.5 text-blue-600" />
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/30">
+                          <Eye className="w-3.5 h-3.5 text-blue-400" />
                           <span>Seen ✓</span>
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-                          <EyeOff className="w-3.5 h-3.5 text-rose-500" />
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30">
+                          <EyeOff className="w-3.5 h-3.5 text-rose-400" />
                           <span>Not Seen</span>
                         </span>
                       )}
@@ -545,16 +545,16 @@ export const AssignedWorksModule: React.FC = () => {
                       <span
                         className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold ${
                           assignment.status === 'completed'
-                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                            ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
                             : assignment.status === 'in_progress'
-                            ? 'bg-blue-100 text-blue-800 border border-blue-300'
-                            : 'bg-amber-100 text-amber-800 border border-amber-300'
+                            ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
+                            : 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
                         }`}
                       >
                         {assignment.status === 'completed' ? (
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                         ) : (
-                          <Clock className="w-3.5 h-3.5 text-amber-600" />
+                          <Clock className="w-3.5 h-3.5 text-amber-400" />
                         )}
                         <span>
                           {assignment.status === 'completed'
@@ -564,7 +564,7 @@ export const AssignedWorksModule: React.FC = () => {
                             : 'Pending'}
                         </span>
                         {assignment.status === 'completed' && isCompRecordedByHR && (
-                          <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                          <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30">
                             Recorded by HR
                           </span>
                         )}
@@ -579,79 +579,79 @@ export const AssignedWorksModule: React.FC = () => {
                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
                         Task Brief
                       </span>
-                      <p className="text-xs text-[#172B4D] font-medium leading-relaxed bg-slate-50/80 p-3 rounded-xl border border-slate-200/70">
+                      <p className="text-xs text-slate-200 font-medium leading-relaxed bg-[#0F172A] p-3 rounded-xl border border-[#334155]">
                         {brief}
                       </p>
                     </div>
 
                     {/* Metadata Grid: Assigned By, Assigned Date, Seen Status, Seen Time, Work Status, Completed Time */}
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-1 text-xs">
-                      <div className="p-2.5 rounded-xl bg-slate-50/70 border border-slate-100">
+                      <div className="p-2.5 rounded-xl bg-[#0F172A] border border-[#334155]">
                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
                           Assigned By
                         </span>
-                        <span className="font-semibold text-[#172B4D] mt-0.5 block truncate">
+                        <span className="font-semibold text-white mt-0.5 block truncate">
                           {assignedBy}
                         </span>
                       </div>
 
-                      <div className="p-2.5 rounded-xl bg-slate-50/70 border border-slate-100">
+                      <div className="p-2.5 rounded-xl bg-[#0F172A] border border-[#334155]">
                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
                           Assigned Date
                         </span>
-                        <span className="font-semibold text-[#172B4D] mt-0.5 block">
+                        <span className="font-semibold text-slate-200 mt-0.5 block">
                           {assignedDate}
                         </span>
                       </div>
 
-                      <div className="p-2.5 rounded-xl bg-slate-50/70 border border-slate-100">
+                      <div className="p-2.5 rounded-xl bg-[#0F172A] border border-[#334155]">
                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
                           Seen Status
                         </span>
                         <span
                           className={`font-bold mt-0.5 block ${
                             isAck
-                              ? 'text-emerald-700'
+                              ? 'text-emerald-400'
                               : assignment.firstViewedAt
-                              ? 'text-blue-700'
-                              : 'text-rose-600'
+                              ? 'text-blue-400'
+                              : 'text-rose-400'
                           }`}
                         >
                           {isAck ? 'Seen ✓' : assignment.firstViewedAt ? 'Seen ✓' : 'Not Seen'}
                         </span>
                       </div>
 
-                      <div className="p-2.5 rounded-xl bg-slate-50/70 border border-slate-100">
+                      <div className="p-2.5 rounded-xl bg-[#0F172A] border border-[#334155]">
                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
                           Seen Time
                         </span>
-                        <span className="font-mono text-[11px] font-semibold text-slate-700 mt-0.5 block">
+                        <span className="font-mono text-[11px] font-semibold text-slate-300 mt-0.5 block">
                           {seenTime}
                         </span>
                       </div>
 
-                      <div className="p-2.5 rounded-xl bg-slate-50/70 border border-slate-100">
+                      <div className="p-2.5 rounded-xl bg-[#0F172A] border border-[#334155]">
                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
                           Work Status
                         </span>
                         <span
                           className={`font-bold mt-0.5 block capitalize ${
                             assignment.status === 'completed'
-                              ? 'text-emerald-700'
+                              ? 'text-emerald-400'
                               : assignment.status === 'in_progress'
-                              ? 'text-blue-700'
-                              : 'text-amber-700'
+                              ? 'text-blue-400'
+                              : 'text-amber-400'
                           }`}
                         >
                           {assignment.status.replace('_', ' ')}
                         </span>
                       </div>
 
-                      <div className="p-2.5 rounded-xl bg-slate-50/70 border border-slate-100">
+                      <div className="p-2.5 rounded-xl bg-[#0F172A] border border-[#334155]">
                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
                           Completed Time
                         </span>
-                        <span className="font-mono text-[11px] font-semibold text-slate-700 mt-0.5 block">
+                        <span className="font-mono text-[11px] font-semibold text-slate-300 mt-0.5 block">
                           {completedTime}
                         </span>
                       </div>
@@ -659,13 +659,13 @@ export const AssignedWorksModule: React.FC = () => {
 
                     {/* Expandable Description & Reference Attachments */}
                     {(description || refFile) && isExpanded && (
-                      <div className="pt-3 border-t border-slate-100 space-y-3 animate-fade-in">
+                      <div className="pt-3 border-t border-[#334155] space-y-3 animate-fade-in">
                         {description && (
                           <div>
                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
                               Task Description & Instructions
                             </span>
-                            <p className="text-xs text-slate-600 leading-relaxed bg-slate-50/60 p-3.5 rounded-xl border border-slate-200/70 whitespace-pre-wrap">
+                            <p className="text-xs text-slate-300 leading-relaxed bg-[#0F172A] p-3.5 rounded-xl border border-[#334155] whitespace-pre-wrap">
                               {description}
                             </p>
                           </div>
@@ -676,7 +676,7 @@ export const AssignedWorksModule: React.FC = () => {
                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
                               Reference Attachment
                             </span>
-                            <div className="p-3 bg-blue-50/30 border border-blue-200/70 rounded-xl flex items-center justify-between gap-3">
+                            <div className="p-3 bg-[#0F172A] border border-[#334155] rounded-xl flex items-center justify-between gap-3">
                               <div className="flex items-center gap-3 min-w-0">
                                 {refFile.startsWith('data:image') ||
                                 refFile.includes('.jpg') ||
@@ -684,15 +684,15 @@ export const AssignedWorksModule: React.FC = () => {
                                   <img
                                     src={refFile}
                                     alt={refFileName}
-                                    className="w-10 h-10 object-cover rounded-lg border border-blue-200 shrink-0"
+                                    className="w-10 h-10 object-cover rounded-lg border border-[#334155] shrink-0"
                                   />
                                 ) : (
-                                  <div className="w-9 h-9 rounded-lg bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+                                  <div className="w-9 h-9 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 flex items-center justify-center shrink-0">
                                     <FileText className="w-4 h-4" />
                                   </div>
                                 )}
                                 <div className="min-w-0">
-                                  <span className="text-xs font-bold text-[#172B4D] block truncate">
+                                  <span className="text-xs font-bold text-white block truncate">
                                     {refFileName}
                                   </span>
                                   <span className="text-[10px] text-slate-400">Attached by {assignedBy}</span>
@@ -704,7 +704,7 @@ export const AssignedWorksModule: React.FC = () => {
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 download={refFileName}
-                                className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-semibold text-[#206DA6] hover:bg-blue-50 flex items-center gap-1 shadow-2xs shrink-0"
+                                className="px-3 py-1.5 rounded-lg bg-[#1E293B] border border-[#334155] text-xs font-semibold text-[#60A5FA] hover:bg-[#2563EB] hover:text-white flex items-center gap-1 shadow-2xs shrink-0 transition-colors"
                               >
                                 <Download className="w-3.5 h-3.5" />
                                 <span>Download</span>
@@ -716,7 +716,7 @@ export const AssignedWorksModule: React.FC = () => {
                     )}
 
                     {/* Action Bar: Expand/Popup Details on Left, Independent Seen / OK | Complete Controls on Right */}
-                    <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/60 -mx-5 -mb-5 px-5 py-3.5">
+                    <div className="pt-3 border-t border-[#334155] flex flex-wrap items-center justify-between gap-3 bg-[#151D2B] -mx-5 -mb-5 px-5 py-3.5">
                       <div className="flex items-center gap-3">
                         <button
                           type="button"
@@ -728,7 +728,7 @@ export const AssignedWorksModule: React.FC = () => {
                               taskCode,
                             })
                           }
-                          className="text-xs font-bold text-[#206DA6] hover:underline flex items-center gap-1 cursor-pointer"
+                          className="text-xs font-bold text-[#60A5FA] hover:text-[#93C5FD] flex items-center gap-1 cursor-pointer transition-colors"
                         >
                           <Eye className="w-3.5 h-3.5" />
                           <span>View Details</span>
@@ -738,7 +738,7 @@ export const AssignedWorksModule: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => toggleExpandTask(assignment.id)}
-                            className="text-xs font-semibold text-slate-500 hover:text-[#172B4D] flex items-center gap-1 cursor-pointer"
+                            className="text-xs font-semibold text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
                           >
                             <span>{isExpanded ? 'Hide Instructions' : 'Expand Instructions'}</span>
                             {isExpanded ? (
@@ -757,7 +757,7 @@ export const AssignedWorksModule: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => handleEmployeeAcknowledge(assignment)}
-                            className="px-4 py-2 rounded-xl bg-[#206DA6] hover:bg-[#1a5682] text-white text-xs font-bold shadow-xs hover:shadow transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+                            className="px-4 py-2 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold shadow-xs hover:shadow transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
                           >
                             <Check className="w-4 h-4" />
                             <span>Seen / OK</span>
@@ -766,12 +766,12 @@ export const AssignedWorksModule: React.FC = () => {
                           <button
                             type="button"
                             disabled
-                            className="px-4 py-2 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-300 text-xs font-bold flex items-center gap-1.5 cursor-default shadow-2xs"
+                            className="px-4 py-2 rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-xs font-bold flex items-center gap-1.5 cursor-default shadow-2xs"
                           >
-                            <Check className="w-4 h-4 text-emerald-600" />
+                            <Check className="w-4 h-4 text-emerald-400" />
                             <span>Seen ✓</span>
                             {assignment.acknowledgedAt && (
-                              <span className="text-[10px] font-mono text-emerald-600/90 ml-0.5">
+                              <span className="text-[10px] font-mono text-emerald-300 ml-0.5">
                                 ({assignment.acknowledgedAt})
                               </span>
                             )}
@@ -783,9 +783,9 @@ export const AssignedWorksModule: React.FC = () => {
                           <button
                             type="button"
                             disabled
-                            className="px-4 py-2 rounded-xl bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold flex items-center gap-1.5 cursor-default shadow-2xs"
+                            className="px-4 py-2 rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-xs font-bold flex items-center gap-1.5 cursor-default shadow-2xs"
                           >
-                            <CheckCircle2 className="w-4 h-4 text-emerald-700" />
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                             <span>Completed ✓</span>
                           </button>
                         ) : !isAck ? (
@@ -793,7 +793,7 @@ export const AssignedWorksModule: React.FC = () => {
                             type="button"
                             disabled
                             title="Please acknowledge the task first by clicking Seen / OK"
-                            className="px-4 py-2 rounded-xl bg-slate-100 text-slate-400 border border-slate-200 text-xs font-semibold flex items-center gap-1.5 cursor-not-allowed opacity-60"
+                            className="px-4 py-2 rounded-xl bg-[#0F172A] text-slate-500 border border-[#334155] text-xs font-semibold flex items-center gap-1.5 cursor-not-allowed"
                           >
                             <CheckCircle2 className="w-4 h-4" />
                             <span>Complete</span>
@@ -807,7 +807,7 @@ export const AssignedWorksModule: React.FC = () => {
                                 taskTitle: title,
                               })
                             }
-                            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs hover:shadow transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+                            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-xs hover:shadow transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
                           >
                             <CheckCircle2 className="w-4 h-4" />
                             <span>Complete</span>
@@ -825,25 +825,25 @@ export const AssignedWorksModule: React.FC = () => {
         {/* ================= CENTERED TASK DETAILS POPUP (EMPLOYEE) ================= */}
         {detailPopupAssignment &&
           createPortal(
-            <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
+            <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
               <div
-                className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden text-[#172B4D] animate-scale-up"
+                className="bg-[#1E293B] rounded-2xl shadow-2xl border border-[#334155] max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden text-white animate-scale-up"
                 role="dialog"
                 aria-modal="true"
               >
-                <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-white">
+                <div className="px-6 py-4 border-b border-[#334155] flex items-center justify-between bg-[#1E293B]">
                   <div className="flex items-center gap-2.5">
-                    <span className="px-2 py-0.5 rounded-md text-xs font-bold bg-slate-100 text-slate-700">
+                    <span className="px-2 py-0.5 rounded-md text-xs font-bold bg-[#0F172A] text-slate-300 border border-[#334155]">
                       Task #{detailPopupAssignment.taskNumber}
                     </span>
-                    <span className="px-2.5 py-0.5 rounded-md text-xs font-mono font-bold bg-[#206DA6] text-white">
+                    <span className="px-2.5 py-0.5 rounded-md text-xs font-mono font-bold bg-[#2563EB] text-white">
                       {detailPopupAssignment.taskCode}
                     </span>
                   </div>
                   <button
                     type="button"
                     onClick={() => setDetailPopupAssignment(null)}
-                    className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-colors"
+                    className="p-1.5 text-slate-400 hover:text-white hover:bg-[#0F172A] rounded-xl transition-colors cursor-pointer"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -851,20 +851,20 @@ export const AssignedWorksModule: React.FC = () => {
 
                 <div className="flex-1 overflow-y-auto p-6 space-y-4">
                   <div>
-                    <h3 className="text-base font-bold text-[#172B4D]">
+                    <h3 className="text-base font-bold text-white">
                       {detailPopupAssignment.assignment.taskTitle ||
                         detailPopupAssignment.task?.title ||
                         'Assigned Task'}
                     </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
+                    <p className="text-xs text-slate-400 mt-0.5">
                       Assigned by{' '}
-                      <span className="font-semibold text-slate-700">
+                      <span className="font-semibold text-slate-200">
                         {detailPopupAssignment.assignment.assignedBy ||
                           detailPopupAssignment.task?.assignedBy ||
                           'HR Administrator'}
                       </span>{' '}
                       on{' '}
-                      <span className="font-semibold text-slate-700">
+                      <span className="font-semibold text-slate-200">
                         {detailPopupAssignment.assignment.assignedAt ||
                           detailPopupAssignment.task?.assignedDate ||
                           '—'}
@@ -876,7 +876,7 @@ export const AssignedWorksModule: React.FC = () => {
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
                       Task Brief
                     </span>
-                    <p className="text-xs text-[#172B4D] font-medium leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+                    <p className="text-xs text-slate-200 font-medium leading-relaxed bg-[#0F172A] p-3.5 rounded-xl border border-[#334155]">
                       {detailPopupAssignment.assignment.taskBrief ||
                         detailPopupAssignment.task?.brief ||
                         'No task brief provided.'}
@@ -887,7 +887,7 @@ export const AssignedWorksModule: React.FC = () => {
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
                       Task Description & Instructions
                     </span>
-                    <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 whitespace-pre-wrap min-h-[72px]">
+                    <p className="text-xs text-slate-300 leading-relaxed bg-[#0F172A] p-3.5 rounded-xl border border-[#334155] whitespace-pre-wrap min-h-[72px]">
                       {detailPopupAssignment.assignment.taskDescription ||
                         detailPopupAssignment.task?.description ||
                         'No detailed instructions provided.'}
@@ -900,18 +900,18 @@ export const AssignedWorksModule: React.FC = () => {
                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
                         Reference Attachment
                       </span>
-                      <div className="p-3 bg-blue-50/40 border border-blue-200/80 rounded-xl flex items-center justify-between gap-3">
+                      <div className="p-3 bg-[#0F172A] border border-[#334155] rounded-xl flex items-center justify-between gap-3">
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-9 h-9 rounded-lg bg-blue-100 text-[#206DA6] flex items-center justify-center shrink-0">
+                          <div className="w-9 h-9 rounded-lg bg-blue-500/10 text-[#60A5FA] border border-blue-500/20 flex items-center justify-center shrink-0">
                             <FileText className="w-4 h-4" />
                           </div>
                           <div className="min-w-0">
-                            <span className="text-xs font-bold text-[#172B4D] block truncate">
+                            <span className="text-xs font-bold text-white block truncate">
                               {detailPopupAssignment.assignment.referenceFileName ||
                                 detailPopupAssignment.task?.referenceFileName ||
                                 'Reference File'}
                             </span>
-                            <span className="text-[10px] text-slate-500">Attached reference file</span>
+                            <span className="text-[10px] text-slate-400">Attached reference file</span>
                           </div>
                         </div>
 
@@ -927,7 +927,7 @@ export const AssignedWorksModule: React.FC = () => {
                             detailPopupAssignment.task?.referenceFileName ||
                             'Reference File'
                           }
-                          className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-semibold text-[#206DA6] hover:bg-blue-50 flex items-center gap-1 shadow-2xs shrink-0"
+                          className="px-3 py-1.5 rounded-lg bg-[#1E293B] border border-[#334155] text-xs font-semibold text-[#60A5FA] hover:bg-[#2563EB] hover:text-white flex items-center gap-1 shadow-2xs shrink-0 transition-colors"
                         >
                           <Download className="w-3.5 h-3.5" />
                           <span>Download</span>
@@ -937,11 +937,11 @@ export const AssignedWorksModule: React.FC = () => {
                   )}
                 </div>
 
-                <div className="px-6 py-3.5 border-t border-slate-200 bg-slate-50 flex items-center justify-end">
+                <div className="px-6 py-3.5 border-t border-[#334155] bg-[#151D2B] flex items-center justify-end">
                   <button
                     type="button"
                     onClick={() => setDetailPopupAssignment(null)}
-                    className="px-4 py-2 rounded-xl bg-white border border-slate-300 text-xs font-bold text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                    className="px-4 py-2 rounded-xl bg-[#0F172A] border border-[#334155] text-xs font-bold text-slate-300 hover:text-white hover:bg-[#1E293B] transition-colors cursor-pointer"
                   >
                     Close
                   </button>
@@ -954,18 +954,18 @@ export const AssignedWorksModule: React.FC = () => {
         {/* ================= EMPLOYEE COMPLETE TASK CONFIRMATION MODAL ================= */}
         {taskToComplete &&
           createPortal(
-            <div className="fixed inset-0 z-60 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
-              <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 text-center space-y-4 animate-scale-up">
-                <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 mx-auto flex items-center justify-center">
+            <div className="fixed inset-0 z-60 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
+              <div className="bg-[#1E293B] rounded-2xl shadow-2xl border border-[#334155] max-w-md w-full p-6 text-center space-y-4 animate-scale-up">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 mx-auto flex items-center justify-center">
                   <CheckCircle2 className="w-6 h-6" />
                 </div>
 
                 <div>
-                  <h3 className="text-base font-bold text-[#172B4D]">Complete Assigned Task</h3>
-                  <p className="text-xs font-semibold text-[#206DA6] mt-1">
+                  <h3 className="text-base font-bold text-white">Complete Assigned Task</h3>
+                  <p className="text-xs font-semibold text-[#60A5FA] mt-1">
                     "{taskToComplete.taskTitle}"
                   </p>
-                  <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+                  <p className="text-xs text-slate-300 mt-2 leading-relaxed">
                     Have you finished this assigned work?
                   </p>
                 </div>
@@ -975,7 +975,7 @@ export const AssignedWorksModule: React.FC = () => {
                     type="button"
                     disabled={isCompleting}
                     onClick={() => setTaskToComplete(null)}
-                    className="flex-1 py-2.5 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer"
+                    className="flex-1 py-2.5 rounded-xl border border-[#334155] text-xs font-semibold text-slate-300 hover:text-white hover:bg-[#0F172A] transition-colors cursor-pointer"
                   >
                     Cancel
                   </button>
@@ -984,7 +984,7 @@ export const AssignedWorksModule: React.FC = () => {
                     type="button"
                     disabled={isCompleting}
                     onClick={handleConfirmEmployeeComplete}
-                    className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
                   >
                     {isCompleting ? (
                       <span>Saving...</span>
@@ -1004,37 +1004,37 @@ export const AssignedWorksModule: React.FC = () => {
         {/* ================= COMPLETION SUCCESS MODAL ================= */}
         {completedSuccessDetails &&
           createPortal(
-            <div className="fixed inset-0 z-60 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
-              <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-sm w-full p-6 text-center space-y-4 animate-scale-up">
-                <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-600 mx-auto flex items-center justify-center">
+            <div className="fixed inset-0 z-60 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
+              <div className="bg-[#1E293B] rounded-2xl shadow-2xl border border-[#334155] max-w-sm w-full p-6 text-center space-y-4 animate-scale-up">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 mx-auto flex items-center justify-center">
                   <CheckCircle2 className="w-7 h-7" />
                 </div>
 
                 <div>
-                  <h3 className="text-base font-bold text-[#172B4D]">
+                  <h3 className="text-base font-bold text-white">
                     Task Completion Recorded Successfully!
                   </h3>
-                  <p className="text-xs text-slate-500 mt-1">
+                  <p className="text-xs text-slate-400 mt-1">
                     Your task status and completion timestamp have been saved.
                   </p>
                 </div>
 
-                <div className="p-3 bg-slate-50 rounded-xl text-left text-xs space-y-1.5 border border-slate-200">
+                <div className="p-3 bg-[#0F172A] rounded-xl text-left text-xs space-y-1.5 border border-[#334155]">
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Employee:</span>
-                    <span className="font-bold text-[#172B4D]">
+                    <span className="text-slate-400">Employee:</span>
+                    <span className="font-bold text-white">
                       {completedSuccessDetails.employeeName}
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Task:</span>
-                    <span className="font-bold text-[#206DA6] truncate max-w-[180px]">
+                    <span className="text-slate-400">Task:</span>
+                    <span className="font-bold text-[#60A5FA] truncate max-w-[180px]">
                       {completedSuccessDetails.taskTitle}
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Completed Time:</span>
-                    <span className="font-bold text-emerald-700">
+                    <span className="text-slate-400">Completed Time:</span>
+                    <span className="font-bold text-emerald-400">
                       {completedSuccessDetails.completedAt}
                     </span>
                   </div>
@@ -1043,7 +1043,7 @@ export const AssignedWorksModule: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setCompletedSuccessDetails(null)}
-                  className="w-full py-2.5 rounded-xl bg-[#206DA6] hover:bg-[#1a5682] text-white text-xs font-bold transition-colors cursor-pointer"
+                  className="w-full py-2.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold transition-colors cursor-pointer"
                 >
                   Great, Continue
                 </button>
@@ -1059,19 +1059,19 @@ export const AssignedWorksModule: React.FC = () => {
   // HR / ADMIN VIEW — ORGANIZATION-WIDE ASSIGNED WORKS MONITORING
   // ============================================================================
   return (
-    <div className="space-y-6 animate-fade-in text-[#172B4D]">
+    <div className="space-y-6 animate-fade-in text-white">
       {/* ================= 1. PAGE HEADER ================= */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-[#206DA6]/10 text-[#206DA6] flex items-center justify-center font-bold">
+            <div className="w-10 h-10 rounded-2xl bg-blue-500/10 text-[#60A5FA] flex items-center justify-center font-bold border border-blue-500/20">
               <ClipboardCheck className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#172B4D]">
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
                 Assigned Works
               </h1>
-              <p className="text-xs sm:text-sm text-[#64748B] mt-0.5">
+              <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
                 Monitor employee assignments, acknowledgements, and task completion.
               </p>
             </div>
@@ -1079,8 +1079,8 @@ export const AssignedWorksModule: React.FC = () => {
         </div>
 
         {/* Live sync badge */}
-        <div className="flex items-center gap-2 bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-xl border border-emerald-200 text-xs font-semibold">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+        <div className="flex items-center gap-2 bg-emerald-500/10 text-emerald-400 px-3 py-1.5 rounded-xl border border-emerald-500/20 text-xs font-semibold">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
           <span>Live Database Synchronized</span>
         </div>
       </div>
@@ -1088,33 +1088,33 @@ export const AssignedWorksModule: React.FC = () => {
       {/* ================= 2. TOP SUMMARY METRIC CARDS (5 METRICS) ================= */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
         {/* Metric 1: Total Assigned Tasks */}
-        <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-xs hover:shadow-sm transition-shadow">
+        <div className="bg-[#1E293B] rounded-2xl p-4 sm:p-5 border border-[#334155] shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
               Total Assigned
             </span>
-            <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center">
               <ClipboardList className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3">
-            <span className="text-2xl font-black text-[#172B4D]">{totalAssignedTasks}</span>
+            <span className="text-2xl font-black text-white">{totalAssignedTasks}</span>
             <span className="text-[10px] text-slate-400 block mt-0.5">Active assigned tasks</span>
           </div>
         </div>
 
         {/* Metric 2: Not Seen Tasks */}
-        <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-xs hover:shadow-sm transition-shadow">
+        <div className="bg-[#1E293B] rounded-2xl p-4 sm:p-5 border border-[#334155] shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
               Not Seen
             </span>
-            <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center justify-center">
               <EyeOff className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3">
-            <span className={`text-2xl font-black ${notSeenTasks > 0 ? 'text-rose-600' : 'text-slate-700'}`}>
+            <span className={`text-2xl font-black ${notSeenTasks > 0 ? 'text-rose-400' : 'text-slate-300'}`}>
               {notSeenTasks}
             </span>
             <span className="text-[10px] text-slate-400 block mt-0.5">Awaiting employee view</span>
@@ -1122,49 +1122,49 @@ export const AssignedWorksModule: React.FC = () => {
         </div>
 
         {/* Metric 3: Acknowledged Tasks */}
-        <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-xs hover:shadow-sm transition-shadow">
+        <div className="bg-[#1E293B] rounded-2xl p-4 sm:p-5 border border-[#334155] shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
               Acknowledged
             </span>
-            <div className="w-8 h-8 rounded-xl bg-blue-50 text-[#206DA6] flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-[#60A5FA] border border-blue-500/20 flex items-center justify-center">
               <CheckCheck className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3">
-            <span className="text-2xl font-black text-[#206DA6]">{acknowledgedTasks}</span>
+            <span className="text-2xl font-black text-[#60A5FA]">{acknowledgedTasks}</span>
             <span className="text-[10px] text-slate-400 block mt-0.5">Confirmed by workforce</span>
           </div>
         </div>
 
         {/* Metric 4: Pending Tasks */}
-        <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-xs hover:shadow-sm transition-shadow">
+        <div className="bg-[#1E293B] rounded-2xl p-4 sm:p-5 border border-[#334155] shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
               Pending
             </span>
-            <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center">
               <Clock className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3">
-            <span className="text-2xl font-black text-amber-600">{pendingTasks}</span>
+            <span className="text-2xl font-black text-amber-400">{pendingTasks}</span>
             <span className="text-[10px] text-slate-400 block mt-0.5">Awaiting completion</span>
           </div>
         </div>
 
         {/* Metric 5: Completed Tasks */}
-        <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-xs hover:shadow-sm transition-shadow col-span-2 sm:col-span-1">
+        <div className="bg-[#1E293B] rounded-2xl p-4 sm:p-5 border border-[#334155] shadow-xs col-span-2 sm:col-span-1">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
               Completed
             </span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center">
               <CheckCircle2 className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3">
-            <span className="text-2xl font-black text-emerald-600">{completedTasks}</span>
+            <span className="text-2xl font-black text-emerald-400">{completedTasks}</span>
             <span className="text-[10px] text-slate-400 block mt-0.5">Finished deliverables</span>
           </div>
         </div>
@@ -1173,8 +1173,8 @@ export const AssignedWorksModule: React.FC = () => {
       {/* ================= 3. EMPLOYEE PROFILE MONITORING CARDS ================= */}
       <div className="space-y-4">
         <div>
-          <h2 className="text-base font-bold text-[#172B4D]">Assigned Work Overviews</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <h2 className="text-base font-bold text-white">Assigned Work Overviews</h2>
+          <p className="text-xs text-slate-400 mt-0.5">
             View individual employee assignments, acknowledgements, and completion status.
           </p>
         </div>
@@ -1193,7 +1193,7 @@ export const AssignedWorksModule: React.FC = () => {
             return (
               <div
                 key={emp.id}
-                className="bg-white rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-md transition-all p-5 flex flex-col justify-between space-y-4"
+                className="bg-[#1E293B] rounded-2xl border border-[#334155] shadow-xs p-5 flex flex-col justify-between space-y-4"
               >
                 {/* Employee Info Header */}
                 <div className="flex items-center gap-3.5">
@@ -1201,16 +1201,16 @@ export const AssignedWorksModule: React.FC = () => {
                     src={emp.avatar}
                     name={emp.fullName}
                     size="lg"
-                    className="ring-2 ring-white shadow-xs rounded-2xl"
+                    className="ring-2 ring-blue-500/20 shadow-xs rounded-2xl"
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-bold text-[#172B4D] truncate">{emp.fullName}</h3>
-                      <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-slate-100 text-slate-700">
+                      <h3 className="text-sm font-bold text-white truncate">{emp.fullName}</h3>
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-[#0F172A] text-slate-300 border border-[#334155]">
                         {emp.employeeCode}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-500 truncate mt-0.5">
+                    <p className="text-xs text-slate-300 truncate mt-0.5">
                       {emp.designation || 'Specialist'}
                     </p>
                     <p className="text-[11px] text-slate-400 truncate">
@@ -1220,35 +1220,35 @@ export const AssignedWorksModule: React.FC = () => {
                 </div>
 
                 {/* 5 Tracking Metric Counters */}
-                <div className="p-3 bg-slate-50 rounded-xl space-y-2 border border-slate-200/60 text-xs">
-                  <div className="flex items-center justify-between font-semibold text-[#172B4D]">
+                <div className="p-3 bg-[#151D2B] rounded-xl space-y-2 border border-[#334155] text-xs">
+                  <div className="flex items-center justify-between font-semibold text-white">
                     <span>Total Assigned Tasks:</span>
                     <span className="font-extrabold">{totalTasks}</span>
                   </div>
-                  <div className="flex items-center justify-between text-slate-500">
+                  <div className="flex items-center justify-between text-slate-400">
                     <span>Not Seen Tasks:</span>
-                    <span className={notSeenCount > 0 ? 'text-rose-600 font-bold' : 'text-slate-600 font-semibold'}>
+                    <span className={notSeenCount > 0 ? 'text-rose-400 font-bold' : 'text-slate-300 font-semibold'}>
                       {notSeenCount}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between text-slate-500">
+                  <div className="flex items-center justify-between text-slate-400">
                     <span>Acknowledged Tasks:</span>
-                    <span className="text-emerald-700 font-bold">{acknowledgedCount}</span>
+                    <span className="text-emerald-400 font-bold">{acknowledgedCount}</span>
                   </div>
-                  <div className="flex items-center justify-between text-slate-500">
+                  <div className="flex items-center justify-between text-slate-400">
                     <span>In Progress Tasks:</span>
-                    <span className="text-blue-700 font-bold">{inProgressCount}</span>
+                    <span className="text-[#60A5FA] font-bold">{inProgressCount}</span>
                   </div>
-                  <div className="flex items-center justify-between text-slate-500">
+                  <div className="flex items-center justify-between text-slate-400">
                     <span>Completed Tasks:</span>
-                    <span className="text-emerald-700 font-bold">{completedCount}</span>
+                    <span className="text-emerald-400 font-bold">{completedCount}</span>
                   </div>
                 </div>
 
                 {/* Action Button: View Assigned Work */}
                 <button
                   onClick={() => handleOpenAssignedWorkModal(emp)}
-                  className="w-full py-2.5 px-4 bg-[#206DA6] hover:bg-[#1a5682] text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+                  className="w-full py-2.5 px-4 bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer active:scale-98"
                 >
                   <Eye className="w-4 h-4" />
                   <span>View Assigned Work</span>
@@ -1260,10 +1260,10 @@ export const AssignedWorksModule: React.FC = () => {
       </div>
 
       {/* ================= 4. ORGANIZATION LIVE WORK MONITORING TABLE ================= */}
-      <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
-        <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/60">
+      <div className="bg-[#1E293B] rounded-2xl border border-[#334155] shadow-xs overflow-hidden">
+        <div className="p-4 border-b border-[#334155] flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#151D2B]">
           <div>
-            <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+            <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
               Organization Live Work Monitoring Table
             </h3>
             <p className="text-[11px] text-slate-400">
@@ -1280,7 +1280,7 @@ export const AssignedWorksModule: React.FC = () => {
                 placeholder="Search task or staff..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 text-xs text-[#172B4D] focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]/30 w-44 sm:w-52 bg-white"
+                className="pl-8 pr-3 py-1.5 rounded-xl border border-[#334155] text-xs text-white focus:outline-hidden focus:ring-2 focus:ring-blue-500/30 w-44 sm:w-52 bg-[#0F172A] placeholder-slate-500"
               />
             </div>
 
@@ -1288,7 +1288,7 @@ export const AssignedWorksModule: React.FC = () => {
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as any)}
-              className="py-1.5 px-3 rounded-xl border border-slate-200 text-xs text-[#172B4D] bg-white focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]/30 font-medium"
+              className="py-1.5 px-3 rounded-xl border border-[#334155] text-xs text-white bg-[#0F172A] focus:outline-hidden focus:ring-2 focus:ring-blue-500/30 font-medium cursor-pointer"
             >
               <option value="all">All Statuses</option>
               <option value="pending">Pending</option>
@@ -1300,7 +1300,7 @@ export const AssignedWorksModule: React.FC = () => {
 
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-100/70 text-slate-600 font-bold border-b border-slate-200">
+            <thead className="bg-[#151D2B] text-slate-400 font-bold border-b border-[#334155]">
               <tr>
                 <th className="py-3 px-4">Task ID</th>
                 <th className="py-3 px-4">Task Title</th>
@@ -1312,7 +1312,7 @@ export const AssignedWorksModule: React.FC = () => {
                 <th className="py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-[#334155]">
               {filteredAssignments.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="py-8 text-center text-slate-400 text-xs">
@@ -1332,15 +1332,15 @@ export const AssignedWorksModule: React.FC = () => {
                   const targetEmp = employees.find((e) => doesAssignmentBelongToEmployee(a, e));
 
                   return (
-                    <tr key={a.id} className="hover:bg-slate-50/80 transition-colors">
+                    <tr key={a.id} className="hover:bg-[#151D2B]/80 transition-colors">
                       {/* 1. Task ID */}
-                      <td className="py-3 px-4 font-mono font-bold text-[#206DA6]">
+                      <td className="py-3 px-4 font-mono font-bold text-[#60A5FA]">
                         {taskCode}
                       </td>
 
                       {/* 2. Task Title */}
                       <td className="py-3 px-4 max-w-[200px]">
-                        <span className="font-semibold text-[#172B4D] truncate block" title={title}>
+                        <span className="font-semibold text-white truncate block" title={title}>
                           {title}
                         </span>
                         {a.taskBrief && (
@@ -1357,10 +1357,10 @@ export const AssignedWorksModule: React.FC = () => {
                             src={a.employeeAvatar}
                             name={a.employeeName}
                             size="sm"
-                            className="w-6 h-6 rounded-lg ring-1 ring-slate-200"
+                            className="w-6 h-6 rounded-lg ring-1 ring-[#334155]"
                           />
                           <div>
-                            <span className="font-medium text-[#172B4D] block leading-tight">
+                            <span className="font-medium text-white block leading-tight">
                               {a.employeeName}
                             </span>
                             <span className="text-[10px] text-slate-400 font-mono">
@@ -1374,30 +1374,30 @@ export const AssignedWorksModule: React.FC = () => {
                       <td className="py-3 px-4">
                         {isAck ? (
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                              <CheckCheck className="w-3 h-3 text-emerald-600" />
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                              <CheckCheck className="w-3 h-3 text-emerald-400" />
                               <span>Acknowledged ✓</span>
                             </span>
                             {isRecordedByHR && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30">
                                 Recorded by HR
                               </span>
                             )}
                           </div>
                         ) : a.firstViewedAt ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                            <Eye className="w-3 h-3 text-blue-500" />
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/30">
+                            <Eye className="w-3 h-3 text-blue-400" />
                             <span>Seen</span>
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-[#0F172A] text-slate-400 border border-[#334155]">
                             <span>Not Seen</span>
                           </span>
                         )}
                       </td>
 
                       {/* 5. Seen Time */}
-                      <td className="py-3 px-4 text-slate-600 font-mono text-[11px]">
+                      <td className="py-3 px-4 text-slate-300 font-mono text-[11px]">
                         {a.acknowledgedAt || a.firstViewedAt || '—'}
                       </td>
 
@@ -1407,21 +1407,21 @@ export const AssignedWorksModule: React.FC = () => {
                           <span
                             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold ${
                               a.status === 'completed'
-                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
                                 : a.status === 'in_progress'
-                                ? 'bg-blue-100 text-blue-800 border border-blue-200'
-                                : 'bg-amber-100 text-amber-800 border border-amber-200'
+                                ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
+                                : 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
                             }`}
                           >
                             {a.status === 'completed' ? (
-                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                              <CheckCircle2 className="w-3 h-3 text-emerald-400" />
                             ) : (
-                              <Clock className="w-3 h-3 text-amber-600" />
+                              <Clock className="w-3 h-3 text-amber-400" />
                             )}
                             <span className="capitalize">{a.status.replace('_', ' ')}</span>
                           </span>
                           {a.status === 'completed' && isCompRecordedByHR && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30">
                               Recorded by HR
                             </span>
                           )}
@@ -1429,7 +1429,7 @@ export const AssignedWorksModule: React.FC = () => {
                       </td>
 
                       {/* 7. Completed Time */}
-                      <td className="py-3 px-4 text-slate-600 font-mono text-[11px]">
+                      <td className="py-3 px-4 text-slate-300 font-mono text-[11px]">
                         {a.completedAt ? (
                           <div>
                             <span>{a.completedAt}</span>
@@ -1448,7 +1448,7 @@ export const AssignedWorksModule: React.FC = () => {
                       <td className="py-3 px-4 text-right">
                         <button
                           onClick={() => targetEmp && handleOpenAssignedWorkModal(targetEmp)}
-                          className="text-[#206DA6] hover:text-[#1a5682] font-bold hover:underline inline-flex items-center gap-1 cursor-pointer"
+                          className="text-[#60A5FA] hover:text-[#93C5FD] font-bold hover:underline inline-flex items-center gap-1 cursor-pointer transition-colors"
                         >
                           <span>View Work</span>
                           <ArrowRight className="w-3 h-3" />
