@@ -71,25 +71,6 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     return employees.find((e) => e.id === employeeToEdit.id) || employeeToEdit;
   }, [employeeToEdit, employees]);
 
-  const employeeDisplayName = useMemo(() => {
-    const fromInputs = `${firstName} ${lastName}`.trim();
-    if (fromInputs) return fromInputs;
-    if (activeEmployee) {
-      if (activeEmployee.fullName) return activeEmployee.fullName;
-      const combined = `${activeEmployee.firstName || ''} ${activeEmployee.lastName || ''}`.trim();
-      if (combined) return combined;
-    }
-    return '';
-  }, [firstName, lastName, activeEmployee]);
-
-  const employeeDisplayCode = useMemo(() => {
-    return (
-      activeEmployee?.employeeCode ||
-      employeeToEdit?.employeeCode ||
-      (employeeToEdit?.id ? `EMP-${employeeToEdit.id}` : 'Auto-Generated on Save')
-    );
-  }, [activeEmployee, employeeToEdit]);
-
   // Navigation State
   const [activeTab, setActiveTab] = useState<FormTab>('personal');
   const [completedTabs, setCompletedTabs] = useState<Set<FormTab>>(new Set());
@@ -150,6 +131,26 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
   const [address, setAddress] = useState('');
   const [country, setCountry] = useState('');
   const [bio, setBio] = useState('');
+
+  // Derived read-only display values for Salary & Bank identification
+  const employeeDisplayName = useMemo(() => {
+    const fromInputs = `${firstName || ''} ${lastName || ''}`.trim();
+    if (fromInputs) return fromInputs;
+    if (activeEmployee) {
+      if (activeEmployee.fullName) return activeEmployee.fullName.trim();
+      const combined = `${activeEmployee.firstName || ''} ${activeEmployee.lastName || ''}`.trim();
+      if (combined) return combined;
+    }
+    return '';
+  }, [firstName, lastName, activeEmployee]);
+
+  const employeeDisplayCode = useMemo(() => {
+    return (
+      activeEmployee?.employeeCode ||
+      employeeToEdit?.employeeCode ||
+      (employeeToEdit?.id ? `EMP-${employeeToEdit.id}` : 'Auto-Generated on Save')
+    );
+  }, [activeEmployee, employeeToEdit]);
 
   // Close designation dropdown when clicking outside
   useEffect(() => {
