@@ -38,6 +38,17 @@ import {
 import { useToast } from './ToastContext';
 import { useAuth } from './AuthContext';
 import { findLinkedEmployee, doesLeaveBelongToEmployee, isSameEmployeeRecord } from '../utils/employeeIdentity';
+import {
+  fetchEmployeesFromSupabase,
+  upsertEmployeeInSupabase,
+  deleteEmployeeFromSupabase,
+  fetchAttendanceFromSupabase,
+  upsertAttendanceInSupabase,
+  fetchLeavesFromSupabase,
+  upsertLeaveInSupabase,
+  fetchPayrollRecordsFromSupabase,
+  upsertPayrollRecordInSupabase,
+} from '../services/hrmsSupabaseService';
 import { getInitialsAvatar } from '../utils/avatar';
 import { safeSetItem, safeGetItem } from '../utils/storage';
 import {
@@ -397,6 +408,43 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => clearInterval(interval);
   }, [settings.timezone]);
 
+  // Supabase Initial Hydration
+  useEffect(() => {
+    let active = true;
+
+    fetchEmployeesFromSupabase().then((remoteEmps) => {
+      if (active && remoteEmps && remoteEmps.length > 0) {
+        setEmployees(remoteEmps);
+        safeSetItem(LOCAL_STORAGE_KEYS.EMPLOYEES, JSON.stringify(remoteEmps));
+      }
+    });
+
+    fetchAttendanceFromSupabase().then((remoteAtt) => {
+      if (active && remoteAtt && remoteAtt.length > 0) {
+        setAttendanceRecords(remoteAtt);
+        safeSetItem(LOCAL_STORAGE_KEYS.ATTENDANCE, JSON.stringify(remoteAtt));
+      }
+    });
+
+    fetchLeavesFromSupabase().then((remoteLeaves) => {
+      if (active && remoteLeaves && remoteLeaves.length > 0) {
+        setLeaveRequests(remoteLeaves);
+        safeSetItem(LOCAL_STORAGE_KEYS.LEAVES, JSON.stringify(remoteLeaves));
+      }
+    });
+
+    fetchPayrollRecordsFromSupabase().then((remotePayroll) => {
+      if (active && remotePayroll && remotePayroll.length > 0) {
+        setPayrollRecords(remotePayroll);
+        safeSetItem(LOCAL_STORAGE_KEYS.PAYROLL, JSON.stringify(remotePayroll));
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // Persistence Effects
   useEffect(() => {
     safeSetItem(LOCAL_STORAGE_KEYS.EMPLOYEES, JSON.stringify(employees));
@@ -509,6 +557,9 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       safeSetItem(LOCAL_STORAGE_KEYS.EMPLOYEES, JSON.stringify(nextEmployees));
       return nextEmployees;
     });
+    upsertEmployeeInSupabase(newEmployee).catch((err) => {
+      console.warn('[Supabase HR] Failed to sync new employee to Supabase:', err);
+    });
     logActivity('onboarded new employee', `${newEmployee.fullName} (${newEmployee.designation})`, 'employee', '#18A999');
     showToast('Employee profile created successfully!', 'success', 'Employee Created');
     return newEmployee;
@@ -520,6 +571,8 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
     let updatedFullName = '';
+    let updatedEmployeeObj: Employee | null = null;
+
     setEmployees((prev) => {
       const updatedList = prev.map((emp) => {
         if (emp.id === id || emp.employeeCode?.toUpperCase() === id.toUpperCase()) {
@@ -542,6 +595,7 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
             fullName,
             avatar,
           };
+          updatedEmployeeObj = updated;
           return updated;
         }
         return emp;
@@ -550,6 +604,12 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       safeSetItem(LOCAL_STORAGE_KEYS.EMPLOYEES, JSON.stringify(updatedList));
       return updatedList;
     });
+
+    if (updatedEmployeeObj) {
+      upsertEmployeeInSupabase(updatedEmployeeObj).catch((err) => {
+        console.warn('[Supabase HR] Failed to sync updated employee to Supabase:', err);
+      });
+    }
 
     // Also sync department name or shift name in attendance if changed
     if (updates.departmentId || updates.shiftId) {
@@ -584,6 +644,11 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setEmployees((prev) => prev.filter((e) => e.id !== id));
     // Remove from attendance and pending leaves
     setAttendanceRecords((prev) => prev.filter((a) => a.employeeId !== id));
+
+    deleteEmployeeFromSupabase(id).catch((err) => {
+      console.warn('[Supabase HR] Failed to delete employee from Supabase:', err);
+    });
+
     logActivity('removed employee record for', emp.fullName, 'employee', '#EF4444');
     showToast(`Employee ${emp.fullName} was deleted.`, 'info');
   };
@@ -1147,6 +1212,35 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     logActivity('manually updated attendance for', `${emp.fullName} (${record.date}) -> ${status.toUpperCase()}`, 'attendance');
     showToast('Attendance updated successfully!', 'success');
+
+    // Sync to Supabase
+    const savedRecord = {
+      id: existing ? existing.id : `att-${Date.now()}`,
+      employeeId: emp.id,
+      employeeName: emp.fullName,
+      employeeCode: emp.employeeCode,
+      departmentId: emp.departmentId,
+      departmentName: emp.departmentName,
+      avatar: emp.avatar,
+      date: record.date,
+      shiftId: shift.id,
+      shiftName: shift.name,
+      scheduledStartTime: shift.startTime,
+      scheduledEndTime: shift.endTime,
+      status,
+      manualStatus: status,
+      calculatedStatus,
+      isManualOverride: true,
+      isManualEntry: true,
+      punctualityStatus,
+      workHours,
+      workHoursFormatted,
+      notes: record.notes,
+      ...record,
+    };
+    upsertAttendanceInSupabase(savedRecord as AttendanceRecord).catch((err) => {
+      console.warn('[Supabase HR] Failed to sync attendance to Supabase:', err);
+    });
   };
 
   const removeAttendanceOverride = (employeeId: string, date: string) => {
@@ -1281,6 +1375,11 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setLeaveRequests((prev) => [newLeave, ...prev]);
 
+    // Sync to Supabase
+    upsertLeaveInSupabase(newLeave).catch((err) => {
+      console.warn('[Supabase HR] Failed to sync leave to Supabase:', err);
+    });
+
     const categoryLabel =
       newLeave.leaveType === 'others' && newLeave.customLeaveType
         ? `Others (${newLeave.customLeaveType})`
@@ -1370,6 +1469,17 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       );
     }
 
+    // Sync to Supabase
+    upsertLeaveInSupabase({
+      ...req,
+      status: 'approved',
+      reviewedBy: reviewerName,
+      reviewedDate: selectedDate,
+      reviewRemarks: remarks || 'Approved by HR/Manager',
+    }).catch((err) => {
+      console.warn('[Supabase HR] Failed to sync approved leave to Supabase:', err);
+    });
+
     logActivity('approved leave request for', `${req.employeeName} (${req.daysCount} days)`, 'leave', '#10B981');
     showToast(`Leave request for ${req.employeeName} approved.`, 'success');
   };
@@ -1403,6 +1513,17 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
           : l
       )
     );
+
+    // Sync to Supabase
+    upsertLeaveInSupabase({
+      ...req,
+      status: 'rejected',
+      reviewedBy: reviewerName,
+      reviewedDate: selectedDate,
+      reviewRemarks: remarks || 'Declined',
+    }).catch((err) => {
+      console.warn('[Supabase HR] Failed to sync rejected leave to Supabase:', err);
+    });
 
     logActivity('rejected leave request for', `${req.employeeName}`, 'leave', '#EF4444');
     showToast(`Leave request for ${req.employeeName} was rejected.`, 'info');

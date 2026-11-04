@@ -15,7 +15,7 @@ import {
 } from '../../modals/EmployeeSalaryRecordDetailModal';
 import {
   Plus,
-  ShieldLock,
+  Lock,
   Calendar,
   X,
   Search,
@@ -556,7 +556,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
     return (
       <div className="bg-white rounded-3xl p-12 text-center border border-slate-200/80 shadow-card max-w-xl mx-auto my-12">
         <div className="w-16 h-16 rounded-3xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto mb-4">
-          <ShieldLock className="w-8 h-8" />
+          <Lock className="w-8 h-8" />
         </div>
         <h2 className="text-xl font-bold text-[#172B4D]">Restricted Compensation Data</h2>
         <p className="text-xs text-slate-500 mt-2 leading-relaxed">

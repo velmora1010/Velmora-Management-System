@@ -21,6 +21,12 @@ import { useToast } from './ToastContext';
 import { generateInitialWorkData, isDemoTask } from '../data/initialWorkData';
 import { safeSetItem, safeGetItem } from '../utils/storage';
 import { findLinkedEmployee, doesAssignmentBelongToEmployee } from '../utils/employeeIdentity';
+import {
+  fetchWorkTasksFromSupabase,
+  fetchAssignmentsFromSupabase,
+  upsertWorkTaskInSupabase,
+  upsertAssignmentInSupabase,
+} from '../services/hrmsSupabaseService';
 
 export interface CreateTaskParams {
   title: string;
@@ -309,6 +315,43 @@ export const WorkAssignmentProvider: React.FC<{ children: React.ReactNode }> = (
     }
     return [];
   });
+
+  // Supabase Work Tasks & Assignments Hydration
+  useEffect(() => {
+    let active = true;
+
+    fetchWorkTasksFromSupabase().then((remoteTasks) => {
+      if (active && remoteTasks && remoteTasks.length > 0) {
+        setTasks((prev) => {
+          const merged = [...remoteTasks];
+          prev.forEach((t) => {
+            if (!merged.some((m) => m.id === t.id || m.taskCode === t.taskCode)) {
+              merged.push(t);
+            }
+          });
+          return merged;
+        });
+      }
+    });
+
+    fetchAssignmentsFromSupabase().then((remoteAssigns) => {
+      if (active && remoteAssigns && remoteAssigns.length > 0) {
+        setTaskAssignments((prev) => {
+          const merged = [...remoteAssigns];
+          prev.forEach((a) => {
+            if (!merged.some((m) => m.id === a.id)) {
+              merged.push(a);
+            }
+          });
+          return merged;
+        });
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Sync to localStorage safely
   useEffect(() => {
@@ -1120,6 +1163,18 @@ export const WorkAssignmentProvider: React.FC<{ children: React.ReactNode }> = (
         setAttachments((prev) => [...newAttachments, ...prev]);
       }
 
+      // Sync tasks and assignments to Supabase
+      newTasks.forEach((t) => {
+        upsertWorkTaskInSupabase(t).catch((err) =>
+          console.warn('[Supabase Work] Failed to sync task:', err)
+        );
+      });
+      newAssignments.forEach((a) => {
+        upsertAssignmentInSupabase(a).catch((err) =>
+          console.warn('[Supabase Work] Failed to sync assignment:', err)
+        );
+      });
+
       showToast('Tasks assigned successfully!', 'success');
       return newTasks;
     },
@@ -1255,6 +1310,21 @@ export const WorkAssignmentProvider: React.FC<{ children: React.ReactNode }> = (
         })
       );
 
+      // Sync acknowledged assignment to Supabase
+      const ackRecord = {
+        ...targetAssignment,
+        isAcknowledged: true,
+        acknowledgedAt: targetAssignment.acknowledgedAt || timestamp,
+        acknowledgedBy: targetAssignment.acknowledgedBy || actorName,
+        acknowledgementSource: (targetAssignment.acknowledgementSource === 'admin' ? 'admin' : 'employee') as any,
+        acknowledgementNote: note || targetAssignment.acknowledgementNote,
+        firstViewedAt: targetAssignment.firstViewedAt || timestamp,
+        updatedAt: new Date().toISOString(),
+      };
+      upsertAssignmentInSupabase(ackRecord).catch((err) =>
+        console.warn('[Supabase Work] Failed to sync acknowledged assignment:', err)
+      );
+
       // Add audit activity log only if not previously acknowledged
       if (!targetAssignment.isAcknowledged) {
         const log: WorkTaskActivityLog = {
@@ -1383,6 +1453,22 @@ export const WorkAssignmentProvider: React.FC<{ children: React.ReactNode }> = (
           }
           return a;
         })
+      );
+
+      // Sync completed assignment to Supabase
+      const compRecord = {
+        ...targetAssignment,
+        status: 'completed' as const,
+        assignmentStatus: 'completed' as const,
+        completedAt: targetAssignment.completedAt || timestamp,
+        completedBy: targetAssignment.completedBy || actorName,
+        completionSource: (targetAssignment.completionSource === 'admin' ? 'admin' : 'employee') as any,
+        completionNote: note || targetAssignment.completionNote,
+        progressPercentage: 100,
+        updatedAt: new Date().toISOString(),
+      };
+      upsertAssignmentInSupabase(compRecord).catch((err) =>
+        console.warn('[Supabase Work] Failed to sync completed assignment:', err)
       );
 
       // Update parent task
