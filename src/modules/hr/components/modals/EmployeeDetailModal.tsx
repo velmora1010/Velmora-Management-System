@@ -14,7 +14,6 @@ import {
   Briefcase,
   Clock,
   Building,
-  ShieldLock,
   DollarSign,
   AlertCircle,
   Edit2,
@@ -360,7 +359,7 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
         >
           <CreditCard className="w-3.5 h-3.5" />
           <span>Salary & Bank</span>
-          {!canViewSalary && <ShieldLock className="w-3.5 h-3.5 text-[#64748B]" />}
+          {!canViewSalary && <Lock className="w-3.5 h-3.5 text-[#64748B]" />}
         </button>
       </div>
 
@@ -430,7 +429,7 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
                   </>
                 ) : (
                   <div className="py-6 text-center bg-[#0F172A] rounded-xl border border-[#334155] px-3">
-                    <ShieldLock className="w-6 h-6 text-[#64748B] mx-auto mb-2" />
+                    <Lock className="w-6 h-6 text-[#64748B] mx-auto mb-2" />
                     <p className="text-xs font-semibold text-white">Private Contact Details</p>
                     <p className="text-[11px] text-[#94A3B8] mt-1 max-w-xs mx-auto">
                       Emergency contacts and residential address are visible only to the employee and HR/Admin.
@@ -941,7 +940,7 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
           <div>
             {!canViewSalary ? (
               <div className="p-8 text-center bg-[#151D2B] border border-[#334155] rounded-xl">
-                <ShieldLock className="w-10 h-10 text-[#64748B] mx-auto mb-3" />
+                <Lock className="w-10 h-10 text-[#64748B] mx-auto mb-3" />
                 <h4 className="font-bold text-sm text-white">Confidential Financial Record</h4>
                 <p className="text-xs text-[#94A3B8] mt-1 max-w-sm mx-auto">
                   Compensation, bank accounts, and tax identifiers are restricted to HR Administrators and Executive Payroll per security policy.
@@ -974,6 +973,11 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
                     <span className="text-xs font-mono text-slate-300 mt-1 block">
                       Account: {employee.accountNumber}
                     </span>
+                    {employee.ifscCode && (
+                      <span className="text-xs font-mono text-emerald-400 mt-0.5 block">
+                        IFSC: {employee.ifscCode}
+                      </span>
+                    )}
                     <span className="text-[11px] text-[#94A3B8] block">
                       Tax ID: {employee.taxId}
                     </span>

@@ -23,7 +23,7 @@ import {
   DollarSign,
   Calendar,
   Filter,
-  ShieldLock,
+  Lock,
 } from 'lucide-react';
 
 interface HRDashboardProps {
@@ -242,7 +242,7 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({
                 </span>
               </div>
               <div className="p-2.5 rounded-xl bg-slate-900/60 text-muted border border-border">
-                <ShieldLock className="w-5 h-5" />
+                <Lock className="w-5 h-5" />
               </div>
             </div>
             <p className="text-[11px] text-muted mt-3 pt-3 border-t border-border/40">

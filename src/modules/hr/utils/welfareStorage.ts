@@ -8,6 +8,7 @@ import {
   getMonthName,
 } from '../types/welfare';
 import { safeGetItem, safeSetItem } from './storage';
+import { upsertWelfareSelectionInSupabase } from '../services/hrmsSupabaseService';
 
 export const WELFARE_STORAGE_KEYS = {
   PRODUCTS: 'hrms_welfare_products_v1',
@@ -256,6 +257,11 @@ export function submitMonthlyWelfareSelection(params: {
 
   const updatedSelections = [newSelection, ...currentSelections];
   saveWelfareSelections(updatedSelections);
+
+  // Sync to Supabase
+  upsertWelfareSelectionInSupabase(newSelection).catch((err) =>
+    console.warn('[Supabase Welfare] Failed to sync selection to Supabase:', err)
+  );
 
   const currentLogs = loadWelfareLogs();
   const logEntry: WelfareActivityLog = {

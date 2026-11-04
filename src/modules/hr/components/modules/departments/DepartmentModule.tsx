@@ -38,7 +38,7 @@ export const DepartmentModule: React.FC<DepartmentModuleProps> = ({
   return (
     <div className="space-y-6">
       {/* Header and Controls */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+      <div className="bg-[#1E293B] p-5 rounded-2xl border border-[#334155] shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-base font-extrabold text-[#172B4D] tracking-tight">
             Department Structure
@@ -102,7 +102,7 @@ export const DepartmentModule: React.FC<DepartmentModuleProps> = ({
             <div
               key={dept.id}
               onClick={() => onSelectDepartment(dept)}
-              className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-card hover:shadow-md hover:border-[#206DA6]/50 transition-all duration-200 cursor-pointer flex flex-col justify-between group relative overflow-hidden"
+              className="bg-[#1E293B] rounded-2xl p-5 border border-[#334155] shadow-card hover:shadow-md hover:border-[#206DA6]/50 transition-all duration-200 cursor-pointer flex flex-col justify-between group relative overflow-hidden"
             >
               {/* Top Accent Line */}
               <div
@@ -147,7 +147,7 @@ export const DepartmentModule: React.FC<DepartmentModuleProps> = ({
                         className="w-7 h-7 rounded-lg object-cover ring-1 ring-slate-200 flex-shrink-0"
                       />
                     ) : (
-                      <div className="w-7 h-7 rounded-lg bg-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-600 flex-shrink-0">
+                      <div className="w-7 h-7 rounded-lg bg-slate-200 flex items-center justify-center text-[10px] font-bold text-[#CBD5E1] flex-shrink-0">
                         HD
                       </div>
                     )}
@@ -169,7 +169,7 @@ export const DepartmentModule: React.FC<DepartmentModuleProps> = ({
                     <MapPin className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                     <span className="truncate">{dept.location}</span>
                   </div>
-                  <div className="flex items-center justify-end gap-1.5 truncate font-mono text-slate-700">
+                  <div className="flex items-center justify-end gap-1.5 truncate font-mono text-[#CBD5E1]">
                     <DollarSign className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                     <span className="font-semibold">
                       {settings.currencySymbol}

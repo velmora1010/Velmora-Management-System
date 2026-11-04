@@ -1,6 +1,41 @@
 /* ==========================================================================
    VELMORA HR MODULE — DARK DESIGN SYSTEM INTEGRATION
+   Theme Specifications:
+   - Main background: #0B0F14
+   - Sidebar: #151B24
+   - Header: #1B2636
+   - Cards and panels: #1E293B
+   - Secondary card background: #151D2B
+   - Table headers: #111827
+   - Input fields: #151F30
+   - Borders: #334155
+   - Primary text: #F8FAFC
+   - Secondary text: #CBD5E1
+   - Muted text: #94A3B8
+   - Primary buttons: #6D28D9
+   - Success: #10B981
+   - Warning: #F59E0B
+   - Error: #F43F5E
    ========================================================================== */
+
+:root {
+  --bg-main: #0B0F14;
+  --sidebar-bg: #151B24;
+  --header-bg: #1B2636;
+  --card-bg: #1E293B;
+  --card-secondary: #151D2B;
+  --table-header-bg: #111827;
+  --input-bg: #151F30;
+  --border-color: #334155;
+  --text-primary: #F8FAFC;
+  --text-secondary: #CBD5E1;
+  --text-muted: #94A3B8;
+  --color-primary: #6D28D9;
+  --color-primary-hover: #5B21B6;
+  --color-success: #10B981;
+  --color-warning: #F59E0B;
+  --color-danger: #F43F5E;
+}
 
 @keyframes fadeIn {
   from { opacity: 0; transform: scale(0.97); }
@@ -22,34 +57,47 @@
 
 /* Base HR Module Root Scoping to Velmora Dark Theme */
 .hr-module-root {
-  background-color: var(--bg-color, #0d1117);
-  color: var(--text-main, #f8fafc);
+  background-color: #0B0F14 !important;
+  color: #F8FAFC !important;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   min-height: 100%;
 }
 
 /* Reconcile legacy white containers with Velmora dark card surfaces */
 .hr-module-root .bg-white {
-  background-color: var(--card-bg, #161b22) !important;
-  color: var(--text-main, #f8fafc);
-  border-color: var(--border-color, #30363d);
+  background-color: #1E293B !important;
+  color: #F8FAFC !important;
+  border-color: #334155 !important;
 }
 
-.hr-module-root .bg-\[\#F6F8FC\] {
-  background-color: var(--bg-color, #0d1117) !important;
+.hr-module-root .bg-\[\#F6F8FC\],
+.hr-module-root .bg-\[\#0d1117\],
+.hr-module-root .bg-background {
+  background-color: #0B0F14 !important;
 }
 
+/* Secondary Panels, Sub-cards, and Inner containers */
 .hr-module-root .bg-slate-50,
 .hr-module-root .bg-slate-50\/50,
+.hr-module-root .bg-slate-50\/60,
 .hr-module-root .bg-slate-50\/70,
 .hr-module-root .bg-slate-50\/80 {
-  background-color: rgba(15, 23, 42, 0.65) !important;
-  border-color: var(--border-color, #30363d) !important;
+  background-color: #151D2B !important;
+  border-color: #334155 !important;
 }
 
-.hr-module-root .bg-slate-100 {
-  background-color: rgba(30, 41, 59, 0.7) !important;
-  border-color: var(--border-color, #30363d) !important;
+.hr-module-root .bg-slate-100,
+.hr-module-root .bg-slate-200 {
+  background-color: #151D2B !important;
+  border-color: #334155 !important;
+}
+
+/* Remove pale light gradients */
+.hr-module-root [class*="from-slate-50"],
+.hr-module-root [class*="to-white"] {
+  background-image: none !important;
+  background-color: #151D2B !important;
+  border-color: #334155 !important;
 }
 
 /* Card, Panel & Divider Borders */
@@ -57,81 +105,122 @@
 .hr-module-root .border-slate-200,
 .hr-module-root .border-slate-200\/60,
 .hr-module-root .border-slate-200\/80,
+.hr-module-root .border-slate-200\/90,
 .hr-module-root .border-slate-300 {
-  border-color: var(--border-color, #30363d) !important;
+  border-color: #334155 !important;
 }
 
 .hr-module-root .divide-slate-100 > * + *,
-.hr-module-root .divide-slate-200 > * + * {
-  border-color: var(--border-color, #30363d) !important;
+.hr-module-root .divide-slate-200 > * + *,
+.hr-module-root .divide-slate-200\/60 > * + * {
+  border-color: #334155 !important;
 }
 
-/* Typography Harmony */
+/* Typography Harmony across all HR sections */
 .hr-module-root .text-\[\#172B4D\],
-.hr-module-root .text-slate-800,
-.hr-module-root .text-slate-900 {
-  color: var(--text-main, #f8fafc) !important;
+.hr-module-root .text-slate-900,
+.hr-module-root .text-slate-800 {
+  color: #F8FAFC !important;
+}
+
+.hr-module-root .text-slate-700,
+.hr-module-root .text-slate-600,
+.hr-module-root .text-gray-700,
+.hr-module-root .text-gray-600 {
+  color: #CBD5E1 !important;
 }
 
 .hr-module-root .text-\[\#64748B\],
 .hr-module-root .text-slate-500,
-.hr-module-root .text-slate-600 {
-  color: var(--text-muted, #8b949e) !important;
+.hr-module-root .text-slate-400,
+.hr-module-root .text-gray-500,
+.hr-module-root .text-gray-400 {
+  color: #94A3B8 !important;
 }
 
 .hr-module-root .text-\[\#206DA6\] {
-  color: var(--primary-color, #7B8CFF) !important;
+  color: #A78BFA !important;
 }
 
 /* Form Controls (Inputs, Selects, Textareas) */
 .hr-module-root input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]),
 .hr-module-root select,
 .hr-module-root textarea {
-  background-color: rgba(15, 23, 42, 0.75) !important;
-  border-color: var(--border-color, #30363d) !important;
-  color: #f8fafc !important;
+  background-color: #151F30 !important;
+  border-color: #334155 !important;
+  color: #F8FAFC !important;
 }
 
 .hr-module-root input:focus,
 .hr-module-root select:focus,
 .hr-module-root textarea:focus {
-  border-color: var(--primary-color, #7B8CFF) !important;
+  border-color: #6D28D9 !important;
   outline: none;
-  box-shadow: 0 0 0 1px var(--primary-color, #7B8CFF) !important;
+  box-shadow: 0 0 0 1px #6D28D9 !important;
 }
 
 .hr-module-root input::placeholder,
 .hr-module-root textarea::placeholder {
-  color: #64748b !important;
+  color: #94A3B8 !important;
 }
 
 /* Dropdown Option Elements */
 .hr-module-root option {
-  background-color: #161b22 !important;
-  color: #f8fafc !important;
+  background-color: #151F30 !important;
+  color: #F8FAFC !important;
 }
 
 /* Tables across HR Modules */
 .hr-module-root table {
-  color: #f8fafc;
+  color: #F8FAFC;
 }
 
+.hr-module-root thead,
+.hr-module-root thead tr,
 .hr-module-root thead th {
-  background-color: rgba(15, 23, 42, 0.9) !important;
-  color: #94a3b8 !important;
-  border-color: var(--border-color, #30363d) !important;
+  background-color: #111827 !important;
+  color: #CBD5E1 !important;
+  border-color: #334155 !important;
 }
 
 .hr-module-root tbody tr {
-  border-color: var(--border-color, #30363d) !important;
+  border-color: #334155 !important;
 }
 
 .hr-module-root tbody tr:hover {
-  background-color: rgba(255, 255, 255, 0.02) !important;
+  background-color: rgba(255, 255, 255, 0.03) !important;
 }
 
 .hr-module-root td {
-  border-color: rgba(48, 54, 61, 0.6) !important;
+  border-color: #334155 !important;
+}
+
+/* Action / Secondary buttons (View Details, secondary action pills) */
+.hr-module-root .bg-blue-50,
+.hr-module-root .bg-blue-50\/70 {
+  background-color: #151D2B !important;
+  border-color: #334155 !important;
+  color: #F8FAFC !important;
+}
+
+.hr-module-root .bg-blue-50:hover,
+.hr-module-root .bg-blue-50\/70:hover {
+  background-color: #1E293B !important;
+  border-color: #6D28D9 !important;
+  color: #FFFFFF !important;
+}
+
+/* Primary Action Buttons */
+.hr-module-root button.bg-\[\#206DA6\],
+.hr-module-root a.bg-\[\#206DA6\] {
+  background-color: #6D28D9 !important;
+  border-color: #7C3AED !important;
+  color: #FFFFFF !important;
+}
+
+.hr-module-root button.bg-\[\#206DA6\]:hover,
+.hr-module-root a.bg-\[\#206DA6\]:hover {
+  background-color: #5B21B6 !important;
 }
 
 /* Custom Dark Scrollbar */

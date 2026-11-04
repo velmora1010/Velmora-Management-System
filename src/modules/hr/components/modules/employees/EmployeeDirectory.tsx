@@ -81,7 +81,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
   return (
     <div className="space-y-6">
       {/* Header and Controls */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
+      <div className="bg-[#1E293B] p-5 rounded-2xl border border-[#334155] shadow-xs flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
         <div>
           <h2 className="text-base font-extrabold text-[#172B4D] tracking-tight">Staff Directory</h2>
           <p className="text-xs text-[#64748B]">
@@ -106,7 +106,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
           <select
             value={selectedDept}
             onChange={(e) => setSelectedDept(e.target.value)}
-            className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-700 font-medium focus:outline-hidden"
+            className="text-xs bg-[#151F30] border border-[#334155] rounded-xl px-3 py-2 text-[#F8FAFC] font-medium focus:outline-hidden"
           >
             <option value="all">All Departments</option>
             {departments.map((d) => (
@@ -120,7 +120,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
           <select
             value={selectedStatus}
             onChange={(e) => setSelectedStatus(e.target.value)}
-            className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-700 font-medium focus:outline-hidden"
+            className="text-xs bg-[#151F30] border border-[#334155] rounded-xl px-3 py-2 text-[#F8FAFC] font-medium focus:outline-hidden"
           >
             <option value="all">All Statuses</option>
             <option value="active">Active</option>
@@ -155,7 +155,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
           {canManageEmployees && (
             <button
               onClick={exportCSV}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-xs"
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#CBD5E1] bg-[#1E293B] border border-[#334155] rounded-xl hover:bg-[#334155] transition-colors shadow-xs"
               title="Export CSV"
             >
               <Download className="w-3.5 h-3.5 text-slate-500" />
@@ -253,10 +253,10 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
         </div>
       ) : (
         /* Table View */
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-card overflow-hidden">
+        <div className="bg-[#1E293B] rounded-2xl border border-[#334155] shadow-card overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase tracking-wider font-bold text-[10px]">
+              <thead className="bg-[#111827] border-b border-[#334155] text-[#CBD5E1] uppercase tracking-wider font-bold text-[10px]">
                 <tr>
                   <th className="py-3.5 px-4">Employee</th>
                   <th className="py-3.5 px-4">Code</th>
@@ -288,13 +288,13 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
                         </div>
                       </div>
                     </td>
-                    <td className="py-3 px-4 font-mono font-semibold text-slate-600">{emp.employeeCode}</td>
-                    <td className="py-3 px-4 text-slate-700">{emp.departmentName}</td>
+                    <td className="py-3 px-4 font-mono font-bold text-[#CBD5E1]">{emp.employeeCode}</td>
+                    <td className="py-3 px-4 text-[#CBD5E1] font-medium">{emp.departmentName}</td>
                     <td className="py-3 px-4 text-slate-500">
                       <div>{emp.email}</div>
                       <div className="text-[11px] text-slate-400">{emp.phone}</div>
                     </td>
-                    <td className="py-3 px-4 text-slate-700 font-medium">{emp.shiftName}</td>
+                    <td className="py-3 px-4 text-[#CBD5E1] font-medium">{emp.shiftName}</td>
                     <td className="py-3 px-4">
                       <Badge variant={emp.status} size="sm">
                         {emp.status.replace('_', ' ')}

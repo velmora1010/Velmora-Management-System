@@ -304,7 +304,7 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-700 font-medium focus:outline-hidden"
+            className="text-xs bg-[#151F30] border border-[#334155] rounded-xl px-3 py-2 text-[#F8FAFC] font-medium focus:outline-hidden"
           >
             <option value="all">All Statuses</option>
             <option value="not_marked">Not Marked</option>
@@ -325,7 +325,7 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
           {/* Export CSV */}
           <button
             onClick={exportAttendanceCSV}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 shadow-xs transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#CBD5E1] bg-[#1E293B] border border-[#334155] rounded-xl hover:bg-[#334155] shadow-xs transition-colors"
           >
             <Download className="w-3.5 h-3.5 text-slate-500" />
             <span className="hidden sm:inline">Export</span>
@@ -345,12 +345,12 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
       {/* 6 Summary Mini-Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5">
         {/* Present Today */}
-        <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+        <div className="p-4 bg-[#1E293B] rounded-2xl border border-[#334155] shadow-xs flex items-center justify-between">
           <div>
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+            <span className="text-[11px] font-bold text-[#CBD5E1] uppercase tracking-wider block">
               Present Today
             </span>
-            <span className="text-2xl font-black text-emerald-700 font-mono mt-0.5 block">
+            <span className="text-2xl font-black text-[#10B981] font-mono mt-0.5 block">
               {presentCount}
             </span>
           </div>
@@ -360,12 +360,12 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
         </div>
 
         {/* Late Arrivals */}
-        <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+        <div className="p-4 bg-[#1E293B] rounded-2xl border border-[#334155] shadow-xs flex items-center justify-between">
           <div>
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+            <span className="text-[11px] font-bold text-[#CBD5E1] uppercase tracking-wider block">
               Late Arrivals
             </span>
-            <span className="text-2xl font-black text-amber-600 font-mono mt-0.5 block">
+            <span className="text-2xl font-black text-[#F59E0B] font-mono mt-0.5 block">
               {lateCount}
             </span>
           </div>
@@ -375,12 +375,12 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
         </div>
 
         {/* Absent */}
-        <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+        <div className="p-4 bg-[#1E293B] rounded-2xl border border-[#334155] shadow-xs flex items-center justify-between">
           <div>
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+            <span className="text-[11px] font-bold text-[#CBD5E1] uppercase tracking-wider block">
               Absent
             </span>
-            <span className="text-2xl font-black text-rose-600 font-mono mt-0.5 block">
+            <span className="text-2xl font-black text-[#F43F5E] font-mono mt-0.5 block">
               {absentCount}
             </span>
           </div>
@@ -390,12 +390,12 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
         </div>
 
         {/* On Leave */}
-        <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+        <div className="p-4 bg-[#1E293B] rounded-2xl border border-[#334155] shadow-xs flex items-center justify-between">
           <div>
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+            <span className="text-[11px] font-bold text-[#CBD5E1] uppercase tracking-wider block">
               On Leave
             </span>
-            <span className="text-2xl font-black text-purple-600 font-mono mt-0.5 block">
+            <span className="text-2xl font-black text-purple-400 font-mono mt-0.5 block">
               {leaveCount}
             </span>
           </div>
@@ -405,9 +405,9 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
         </div>
 
         {/* Pending */}
-        <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+        <div className="p-4 bg-[#1E293B] rounded-2xl border border-[#334155] shadow-xs flex items-center justify-between">
           <div>
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+            <span className="text-[11px] font-bold text-[#CBD5E1] uppercase tracking-wider block">
               Pending
             </span>
             <span className="text-2xl font-black text-sky-600 font-mono mt-0.5 block">
@@ -420,12 +420,12 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
         </div>
 
         {/* Not Marked */}
-        <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+        <div className="p-4 bg-[#1E293B] rounded-2xl border border-[#334155] shadow-xs flex items-center justify-between">
           <div>
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+            <span className="text-[11px] font-bold text-[#CBD5E1] uppercase tracking-wider block">
               Not Marked
             </span>
-            <span className="text-2xl font-black text-slate-700 font-mono mt-0.5 block">
+            <span className="text-2xl font-black text-[#CBD5E1] font-mono mt-0.5 block">
               {notMarkedCount}
             </span>
           </div>
@@ -436,10 +436,10 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
       </div>
 
       {/* Attendance Table - 10 Columns */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-card overflow-hidden">
+      <div className="bg-[#1E293B] rounded-2xl border border-[#334155] shadow-card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase tracking-wider font-bold text-[10px]">
+            <thead className="bg-[#111827] border-b border-[#334155] text-[#CBD5E1] uppercase tracking-wider font-bold text-[10px]">
               <tr>
                 <th className="py-3.5 px-4">Employee</th>
                 <th className="py-3.5 px-4">Department</th>
@@ -494,7 +494,7 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
                     </td>
 
                     {/* 2. Department */}
-                    <td className="py-3 px-4 text-slate-700 font-medium">{emp.departmentName}</td>
+                    <td className="py-3 px-4 text-[#CBD5E1] font-medium">{emp.departmentName}</td>
 
                     {/* 3. Shift */}
                     <td className="py-3 px-4">
@@ -511,14 +511,14 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
                     </td>
 
                     {/* 4. Scheduled Time */}
-                    <td className="py-3 px-4 font-mono font-medium text-slate-600">
+                    <td className="py-3 px-4 font-mono font-medium text-[#CBD5E1]">
                       {scheduledTime}
                     </td>
 
                     {/* 5. Check-In */}
                     <td className="py-3 px-4 font-mono font-semibold">
                       {record.checkInTime ? (
-                        <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                        <span className="text-emerald-300 bg-emerald-500/15 px-2 py-0.5 rounded-md border border-emerald-500/30">
                           {formatTime12Hour(record.checkInTime)}
                         </span>
                       ) : (
@@ -529,7 +529,7 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
                     {/* 6. Check-Out */}
                     <td className="py-3 px-4 font-mono font-semibold">
                       {record.checkOutTime ? (
-                        <span className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
+                        <span className="text-blue-300 bg-blue-500/15 px-2 py-0.5 rounded-md border border-blue-500/30">
                           {formatTime12Hour(record.checkOutTime)}
                         </span>
                       ) : (
@@ -540,11 +540,11 @@ export const AttendanceModule: React.FC<AttendanceModuleProps> = ({
                     {/* 7. Total Hours */}
                     <td className="py-3 px-4 font-mono font-bold text-slate-700">
                       {workHoursFormatted !== '--' ? (
-                        <span className="text-slate-800 bg-slate-100 px-2 py-0.5 rounded-md">
+                        <span className="text-[#F8FAFC] bg-[#151D2B] border border-[#334155] px-2 py-0.5 rounded-md">
                           {workHoursFormatted}
                         </span>
                       ) : record.workHours ? (
-                        <span className="text-slate-800 bg-slate-100 px-2 py-0.5 rounded-md">
+                        <span className="text-[#F8FAFC] bg-[#151D2B] border border-[#334155] px-2 py-0.5 rounded-md">
                           {record.workHours}h
                         </span>
                       ) : (

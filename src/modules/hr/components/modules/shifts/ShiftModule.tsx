@@ -35,7 +35,7 @@ export const ShiftModule: React.FC<ShiftModuleProps> = ({
   return (
     <div className="space-y-6">
       {/* Top Header */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+      <div className="bg-[#1E293B] p-5 rounded-2xl border border-[#334155] shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-base font-extrabold text-[#172B4D] tracking-tight">
             Shift Management & Rostering
@@ -61,7 +61,7 @@ export const ShiftModule: React.FC<ShiftModuleProps> = ({
             <select
               value={selectedDept}
               onChange={(e) => setSelectedDept(e.target.value)}
-              className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-700 font-medium focus:outline-hidden"
+              className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[#CBD5E1] font-medium focus:outline-hidden"
             >
               <option value="all">All Departments</option>
               {departments.map((d) => (
@@ -141,7 +141,7 @@ export const ShiftModule: React.FC<ShiftModuleProps> = ({
 
                   <div className="mt-4 pt-3 border-t border-slate-100 pl-2 flex items-center justify-between text-xs">
                     <span className="text-slate-400">{shift.workHours}h Working Window</span>
-                    <span className="font-bold text-slate-700 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
+                    <span className="font-bold text-[#CBD5E1] bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
                       {assignedCount} Assigned
                     </span>
                   </div>
@@ -154,7 +154,7 @@ export const ShiftModule: React.FC<ShiftModuleProps> = ({
 
       {/* Shift Roster Matrix Table */}
       {employees.length > 0 && shiftTemplates.length > 0 && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-card overflow-hidden">
+        <div className="bg-[#1E293B] rounded-2xl border border-[#334155] shadow-card overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Calendar className="w-4 h-4 text-[#206DA6]" />
