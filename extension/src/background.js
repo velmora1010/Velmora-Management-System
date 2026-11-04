@@ -1822,80 +1822,107 @@ async function executeProfileResearchOnTab(payload, sender, normalizedUser, star
     igTabId = await updateInstagramTabUrl(igTabId, profileRootUrl, normalizedUser, 'startProfileResearch:retry_profile_root');
     await new Promise(r => setTimeout(r, 2000));
 
-    // First check: Are reels discoverable directly on the main profile grid WITH valid view counts?
+    // First check: Are reels discoverable directly on the main profile grid?
     const profileGridDiscovered = await discoverReelLinks(igTabId, normalizedUser);
     const profileGridResults = processDiscoveredReels(profileGridDiscovered, sender, payload);
-    if (profileGridResults.selectedReelCount > 0 && profileGridResults.validViewCountsCount > 0) {
-      console.log(`[startProfileResearch] Discovered ${profileGridResults.selectedReelCount} Reels with views directly on profile feed for @${normalizedUser}. Continuing scroll...`);
-      const retryDiscovered = await scrollUntilEnoughReels(igTabId, sender, payload);
-      const retryResults = processDiscoveredReels(retryDiscovered, sender, payload);
-      if (retryResults.selectedReelCount > 0) {
-        reelResults = retryResults;
-      }
-    } else {
-      // Second check: Try in-page SPA transition by clicking the profile's Reels tab
-      let tabClicked = false;
-      try {
-        tabClicked = await injectScript(igTabId, (u) => {
-          const userLower = u.toLowerCase();
-          const tablist = document.querySelector('main div[role="tablist"], div[role="tablist"], main nav');
-          const allTabs = Array.from(document.querySelectorAll('a[href]'));
-          const reelsTab =
-            (tablist && (
-              tablist.querySelector('a[href*="/reels/"]') ||
-              tablist.querySelector('a[role="tab"][href*="/reels/"]') ||
-              Array.from(tablist.querySelectorAll('a[href]')).find(a => {
-                const h = (a.getAttribute('href') || '').toLowerCase();
-                return (h.includes(`/${userLower}/reels`) || h.endsWith('/reels/')) &&
-                       !h.endsWith('.com/reels/') && h !== '/reels/' && !h.startsWith('/reels?');
-              })
-            )) ||
-            allTabs.find(a => {
+
+    let preservedProfileFeedResults = null;
+    let preservedProfileFeedDiscovered = null;
+    if (profileGridResults.selectedReelCount > 0) {
+      console.log(`[startProfileResearch] Found ${profileGridResults.selectedReelCount} Reel candidate(s) on profile root for @${normalizedUser}. Preserving as fallback while attempting /reels/ tab for view counts...`);
+      preservedProfileFeedResults = profileGridResults;
+      preservedProfileFeedDiscovered = profileGridDiscovered;
+    }
+
+    // Attempt in-page SPA transition by clicking the profile's Reels tab
+    let tabClicked = false;
+    try {
+      tabClicked = await injectScript(igTabId, (u) => {
+        const userLower = u.toLowerCase();
+        const tablist = document.querySelector('main div[role="tablist"], div[role="tablist"], main nav');
+        const allTabs = Array.from(document.querySelectorAll('a[href]'));
+        const reelsTab =
+          (tablist && (
+            tablist.querySelector('a[href*="/reels/"]') ||
+            tablist.querySelector('a[role="tab"][href*="/reels/"]') ||
+            Array.from(tablist.querySelectorAll('a[href]')).find(a => {
               const h = (a.getAttribute('href') || '').toLowerCase();
               return (h.includes(`/${userLower}/reels`) || h.endsWith('/reels/')) &&
                      !h.endsWith('.com/reels/') && h !== '/reels/' && !h.startsWith('/reels?');
-            });
-          if (reelsTab) {
-            ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(evt => {
-              reelsTab.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
-            });
-            reelsTab.click();
-            window.dispatchEvent(new Event('resize'));
-            window.dispatchEvent(new Event('scroll'));
-            return true;
+            })
+          )) ||
+          allTabs.find(a => {
+            const h = (a.getAttribute('href') || '').toLowerCase();
+            return (h.includes(`/${userLower}/reels`) || h.endsWith('/reels/')) &&
+                   !h.endsWith('.com/reels/') && h !== '/reels/' && !h.startsWith('/reels?');
+          });
+        if (reelsTab) {
+          ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(evt => {
+            reelsTab.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+          });
+          reelsTab.click();
+          window.dispatchEvent(new Event('resize'));
+          window.dispatchEvent(new Event('scroll'));
+          return true;
+        }
+        return false;
+      }, [normalizedUser]);
+    } catch (e) {}
+
+    if (!tabClicked) {
+      igTabId = await updateInstagramTabUrl(igTabId, targetReelsUrl, normalizedUser, 'startProfileResearch:retry_reels_nav');
+      await new Promise(r => setTimeout(r, 1200));
+    } else {
+      await new Promise(r => setTimeout(r, 1500));
+    }
+
+    pageState = await waitForReelsPage(igTabId, normalizedUser, 15000, sender, payload);
+    extractionMoment = {
+      actualUrl: pageState.url,
+      finalUrl: pageState.url,
+      normalizedUser,
+      navigationSuccess: (!pageState.timedOut || pageState.reelCount > 0) && pageState.url.toLowerCase().includes(`/${normalizedUser.toLowerCase()}/reels`),
+      pageReadiness: pageState.ready ? 'complete' : (pageState.readyState || 'unknown'),
+      reelAnchorsCount: pageState.reelCount || 0,
+      postAnchorsCount: pageState.postCount || 0,
+      mediaCount: pageState.mediaCount || 0,
+      gridElementCount: pageState.gridElementCount || 0,
+      timedOut: !!pageState.timedOut,
+      elapsedMs: pageState.elapsed || 0
+    };
+
+    const retryDiscovered = await scrollUntilEnoughReels(igTabId, sender, payload);
+    const retryResults = processDiscoveredReels(retryDiscovered, sender, payload);
+
+    if (retryResults.selectedReelCount > 0) {
+      if (preservedProfileFeedDiscovered && preservedProfileFeedDiscovered.length > 0) {
+        // Merge preserved feed reels with retryResults from /reels/ tab without losing view badges
+        const mergedMap = new Map();
+        // Priority 1: retryResults from /reels/ tab (they may carry view badges)
+        (retryDiscovered || []).forEach(r => {
+          mergedMap.set(r.url, { ...r });
+        });
+        // Priority 2: preserved feed reels (if not already found on /reels/ tab)
+        (preservedProfileFeedDiscovered || []).forEach(r => {
+          if (!mergedMap.has(r.url)) {
+            mergedMap.set(r.url, { ...r });
+          } else {
+            const existing = mergedMap.get(r.url);
+            if (existing.viewCount === null && typeof r.viewCount === 'number') {
+              existing.viewCount = r.viewCount;
+              existing.rawViewText = r.rawViewText;
+              existing.viewIconLocation = r.viewIconLocation;
+              existing.viewIconFound = r.viewIconFound;
+            }
           }
-          return false;
-        }, [normalizedUser]);
-      } catch (e) {}
-
-      if (!tabClicked) {
-        igTabId = await updateInstagramTabUrl(igTabId, targetReelsUrl, normalizedUser, 'startProfileResearch:retry_reels_nav');
-        await new Promise(r => setTimeout(r, 1200));
+        });
+        reelResults = processDiscoveredReels(Array.from(mergedMap.values()), sender, payload);
       } else {
-        await new Promise(r => setTimeout(r, 1500));
-      }
-
-      pageState = await waitForReelsPage(igTabId, normalizedUser, 15000, sender, payload);
-      extractionMoment = {
-        actualUrl: pageState.url,
-        finalUrl: pageState.url,
-        normalizedUser,
-        navigationSuccess: (!pageState.timedOut || pageState.reelCount > 0) && pageState.url.toLowerCase().includes(`/${normalizedUser.toLowerCase()}/reels`),
-        pageReadiness: pageState.ready ? 'complete' : (pageState.readyState || 'unknown'),
-        reelAnchorsCount: pageState.reelCount || 0,
-        postAnchorsCount: pageState.postCount || 0,
-        mediaCount: pageState.mediaCount || 0,
-        gridElementCount: pageState.gridElementCount || 0,
-        timedOut: !!pageState.timedOut,
-        elapsedMs: pageState.elapsed || 0
-      };
-
-      const retryDiscovered = await scrollUntilEnoughReels(igTabId, sender, payload);
-      const retryResults = processDiscoveredReels(retryDiscovered, sender, payload);
-
-      if (retryResults.selectedReelCount > reelResults.selectedReelCount || retryResults.reelsDiscovered > reelResults.reelsDiscovered) {
         reelResults = retryResults;
       }
+    } else if (preservedProfileFeedResults && preservedProfileFeedResults.selectedReelCount > 0) {
+      console.log(`[startProfileResearch] /reels/ tab returned 0 reels for @${normalizedUser}; falling back to ${preservedProfileFeedResults.selectedReelCount} Reel candidates discovered on profile root.`);
+      reelResults = preservedProfileFeedResults;
     }
   }
 

@@ -203,6 +203,65 @@ export function simulateReelFallbackCap(
   };
 }
 
+export interface DiscoveredReelItem {
+  url: string;
+  isPinned?: boolean;
+  viewCount: number | null;
+  rawViewText?: string | null;
+  viewIconLocation?: string | null;
+  viewIconFound?: boolean;
+}
+
+export function resolveReelResultsWithFallback(
+  profileFeedReels: DiscoveredReelItem[],
+  reelsTabReels: DiscoveredReelItem[]
+): {
+  finalReels: DiscoveredReelItem[];
+  source: 'reels_tab' | 'merged' | 'profile_feed_fallback' | 'empty';
+} {
+  const profileHasReels = profileFeedReels && profileFeedReels.length > 0;
+  const reelsTabHasReels = reelsTabReels && reelsTabReels.length > 0;
+
+  if (reelsTabHasReels) {
+    if (profileHasReels) {
+      const mergedMap = new Map<string, DiscoveredReelItem>();
+      reelsTabReels.forEach(r => mergedMap.set(r.url, { ...r }));
+      profileFeedReels.forEach(r => {
+        if (!mergedMap.has(r.url)) {
+          mergedMap.set(r.url, { ...r });
+        } else {
+          const existing = mergedMap.get(r.url)!;
+          if (existing.viewCount === null && typeof r.viewCount === 'number') {
+            existing.viewCount = r.viewCount;
+            existing.rawViewText = r.rawViewText;
+            existing.viewIconLocation = r.viewIconLocation;
+          }
+        }
+      });
+      return {
+        finalReels: Array.from(mergedMap.values()),
+        source: 'merged'
+      };
+    }
+    return {
+      finalReels: reelsTabReels,
+      source: 'reels_tab'
+    };
+  }
+
+  if (profileHasReels) {
+    return {
+      finalReels: profileFeedReels,
+      source: 'profile_feed_fallback'
+    };
+  }
+
+  return {
+    finalReels: [],
+    source: 'empty'
+  };
+}
+
 export function classifyPageState(page: {
   url: string;
   targetUser: string;
@@ -458,18 +517,55 @@ function runAllTests() {
   }
   console.log('  -> Tile container boundaries protect against neighbor tile value bleed.');
 
-  console.log('\n[Test 11] Profile-root fallback prioritizing /reels/ tab...');
-  const rootDiscovery = {
-    selectedReelCount: 10,
-    validViewCountsCount: 0
-  };
-  const shouldNavigateToReels = rootDiscovery.selectedReelCount > 0 && rootDiscovery.validViewCountsCount === 0;
-  if (!shouldNavigateToReels) {
-    throw new Error('Expected shouldNavigateToReels to be true when root has reels but 0 views');
-  }
-  console.log('  -> Correctly triggers navigation to /reels/ tab when root grid lacks view badges.');
+  console.log('\n[Test 11] Profile-root Reel candidates retained when /reels/ returns zero or fails to hydrate...');
+  const mockFeedReels: DiscoveredReelItem[] = Array.from({ length: 11 }, (_, i) => ({
+    url: `https://www.instagram.com/reel/FEED${i + 1}/`,
+    viewCount: null,
+    isPinned: i === 0
+  }));
+  const emptyReelsTab: DiscoveredReelItem[] = [];
 
-  console.log('\n[Test 12] Bounded individual Reel fallback cap (max 3 reels)...');
+  const fallbackResult = resolveReelResultsWithFallback(mockFeedReels, emptyReelsTab);
+  if (fallbackResult.source !== 'profile_feed_fallback') {
+    throw new Error(`Expected profile_feed_fallback, got ${fallbackResult.source}`);
+  }
+  if (fallbackResult.finalReels.length !== 11) {
+    throw new Error(`Expected 11 preserved feed reels, got ${fallbackResult.finalReels.length}`);
+  }
+  console.log('  -> Profile-root candidates successfully preserved as fallback when /reels/ tab returns zero reels.');
+
+  console.log('\n[Test 12] /reels/ results with valid counts preferred and merged when available...');
+  const mockReelsTabFound: DiscoveredReelItem[] = [
+    { url: 'https://www.instagram.com/reel/FEED2/', viewCount: 245000, rawViewText: '245K' },
+    { url: 'https://www.instagram.com/reel/NEW_TAB1/', viewCount: 1200000, rawViewText: '1.2M' }
+  ];
+  const mergedResult = resolveReelResultsWithFallback(mockFeedReels, mockReelsTabFound);
+  if (mergedResult.source !== 'merged') {
+    throw new Error(`Expected merged, got ${mergedResult.source}`);
+  }
+  const feed2 = mergedResult.finalReels.find(r => r.url === 'https://www.instagram.com/reel/FEED2/');
+  if (!feed2 || feed2.viewCount !== 245000) {
+    throw new Error(`Expected FEED2 viewCount to be updated to 245000, got ${JSON.stringify(feed2)}`);
+  }
+  if (mergedResult.finalReels.length !== 12) {
+    throw new Error(`Expected 12 unique merged reels (11 feed + 1 new tab), got ${mergedResult.finalReels.length}`);
+  }
+  console.log('  -> /reels/ tab results preferred and merged without dropping candidate shortcodes.');
+
+  console.log('\n[Test 13] Missing-view profile-root candidates reach individual fallback...');
+  const feedOnlyMissing = fallbackResult.finalReels
+    .filter(r => !r.isPinned && r.viewCount === null)
+    .map(r => ({ reelUrl: r.url, viewCount: r.viewCount }));
+  if (feedOnlyMissing.length !== 10) {
+    throw new Error(`Expected 10 non-pinned missing-view reels from fallback, got ${feedOnlyMissing.length}`);
+  }
+  const fallbackCapRun = simulateReelFallbackCap(feedOnlyMissing, 3);
+  if (fallbackCapRun.inspectedCount !== 3 || fallbackCapRun.remainingMissing !== 7) {
+    throw new Error(`Expected exactly 3 inspected and 7 remaining, got ${JSON.stringify(fallbackCapRun)}`);
+  }
+  console.log('  -> Retained profile-root candidates correctly reach individual Reel metric fallback.');
+
+  console.log('\n[Test 14] Bounded individual Reel fallback cap (max 3 reels)...');
   const mockBatch = [
     { reelUrl: 'https://www.instagram.com/reel/1/', viewCount: 1000 },
     { reelUrl: 'https://www.instagram.com/reel/2/', viewCount: null },
@@ -483,7 +579,12 @@ function runAllTests() {
   }
   console.log(`  -> Fallback strictly capped: inspected ${capRes.inspectedCount} reels, avoided unbounded navigation.`);
 
-  console.log('\nPASS: All 12 Reel discovery & metric extraction tests passed successfully!');
+  console.log('\n[Test 15] Deduplication and true-zero (0) preservation integrity...');
+  if (parseInstagramViewCount('0') !== 0) throw new Error('True zero (0) must remain numeric 0');
+  if (parseInstagramViewCount(null) !== null) throw new Error('Missing view must remain null');
+  console.log('  -> Real numeric zero (0) distinct from missing (null) verified.');
+
+  console.log('\nPASS: All 15 Reel discovery & metric extraction tests passed successfully!');
 }
 
 runAllTests();
