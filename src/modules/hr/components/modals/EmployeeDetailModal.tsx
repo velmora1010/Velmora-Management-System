@@ -973,6 +973,11 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
                     <span className="text-xs font-mono text-slate-300 mt-1 block">
                       Account: {employee.accountNumber}
                     </span>
+                    {employee.ifscCode && (
+                      <span className="text-xs font-mono text-emerald-400 mt-0.5 block">
+                        IFSC: {employee.ifscCode}
+                      </span>
+                    )}
                     <span className="text-[11px] text-[#94A3B8] block">
                       Tax ID: {employee.taxId}
                     </span>

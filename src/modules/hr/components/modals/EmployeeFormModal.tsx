@@ -120,6 +120,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
   const [baseSalary, setBaseSalary] = useState<number | ''>('');
   const [bankName, setBankName] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
+  const [ifscCode, setIfscCode] = useState('');
   const [taxId, setTaxId] = useState('');
 
   // Step 4: Emergency Contact & Address
@@ -175,6 +176,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
       // Load actual saved values directly and preserve them
       setBankName(source.bankName || '');
       setAccountNumber(source.accountNumber || '');
+      setIfscCode(source.ifscCode || '');
       setTaxId(source.taxId || '');
       setBaseSalary(
         source.baseSalary !== undefined && source.baseSalary !== null
@@ -226,6 +228,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
         setBaseSalary(draft.baseSalary || '');
         setBankName(draft.bankName || '');
         setAccountNumber(draft.accountNumber || '');
+        setIfscCode(draft.ifscCode || '');
         setTaxId(draft.taxId || '');
         setEmergencyContactName(draft.emergencyContactName || '');
         setEmergencyContactRelation(draft.emergencyContactRelation || '');
@@ -259,6 +262,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
         setBaseSalary('');
         setBankName('');
         setAccountNumber('');
+        setIfscCode('');
         setTaxId('');
         setEmergencyContactName('');
         setEmergencyContactRelation('');
@@ -423,6 +427,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
         baseSalary,
         bankName,
         accountNumber,
+        ifscCode,
         taxId,
         emergencyContactName,
         emergencyContactRelation,
@@ -515,6 +520,12 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
       if (baseSalary === '' || Number(baseSalary) <= 0) {
         err.baseSalary = 'Valid monthly base salary is required (must be greater than 0)';
       }
+      const trimmedIfsc = ifscCode.trim().toUpperCase();
+      if (!trimmedIfsc) {
+        err.ifscCode = 'IFSC Code is required';
+      } else if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(trimmedIfsc)) {
+        err.ifscCode = 'Invalid IFSC code format (e.g. SBIN0001234: 4 letters, 0, followed by 6 alphanumeric characters)';
+      }
     }
 
     setErrors((prev) => {
@@ -529,6 +540,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
         delete copy.shiftId;
       } else if (tab === 'financial') {
         delete copy.baseSalary;
+        delete copy.ifscCode;
       }
       return { ...copy, ...err };
     });
@@ -562,6 +574,19 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
 
     if (baseSalary === '' || Number(baseSalary) <= 0) {
       err.baseSalary = 'Valid monthly base salary is required (must be greater than 0)';
+      if (!firstInvalidTab) {
+        firstInvalidTab = 'financial';
+      }
+    }
+
+    const trimmedIfsc = ifscCode.trim().toUpperCase();
+    if (!trimmedIfsc) {
+      err.ifscCode = 'IFSC Code is required';
+      if (!firstInvalidTab) {
+        firstInvalidTab = 'financial';
+      }
+    } else if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(trimmedIfsc)) {
+      err.ifscCode = 'Invalid IFSC code format (e.g. SBIN0001234: 4 letters, 0, followed by 6 alphanumeric characters)';
       if (!firstInvalidTab) {
         firstInvalidTab = 'financial';
       }
@@ -620,6 +645,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
       currency: 'INR',
       bankName: touchedFields.has('bankName') ? bankName.trim() : (current?.bankName ?? bankName.trim()),
       accountNumber: touchedFields.has('accountNumber') ? accountNumber.trim() : (current?.accountNumber ?? accountNumber.trim()),
+      ifscCode: touchedFields.has('ifscCode') ? ifscCode.trim().toUpperCase() : (current?.ifscCode ?? ifscCode.trim().toUpperCase()),
       taxId: touchedFields.has('taxId') ? taxId.trim() : (current?.taxId ?? taxId.trim()),
 
       emergencyContactName: touchedFields.has('emergencyContactName') ? emergencyContactName.trim() : (current?.emergencyContactName ?? emergencyContactName.trim()),
@@ -1370,7 +1396,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                     setAccountNumber(e.target.value);
                     markTouched('accountNumber');
                   }}
-                  className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl font-mono"
+                  className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl font-mono text-slate-800"
                   placeholder="e.g. 1234567890"
                 />
               </div>
@@ -1384,9 +1410,41 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                     setTaxId(e.target.value);
                     markTouched('taxId');
                   }}
-                  className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl font-mono"
+                  className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl font-mono text-slate-800"
                   placeholder="e.g. US-TAX-98211"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-white uppercase mb-1">
+                  IFSC CODE <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={ifscCode}
+                  maxLength={11}
+                  onChange={(e) => {
+                    const val = e.target.value.toUpperCase();
+                    setIfscCode(val);
+                    markTouched('ifscCode');
+                    if (errors.ifscCode) {
+                      setErrors((prev) => {
+                        const copy = { ...prev };
+                        delete copy.ifscCode;
+                        return copy;
+                      });
+                    }
+                  }}
+                  className={`w-full px-3 py-2 text-sm bg-slate-50 border rounded-xl font-mono uppercase tracking-wider text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-[#206DA6] ${
+                    errors.ifscCode ? 'border-red-500' : 'border-slate-200'
+                  }`}
+                  placeholder="e.g. SBIN0001234"
+                />
+                {errors.ifscCode && (
+                  <span className="text-[11px] text-red-500 mt-1 block">
+                    {errors.ifscCode}
+                  </span>
+                )}
               </div>
             </div>
           </div>

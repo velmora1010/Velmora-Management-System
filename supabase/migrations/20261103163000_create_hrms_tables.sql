@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS public.employees (
   currency TEXT DEFAULT 'INR',
   bank_name TEXT,
   account_number TEXT,
+  ifsc_code TEXT,
   tax_id TEXT,
   emergency_contact_name TEXT,
   emergency_contact_relation TEXT,

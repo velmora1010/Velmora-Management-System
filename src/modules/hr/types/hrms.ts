@@ -43,6 +43,7 @@ export interface Employee {
   currency: string;
   bankName: string;
   accountNumber: string;
+  ifscCode?: string;
   taxId: string;
   // Emergency Contact
   emergencyContactName: string;
