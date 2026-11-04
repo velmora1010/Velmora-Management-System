@@ -861,21 +861,24 @@ function parseInstagramViewCount(rawText) {
   const cleaned = rawText.trim().replace(/\s+/g, ' ');
   if (!cleaned) return null;
 
-  const match = cleaned.match(/^([\d,.]+)\s*([kmbKMB])?(?:\s*(?:views?|plays?))?$/i);
-  if (!match) return null;
+  const stripped = cleaned.replace(/^(?:(?:plays?|views?)(?:\s*counts?)?)\s*[:\-–—]?\s*/i, '').trim();
+  const match = stripped.match(/^([\d,.]+)\s*(k|m|b|thousand|million|billion|lakhs?|crores?)?(?:\s*(?:views?|plays?))?$/i);
+  const m = match || stripped.match(/\b([\d,.]+)\s*(k|m|b|thousand|million|billion|lakhs?|crores?)?\s*(?:views?|plays?)\b/i);
+  if (!m) return null;
 
-  const numPart = match[1];
-  const suffix = match[2] ? match[2].toLowerCase() : null;
-
-  const normalizedNumStr = numPart.replace(/,/g, '');
-  if ((normalizedNumStr.match(/\./g) || []).length > 1) return null;
-  const base = parseFloat(normalizedNumStr);
+  const numPart = m[1].replace(/,/g, '');
+  if ((numPart.match(/\./g) || []).length > 1) return null;
+  const base = parseFloat(numPart);
   if (isNaN(base) || base < 0) return null;
+  if (base === 0) return 0;
 
-  if (suffix === 'k') return Math.round(base * 1000);
-  if (suffix === 'm') return Math.round(base * 1000000);
-  if (suffix === 'b') return Math.round(base * 1000000000);
-  if (!suffix) return Math.round(base);
+  const mult = (m[2] || '').toLowerCase();
+  if (mult === 'k' || mult === 'thousand') return Math.round(base * 1000);
+  if (mult === 'm' || mult === 'million') return Math.round(base * 1000000);
+  if (mult === 'b' || mult === 'billion') return Math.round(base * 1000000000);
+  if (mult === 'lakh' || mult === 'lakhs') return Math.round(base * 100000);
+  if (mult === 'crore' || mult === 'crores') return Math.round(base * 10000000);
+  if (!mult) return Math.round(base);
   return null;
 }
 
@@ -899,34 +902,74 @@ async function discoverReelLinks(igTabId, username = null) {
         if (!rawText || typeof rawText !== 'string') return null;
         const cleaned = rawText.trim().replace(/\s+/g, ' ');
         if (!cleaned) return null;
-        const match = cleaned.match(/^([\d,.]+)\s*([kmbKMB])?(?:\s*(?:views?|plays?))?$/i);
-        if (!match) return null;
-        const numPart = match[1];
-        const suffix = match[2] ? match[2].toLowerCase() : null;
-        const normalizedNumStr = numPart.replace(/,/g, '');
-        if ((normalizedNumStr.match(/\./g) || []).length > 1) return null;
-        const base = parseFloat(normalizedNumStr);
+
+        const stripped = cleaned.replace(/^(?:(?:plays?|views?)(?:\s*counts?)?)\s*[:\-–—]?\s*/i, '').trim();
+        const match = stripped.match(/^([\d,.]+)\s*(k|m|b|thousand|million|billion|lakhs?|crores?)?(?:\s*(?:views?|plays?))?$/i);
+        const m = match || stripped.match(/\b([\d,.]+)\s*(k|m|b|thousand|million|billion|lakhs?|crores?)?\s*(?:views?|plays?)\b/i);
+        if (!m) return null;
+
+        const numPart = m[1].replace(/,/g, '');
+        if ((numPart.match(/\./g) || []).length > 1) return null;
+        const base = parseFloat(numPart);
         if (isNaN(base) || base < 0) return null;
-        if (suffix === 'k') return Math.round(base * 1000);
-        if (suffix === 'm') return Math.round(base * 1000000);
-        if (suffix === 'b') return Math.round(base * 1000000000);
-        if (!suffix) return Math.round(base);
+        if (base === 0) return 0;
+
+        const mult = (m[2] || '').toLowerCase();
+        if (mult === 'k' || mult === 'thousand') return Math.round(base * 1000);
+        if (mult === 'm' || mult === 'million') return Math.round(base * 1000000);
+        if (mult === 'b' || mult === 'billion') return Math.round(base * 1000000000);
+        if (mult === 'lakh' || mult === 'lakhs') return Math.round(base * 100000);
+        if (mult === 'crore' || mult === 'crores') return Math.round(base * 10000000);
+        if (!mult) return Math.round(base);
         return null;
       }
 
-      function extractView(a) {
-        let pinnedSvg = a.querySelector('svg[aria-label="Pinned post icon"], svg[aria-label*="Pinned" i]');
-        if (!pinnedSvg && a.parentElement && a.parentElement.querySelectorAll('a[href*="/reel/"]').length === 1) {
-          pinnedSvg = a.parentElement.querySelector('svg[aria-label="Pinned post icon"], svg[aria-label*="Pinned" i]');
+      function getTileContainer(a) {
+        let tileContainer = a;
+        let curr = a.parentElement;
+        while (curr && curr !== document.body && curr.tagName !== 'MAIN') {
+          const reelsInParent = curr.querySelectorAll('a[href*="/reel/"], a[href*="/p/"]');
+          if (reelsInParent.length > 1) {
+            break;
+          }
+          tileContainer = curr;
+          curr = curr.parentElement;
         }
-        const isPinned = !!pinnedSvg;
-        if (isPinned) {
+        return tileContainer;
+      }
+
+      function extractView(a) {
+        const tileContainer = getTileContainer(a);
+
+        // 1. Check pinned status on anchor and tileContainer
+        const pinnedEl = tileContainer.querySelector('svg[aria-label*="Pinned" i], [aria-label*="Pinned" i]');
+        if (pinnedEl) {
           return { rawText: null, count: null, location: 'pinned_skipped', isPinned: true, viewIconFound: false };
         }
 
-        const viewIcon = a.querySelector('svg[aria-label="View count icon"], svg[aria-label*="View count" i], svg[aria-label*="view count" i]');
+        // 2. Check aria-labels & title on anchor and tileContainer
+        const ariaCandidates = [
+          a.getAttribute('aria-label'),
+          a.getAttribute('title'),
+          tileContainer.getAttribute('aria-label'),
+          tileContainer.getAttribute('title')
+        ];
+        Array.from(tileContainer.querySelectorAll('[aria-label*="view" i], [aria-label*="play" i]')).forEach(el => {
+          ariaCandidates.push(el.getAttribute('aria-label'));
+        });
+        for (const raw of ariaCandidates) {
+          if (!raw) continue;
+          const count = parseView(raw);
+          if (count !== null) {
+            return { rawText: raw, count, location: 'tile_aria_label', isPinned: false, viewIconFound: true };
+          }
+        }
+
+        // 3. Search for view/play icon in tileContainer or anchor
+        const viewIcon = tileContainer.querySelector(
+          'svg[aria-label*="View count" i], svg[aria-label*="view count" i], svg[aria-label*="Play count" i], svg[aria-label*="Plays" i], svg[aria-label*="Play" i], svg[aria-label*="Clip" i], svg[aria-label*="Reel" i]'
+        );
         if (viewIcon) {
-          // 1. Immediate siblings of icon
           if (viewIcon.nextElementSibling) {
             const text = (viewIcon.nextElementSibling.innerText || viewIcon.nextElementSibling.textContent || '').trim();
             const count = parseView(text);
@@ -938,7 +981,6 @@ async function discoverReelLinks(igTabId, username = null) {
             if (count !== null) return { rawText: text, count, location: 'icon_prev_sibling', isPinned: false, viewIconFound: true };
           }
 
-          // 2. Icon's direct parent element
           const parent = viewIcon.parentElement;
           if (parent) {
             const directChildren = Array.from(parent.querySelectorAll('span, div')).filter(el => el !== viewIcon && !viewIcon.contains(el));
@@ -958,9 +1000,8 @@ async function discoverReelLinks(igTabId, username = null) {
             }
           }
 
-          // 3. Ancestor container inside anchor
           let curr = parent ? parent.parentElement : null;
-          while (curr && curr !== a && curr !== document.body) {
+          while (curr && curr !== tileContainer.parentElement && curr !== document.body) {
             const candidateNodes = Array.from(curr.querySelectorAll('span, div')).filter(el => !viewIcon.contains(el));
             for (const node of candidateNodes) {
               const parentWithSvg = node.parentElement;
@@ -973,15 +1014,13 @@ async function discoverReelLinks(igTabId, username = null) {
             }
             curr = curr.parentElement;
           }
-          // If viewIcon was present but Steps 1-3 did not match, fall through to Step 4 leaf/regex fallback
         }
 
         const hasViewIcon = !!viewIcon;
 
-        // 4. Evidence-based fallback when View count SVG aria-label is absent or text is in a separate leaf:
-        // Collect all leaf spans/divs inside the anchor, excluding hover-overlay icons (Like/Comment)
+        // 4. Fallback: inspect leaf spans/divs in tileContainer (excluding like/comment overlays)
         const leafCandidates = [];
-        const innerSpans = Array.from(a.querySelectorAll('span, div'));
+        const innerSpans = Array.from(tileContainer.querySelectorAll('span, div'));
         for (const span of innerSpans) {
           if (span.querySelector('span, div')) continue;
           const parentWithSvg = span.parentElement;
@@ -996,30 +1035,36 @@ async function discoverReelLinks(igTabId, username = null) {
         }
 
         if (leafCandidates.length > 0) {
-          // In Instagram's Reels grid DOM, the hover overlay (Likes, Comments) precedes the persistent bottom-left View Count footer.
-          // Selecting the last leaf candidate pairs the Reel with its actual view count.
           const lastCandidate = leafCandidates[leafCandidates.length - 1];
           return {
             rawText: lastCandidate.rawText,
             count: lastCandidate.count,
-            location: leafCandidates.length > 1 ? `anchor_last_leaf_of_${leafCandidates.length}` : 'anchor_child_span',
+            location: leafCandidates.length > 1 ? `tile_last_leaf_of_${leafCandidates.length}` : 'tile_child_span',
             isPinned: false,
             viewIconFound: hasViewIcon
           };
         }
 
+        // 5. Direct text & regex scan across anchor & tileContainer
         const anchorDirectText = (a.innerText || a.textContent || '').trim();
         const directCount = parseView(anchorDirectText);
         if (directCount !== null) {
           return { rawText: anchorDirectText, count: directCount, location: 'anchor_direct_text', isPinned: false, viewIconFound: hasViewIcon };
         }
 
-        const allMatches = Array.from(anchorDirectText.matchAll(/\b(\d[\d,.]*\s*[kmbKMB]?(?:\s*(?:views?|plays?))?)\b/gi));
+        const tileDirectText = (tileContainer.innerText || tileContainer.textContent || '').trim();
+        const tileCount = parseView(tileDirectText);
+        if (tileCount !== null) {
+          return { rawText: tileDirectText, count: tileCount, location: 'tile_direct_text', isPinned: false, viewIconFound: hasViewIcon };
+        }
+
+        const combinedText = `${anchorDirectText} ${tileDirectText}`;
+        const allMatches = Array.from(combinedText.matchAll(/\b(\d[\d,.]*\s*(?:[kmbKMB]|thousand|million|billion|lakhs?|crores?)?(?:\s*(?:views?|plays?))?)\b/gi));
         for (let i = allMatches.length - 1; i >= 0; i--) {
           const candidateStr = allMatches[i][1].trim();
           const count = parseView(candidateStr);
           if (count !== null) {
-            return { rawText: candidateStr, count, location: 'anchor_candidate_regex', isPinned: false, viewIconFound: hasViewIcon };
+            return { rawText: candidateStr, count, location: 'tile_candidate_regex', isPinned: false, viewIconFound: hasViewIcon };
           }
         }
 
@@ -1223,6 +1268,14 @@ async function scrollUntilEnoughReels(igTabId, sender, payload) {
         if (scrollingEl) {
           scrollingEl.scrollTop = scrollHeight;
         }
+
+        // Gentle pointer activation to mount lazy view count badges on visible tiles
+        try {
+          reelAnchors.slice(0, 15).forEach(a => {
+            a.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true, cancelable: true }));
+            a.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+          });
+        } catch (e) {}
 
         // Real browser micro-scroll bounce to trigger IntersectionObserver threshold crossing
         if (isStall) {
@@ -1769,11 +1822,11 @@ async function executeProfileResearchOnTab(payload, sender, normalizedUser, star
     igTabId = await updateInstagramTabUrl(igTabId, profileRootUrl, normalizedUser, 'startProfileResearch:retry_profile_root');
     await new Promise(r => setTimeout(r, 2000));
 
-    // First check: Are reels discoverable directly on the main profile grid? (e.g. video posts/reels)
+    // First check: Are reels discoverable directly on the main profile grid WITH valid view counts?
     const profileGridDiscovered = await discoverReelLinks(igTabId, normalizedUser);
     const profileGridResults = processDiscoveredReels(profileGridDiscovered, sender, payload);
-    if (profileGridResults.selectedReelCount > 0) {
-      console.log(`[startProfileResearch] Discovered ${profileGridResults.selectedReelCount} Reels directly on profile feed for @${normalizedUser}. Continuing scroll...`);
+    if (profileGridResults.selectedReelCount > 0 && profileGridResults.validViewCountsCount > 0) {
+      console.log(`[startProfileResearch] Discovered ${profileGridResults.selectedReelCount} Reels with views directly on profile feed for @${normalizedUser}. Continuing scroll...`);
       const retryDiscovered = await scrollUntilEnoughReels(igTabId, sender, payload);
       const retryResults = processDiscoveredReels(retryDiscovered, sender, payload);
       if (retryResults.selectedReelCount > 0) {
@@ -1843,6 +1896,119 @@ async function executeProfileResearchOnTab(payload, sender, normalizedUser, star
       if (retryResults.selectedReelCount > reelResults.selectedReelCount || retryResults.reelsDiscovered > reelResults.reelsDiscovered) {
         reelResults = retryResults;
       }
+    }
+  }
+
+  // 6. Bounded Individual Reel-page metric fallback (only if grid extraction still misses counts)
+  // Strictly bounded to at most 3 reels per profile to preserve speed and avoid repeated navigation
+  const missingCountReels = (reelResults.selectedReels || []).filter(
+    r => typeof r.viewCount !== 'number' && !r.isPinned
+  );
+
+  if (missingCountReels.length > 0 && reelResults.validViewCountsCount < 15) {
+    const MAX_FALLBACK_PER_PROFILE = 3;
+    const reelsToInspect = missingCountReels.slice(0, MAX_FALLBACK_PER_PROFILE);
+    console.log(`[startProfileResearch] Bounded individual Reel fallback: inspecting ${reelsToInspect.length} Reel(s) with missing view counts for @${normalizedUser}...`);
+
+    let anyViewUpdated = false;
+    for (const reel of reelsToInspect) {
+      try {
+        await handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, 'reel_metric_fallback');
+        logTabOp('reel_metric_fallback:nav', normalizedUser, igTabId, reel.reelUrl);
+        igTabId = await updateInstagramTabUrl(igTabId, reel.reelUrl, normalizedUser, 'startProfileResearch:reel_metric_fallback');
+        await new Promise(r => setTimeout(r, 1800));
+
+        const extracted = await injectScript(igTabId, () => {
+          function parseCount(raw) {
+            if (!raw || typeof raw !== 'string') return null;
+            const cleaned = raw.trim().replace(/\s+/g, ' ');
+            if (!cleaned) return null;
+            const stripped = cleaned.replace(/^(?:(?:plays?|views?)(?:\s*counts?)?)\s*[:\-–—]?\s*/i, '').trim();
+            const match = stripped.match(/^([\d,.]+)\s*(k|m|b|thousand|million|billion|lakhs?|crores?)?(?:\s*(?:views?|plays?))?$/i);
+            const m = match || stripped.match(/\b([\d,.]+)\s*(k|m|b|thousand|million|billion|lakhs?|crores?)?\s*(?:views?|plays?)\b/i);
+            if (!m) return null;
+            const normStr = m[1].replace(/,/g, '');
+            if ((normStr.match(/\./g) || []).length > 1) return null;
+            const base = parseFloat(normStr);
+            if (isNaN(base) || base < 0) return null;
+            if (base === 0) return 0;
+            const mult = (m[2] || '').toLowerCase();
+            if (mult === 'k' || mult === 'thousand') return Math.round(base * 1000);
+            if (mult === 'm' || mult === 'million') return Math.round(base * 1000000);
+            if (mult === 'b' || mult === 'billion') return Math.round(base * 1000000000);
+            if (mult === 'lakh' || mult === 'lakhs') return Math.round(base * 100000);
+            if (mult === 'crore' || mult === 'crores') return Math.round(base * 10000000);
+            if (!mult) return Math.round(base);
+            return null;
+          }
+
+          let view = null;
+          let raw = null;
+
+          // Strategy A: Check accessibility labels on buttons, spans, or SVGs
+          const ariaNodes = Array.from(document.querySelectorAll('[aria-label*="view" i], [aria-label*="play" i]'));
+          for (const el of ariaNodes) {
+            const val = el.getAttribute('aria-label');
+            const c = parseCount(val);
+            if (c !== null) { view = c; raw = val; break; }
+          }
+
+          // Strategy B: Check visible text nodes in player sidebar/details
+          if (view === null) {
+            const candidates = Array.from(document.querySelectorAll('span, [role="button"]'));
+            for (const el of candidates) {
+              if (el.children.length > 2) continue;
+              const t = (el.innerText || el.textContent || '').trim();
+              if (/\b(?:views?|plays?)\b/i.test(t)) {
+                const c = parseCount(t);
+                if (c !== null) { view = c; raw = t; break; }
+              }
+            }
+          }
+
+          // Strategy C: Check page meta description
+          if (view === null) {
+            const ogDesc = document.querySelector('meta[property="og:description"]')?.content ||
+                           document.querySelector('meta[name="description"]')?.content || '';
+            const m = ogDesc.match(/\b([\d,.]+\s*(?:[kmbKMB]|thousand|million|billion|lakhs?|crores?)?\s*(?:views?|plays?))\b/i);
+            if (m) {
+              const c = parseCount(m[1]);
+              if (c !== null) { view = c; raw = m[1]; }
+            }
+          }
+
+          return { view, raw };
+        });
+
+        if (extracted && typeof extracted.view === 'number') {
+          reel.viewCount = extracted.view;
+          reel.rawViewText = extracted.raw;
+          reel.viewIconLocation = 'reel_page_fallback';
+          anyViewUpdated = true;
+          logTabOp('reel_metric_fallback:success', normalizedUser, igTabId, reel.reelUrl, `View count: ${extracted.view}`);
+        }
+      } catch (fbErr) {
+        if (isTabInvalidError(fbErr) || String(fbErr?.message || '').includes('COMPANION_WINDOW_CLOSED')) throw fbErr;
+        console.warn(`[startProfileResearch] Metric fallback issue for ${reel.reelUrl}:`, fbErr.message);
+      }
+    }
+
+    // Always restore companion tab safely back to targetReelsUrl
+    try {
+      igTabId = await updateInstagramTabUrl(igTabId, targetReelsUrl, normalizedUser, 'startProfileResearch:return_from_fallback');
+      await new Promise(r => setTimeout(r, 1200));
+    } catch (e) {}
+
+    // If any view counts were updated, re-process metrics
+    if (anyViewUpdated) {
+      const allDiscovered = (reelResults.selectedReels || []).map(r => ({
+        url: r.reelUrl,
+        isPinned: r.isPinned,
+        viewCount: r.viewCount,
+        rawViewText: r.rawViewText,
+        viewIconLocation: r.viewIconLocation
+      }));
+      reelResults = processDiscoveredReels(allDiscovered, sender, payload);
     }
   }
 
@@ -2269,34 +2435,74 @@ async function runReelDiagnostic(payload, sender) {
         if (!rawText || typeof rawText !== 'string') return null;
         const cleaned = rawText.trim().replace(/\s+/g, ' ');
         if (!cleaned) return null;
-        const match = cleaned.match(/^([\d,.]+)\s*([kmbKMB])?(?:\s*(?:views?|plays?))?$/i);
-        if (!match) return null;
-        const numPart = match[1];
-        const suffix = match[2] ? match[2].toLowerCase() : null;
-        const normalizedNumStr = numPart.replace(/,/g, '');
-        if ((normalizedNumStr.match(/\./g) || []).length > 1) return null;
-        const base = parseFloat(normalizedNumStr);
+
+        const stripped = cleaned.replace(/^(?:(?:plays?|views?)(?:\s*counts?)?)\s*[:\-–—]?\s*/i, '').trim();
+        const match = stripped.match(/^([\d,.]+)\s*(k|m|b|thousand|million|billion|lakhs?|crores?)?(?:\s*(?:views?|plays?))?$/i);
+        const m = match || stripped.match(/\b([\d,.]+)\s*(k|m|b|thousand|million|billion|lakhs?|crores?)?\s*(?:views?|plays?)\b/i);
+        if (!m) return null;
+
+        const numPart = m[1].replace(/,/g, '');
+        if ((numPart.match(/\./g) || []).length > 1) return null;
+        const base = parseFloat(numPart);
         if (isNaN(base) || base < 0) return null;
-        if (suffix === 'k') return Math.round(base * 1000);
-        if (suffix === 'm') return Math.round(base * 1000000);
-        if (suffix === 'b') return Math.round(base * 1000000000);
-        if (!suffix) return Math.round(base);
+        if (base === 0) return 0;
+
+        const mult = (m[2] || '').toLowerCase();
+        if (mult === 'k' || mult === 'thousand') return Math.round(base * 1000);
+        if (mult === 'm' || mult === 'million') return Math.round(base * 1000000);
+        if (mult === 'b' || mult === 'billion') return Math.round(base * 1000000000);
+        if (mult === 'lakh' || mult === 'lakhs') return Math.round(base * 100000);
+        if (mult === 'crore' || mult === 'crores') return Math.round(base * 10000000);
+        if (!mult) return Math.round(base);
         return null;
       }
 
-      function extractView(a) {
-        let pinnedSvg = a.querySelector('svg[aria-label="Pinned post icon"], svg[aria-label*="Pinned" i]');
-        if (!pinnedSvg && a.parentElement && a.parentElement.querySelectorAll('a[href*="/reel/"]').length === 1) {
-          pinnedSvg = a.parentElement.querySelector('svg[aria-label="Pinned post icon"], svg[aria-label*="Pinned" i]');
+      function getTileContainer(a) {
+        let tileContainer = a;
+        let curr = a.parentElement;
+        while (curr && curr !== document.body && curr.tagName !== 'MAIN') {
+          const reelsInParent = curr.querySelectorAll('a[href*="/reel/"], a[href*="/p/"]');
+          if (reelsInParent.length > 1) {
+            break;
+          }
+          tileContainer = curr;
+          curr = curr.parentElement;
         }
-        const isPinned = !!pinnedSvg;
-        if (isPinned) {
+        return tileContainer;
+      }
+
+      function extractView(a) {
+        const tileContainer = getTileContainer(a);
+
+        // 1. Check pinned status on anchor and tileContainer
+        const pinnedEl = tileContainer.querySelector('svg[aria-label*="Pinned" i], [aria-label*="Pinned" i]');
+        if (pinnedEl) {
           return { rawText: null, count: null, location: 'pinned_skipped', isPinned: true, viewIconFound: false };
         }
 
-        const viewIcon = a.querySelector('svg[aria-label="View count icon"], svg[aria-label*="View count" i], svg[aria-label*="view count" i]');
+        // 2. Check aria-labels & title on anchor and tileContainer
+        const ariaCandidates = [
+          a.getAttribute('aria-label'),
+          a.getAttribute('title'),
+          tileContainer.getAttribute('aria-label'),
+          tileContainer.getAttribute('title')
+        ];
+        Array.from(tileContainer.querySelectorAll('[aria-label*="view" i], [aria-label*="play" i]')).forEach(el => {
+          ariaCandidates.push(el.getAttribute('aria-label'));
+        });
+        for (const raw of ariaCandidates) {
+          if (!raw) continue;
+          const count = parseView(raw);
+          if (count !== null) {
+            return { rawText: raw, count, location: 'tile_aria_label', isPinned: false, viewIconFound: true };
+          }
+        }
+
+        // 3. Search for view/play icon in tileContainer or anchor
+        const viewIcon = tileContainer.querySelector(
+          'svg[aria-label*="View count" i], svg[aria-label*="view count" i], svg[aria-label*="Play count" i], svg[aria-label*="Plays" i], svg[aria-label*="Play" i], svg[aria-label*="Clip" i], svg[aria-label*="Reel" i]'
+        );
         if (viewIcon) {
-          // 1. Immediate siblings of icon
           if (viewIcon.nextElementSibling) {
             const text = (viewIcon.nextElementSibling.innerText || viewIcon.nextElementSibling.textContent || '').trim();
             const count = parseView(text);
@@ -2308,7 +2514,6 @@ async function runReelDiagnostic(payload, sender) {
             if (count !== null) return { rawText: text, count, location: 'icon_prev_sibling', isPinned: false, viewIconFound: true };
           }
 
-          // 2. Icon's direct parent element
           const parent = viewIcon.parentElement;
           if (parent) {
             const directChildren = Array.from(parent.querySelectorAll('span, div')).filter(el => el !== viewIcon && !viewIcon.contains(el));
@@ -2328,9 +2533,8 @@ async function runReelDiagnostic(payload, sender) {
             }
           }
 
-          // 3. Ancestor container inside anchor
           let curr = parent ? parent.parentElement : null;
-          while (curr && curr !== a && curr !== document.body) {
+          while (curr && curr !== tileContainer.parentElement && curr !== document.body) {
             const candidateNodes = Array.from(curr.querySelectorAll('span, div')).filter(el => !viewIcon.contains(el));
             for (const node of candidateNodes) {
               const parentWithSvg = node.parentElement;
@@ -2343,15 +2547,13 @@ async function runReelDiagnostic(payload, sender) {
             }
             curr = curr.parentElement;
           }
-          // If viewIcon was present but Steps 1-3 did not match, fall through to Step 4 leaf/regex fallback
         }
 
         const hasViewIcon = !!viewIcon;
 
-        // 4. Evidence-based fallback when View count SVG aria-label is absent or text is in a separate leaf:
-        // Collect all leaf spans/divs inside the anchor, excluding hover-overlay icons (Like/Comment)
+        // 4. Fallback: inspect leaf spans/divs in tileContainer
         const leafCandidates = [];
-        const innerSpans = Array.from(a.querySelectorAll('span, div'));
+        const innerSpans = Array.from(tileContainer.querySelectorAll('span, div'));
         for (const span of innerSpans) {
           if (span.querySelector('span, div')) continue;
           const parentWithSvg = span.parentElement;
@@ -2366,30 +2568,36 @@ async function runReelDiagnostic(payload, sender) {
         }
 
         if (leafCandidates.length > 0) {
-          // In Instagram's Reels grid DOM, the hover overlay (Likes, Comments) precedes the persistent bottom-left View Count footer.
-          // Selecting the last leaf candidate pairs the Reel with its actual view count.
           const lastCandidate = leafCandidates[leafCandidates.length - 1];
           return {
             rawText: lastCandidate.rawText,
             count: lastCandidate.count,
-            location: leafCandidates.length > 1 ? `anchor_last_leaf_of_${leafCandidates.length}` : 'anchor_child_span',
+            location: leafCandidates.length > 1 ? `tile_last_leaf_of_${leafCandidates.length}` : 'tile_child_span',
             isPinned: false,
             viewIconFound: hasViewIcon
           };
         }
 
+        // 5. Direct text & regex scan
         const anchorDirectText = (a.innerText || a.textContent || '').trim();
         const directCount = parseView(anchorDirectText);
         if (directCount !== null) {
           return { rawText: anchorDirectText, count: directCount, location: 'anchor_direct_text', isPinned: false, viewIconFound: hasViewIcon };
         }
 
-        const allMatches = Array.from(anchorDirectText.matchAll(/\b(\d[\d,.]*\s*[kmbKMB]?(?:\s*(?:views?|plays?))?)\b/gi));
+        const tileDirectText = (tileContainer.innerText || tileContainer.textContent || '').trim();
+        const tileCount = parseView(tileDirectText);
+        if (tileCount !== null) {
+          return { rawText: tileDirectText, count: tileCount, location: 'tile_direct_text', isPinned: false, viewIconFound: hasViewIcon };
+        }
+
+        const combinedText = `${anchorDirectText} ${tileDirectText}`;
+        const allMatches = Array.from(combinedText.matchAll(/\b(\d[\d,.]*\s*(?:[kmbKMB]|thousand|million|billion|lakhs?|crores?)?(?:\s*(?:views?|plays?))?)\b/gi));
         for (let i = allMatches.length - 1; i >= 0; i--) {
           const candidateStr = allMatches[i][1].trim();
           const count = parseView(candidateStr);
           if (count !== null) {
-            return { rawText: candidateStr, count, location: 'anchor_candidate_regex', isPinned: false, viewIconFound: hasViewIcon };
+            return { rawText: candidateStr, count, location: 'tile_candidate_regex', isPinned: false, viewIconFound: hasViewIcon };
           }
         }
 
