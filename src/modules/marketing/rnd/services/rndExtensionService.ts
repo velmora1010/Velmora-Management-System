@@ -1,32 +1,43 @@
-import { 
-  ExtensionMessage, 
-  ExtensionResponse, 
-  VELMORA_RND_SOURCE, 
+import {
+  ExtensionMessage,
+  ExtensionResponse,
+  VELMORA_RND_SOURCE,
   VELMORA_RND_EXTENSION,
   ExtensionCommandType,
   DiagnosticResult
 } from '../types/extensionTypes';
 
+interface PendingRequestItem {
+  resolve: (val: any) => void;
+  reject: (err: any) => void;
+  timeoutId?: ReturnType<typeof setTimeout>;
+}
+
 class RndExtensionService {
-  private pendingRequests: Map<string, { resolve: (val: any) => void, reject: (err: any) => void }> = new Map();
+  private pendingRequests: Map<string, PendingRequestItem> = new Map();
   private eventListeners: Array<(event: ExtensionResponse) => void> = [];
 
   constructor() {
-    window.addEventListener('message', this.handleMessage.bind(this));
+    if (typeof window !== 'undefined') {
+      window.addEventListener('message', this.handleMessage.bind(this));
+    }
   }
 
-  private handleMessage(event: MessageEvent) {
-    if (event.source !== window) return;
-    const data = event.data as ExtensionResponse;
-    
+  public handleIncomingMessage(data: any) {
     if (data?.source === VELMORA_RND_EXTENSION) {
       // Handle responses to specific requests
       if (data.id && this.pendingRequests.has(data.id)) {
         const promiseControls = this.pendingRequests.get(data.id)!;
         this.pendingRequests.delete(data.id);
-        
-        if (data.error && data.type.endsWith('_FAILED')) {
-          promiseControls.reject(new Error(data.error));
+        if (promiseControls.timeoutId) {
+          clearTimeout(promiseControls.timeoutId);
+        }
+
+        // Defensive check: reject safely if data.error exists (even if type is missing/undefined),
+        // or if type is a string ending in '_FAILED'
+        const isFailureType = typeof data.type === 'string' && data.type.endsWith('_FAILED');
+        if (data.error || isFailureType) {
+          promiseControls.reject(new Error(data.error || 'Extension request failed'));
         } else {
           promiseControls.resolve(data);
         }
@@ -37,10 +48,15 @@ class RndExtensionService {
     }
   }
 
+  private handleMessage(event: MessageEvent) {
+    if (event.source !== window) return;
+    this.handleIncomingMessage(event.data);
+  }
+
   private sendMessage<T = any>(type: ExtensionCommandType, payload?: any, timeoutMs = 2000): Promise<T> {
     return new Promise((resolve, reject) => {
       const id = Math.random().toString(36).substring(2, 15);
-      
+
       const message: ExtensionMessage = {
         source: VELMORA_RND_SOURCE,
         id,
@@ -48,16 +64,18 @@ class RndExtensionService {
         payload
       };
 
-      this.pendingRequests.set(id, { resolve, reject });
-      window.postMessage(message, '*');
-
       // Cleanup on timeout
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         if (this.pendingRequests.has(id)) {
           this.pendingRequests.delete(id);
           reject(new Error(`Extension request timeout for ${type}`));
         }
       }, timeoutMs);
+
+      this.pendingRequests.set(id, { resolve, reject, timeoutId });
+      if (typeof window !== 'undefined') {
+        window.postMessage(message, '*');
+      }
     });
   }
 

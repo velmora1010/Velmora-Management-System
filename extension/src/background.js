@@ -4,6 +4,82 @@ const EXTENSION_VERSION = "1.0.0";
 let lastUsedIgTabId = null;
 let researchQueue = Promise.resolve();
 
+// Companion window architecture state
+let companionWindowId = null;
+let companionTabId = null;
+let companionWindowCreatedByUs = false;
+let companionIdleCloseTimer = null;
+
+// Authoritative batch lifecycle state
+let isResearchActive = false;
+let activeBatchJobId = null;
+let companionWindowClosedByUser = false;
+let batchSettledTimer = null;
+let idleTimerGeneration = 0;
+
+function logBoundedDiag(event, username, data = {}) {
+  const cleanData = { ...data };
+  delete cleanData.cookie;
+  delete cleanData.token;
+  delete cleanData.auth;
+  delete cleanData.password;
+  delete cleanData.session;
+  console.log(`[CompanionDiag][${event}] user=@${username || 'none'}`, JSON.stringify(cleanData));
+}
+
+function beginOrContinueBatch(jobId) {
+  // Clear any existing idle-close timer immediately so it cannot close the window
+  if (companionIdleCloseTimer) {
+    clearTimeout(companionIdleCloseTimer);
+    companionIdleCloseTimer = null;
+  }
+  if (batchSettledTimer) {
+    clearTimeout(batchSettledTimer);
+    batchSettledTimer = null;
+  }
+
+  const effectiveJobId = jobId || activeBatchJobId || `job_${Date.now()}`;
+  const isNewBatch = !isResearchActive || (activeBatchJobId && activeBatchJobId !== effectiveJobId);
+
+  if (isNewBatch) {
+    idleTimerGeneration++;
+    isResearchActive = true;
+    activeBatchJobId = effectiveJobId;
+    companionWindowClosedByUser = false; // Reset signal only on new batch initialization
+    logBoundedDiag('batch_started', null, { jobId: activeBatchJobId, generation: idleTimerGeneration });
+  } else {
+    isResearchActive = true;
+    activeBatchJobId = effectiveJobId;
+  }
+}
+
+function scheduleBatchCompletionCheck(delayMs = 6000) {
+  if (batchSettledTimer) {
+    clearTimeout(batchSettledTimer);
+  }
+  const currentGen = idleTimerGeneration;
+  batchSettledTimer = setTimeout(() => {
+    // If no subsequent profile arrived within the debounce window, mark batch completed
+    if (currentGen === idleTimerGeneration && isResearchActive) {
+      markBatchCompleted('batch_settled');
+    }
+  }, delayMs);
+}
+
+function markBatchCompleted(reason = 'batch_settled') {
+  if (batchSettledTimer) {
+    clearTimeout(batchSettledTimer);
+    batchSettledTimer = null;
+  }
+  logBoundedDiag('batch_completed', null, { jobId: activeBatchJobId, reason });
+  isResearchActive = false;
+  activeBatchJobId = null;
+  companionWindowClosedByUser = false;
+
+  // Arm the idle timer ONLY after the batch has fully completed and research is genuinely idle
+  scheduleCompanionIdleClose(45000);
+}
+
 function logTabOp(stage, username, tabId, url, extra = '') {
   const userTag = username ? `@${username}` : 'n/a';
   const extraStr = extra ? ` | ${extra}` : '';
@@ -22,7 +98,165 @@ function isTabInvalidError(err) {
   );
 }
 
+async function getValidCompanionWindow(winId) {
+  if (!winId) return null;
+  return new Promise((resolve) => {
+    chrome.windows.get(winId, { populate: true }, (win) => {
+      if (chrome.runtime.lastError || !win) {
+        resolve(null);
+      } else {
+        resolve(win);
+      }
+    });
+  });
+}
+
+async function checkCompanionWindowState() {
+  if (!companionWindowId) return { valid: false, state: 'unknown', focused: false };
+  return new Promise((resolve) => {
+    chrome.windows.get(companionWindowId, (win) => {
+      if (chrome.runtime.lastError || !win) {
+        resolve({ valid: false, state: 'closed', focused: false });
+      } else {
+        resolve({ valid: true, state: win.state, focused: win.focused });
+      }
+    });
+  });
+}
+
+async function closeCompanionWindow(reason = 'batch_complete') {
+  if (companionIdleCloseTimer) {
+    clearTimeout(companionIdleCloseTimer);
+    companionIdleCloseTimer = null;
+  }
+  if (batchSettledTimer) {
+    clearTimeout(batchSettledTimer);
+    batchSettledTimer = null;
+  }
+
+  // If reason is 'idle_timeout', independently verify that research is inactive before closing
+  if (reason === 'idle_timeout' && isResearchActive) {
+    logBoundedDiag('idle_timeout_aborted_active_research', null, { jobId: activeBatchJobId });
+    return;
+  }
+
+  if (companionWindowId && companionWindowCreatedByUs) {
+    const winToClose = companionWindowId;
+    companionWindowId = null;
+    companionTabId = null;
+    companionWindowCreatedByUs = false;
+    lastUsedIgTabId = null;
+    try {
+      logBoundedDiag('companion_window_closing', null, { winId: winToClose, reason });
+      await chrome.windows.remove(winToClose);
+    } catch (e) {
+      // Window may already be closed
+    }
+  }
+}
+
+function scheduleCompanionIdleClose(delayMs = 45000) {
+  if (companionIdleCloseTimer) {
+    clearTimeout(companionIdleCloseTimer);
+    companionIdleCloseTimer = null;
+  }
+  // Never arm idle timer while a batch is active (including between profiles or while paused)
+  if (isResearchActive) {
+    logBoundedDiag('idle_timer_skipped_active_batch', null, { jobId: activeBatchJobId });
+    return;
+  }
+  const timerGen = idleTimerGeneration;
+  companionIdleCloseTimer = setTimeout(() => {
+    // Independently verify that research is inactive and generation hasn't changed before closing
+    if (!isResearchActive && timerGen === idleTimerGeneration) {
+      closeCompanionWindow('idle_timeout').catch(() => {});
+    }
+  }, delayMs);
+}
+
+async function handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, stage) {
+  // If companion window was closed during this batch, persistently throw COMPANION_WINDOW_CLOSED
+  if (companionWindowClosedByUser) {
+    throw new Error('COMPANION_WINDOW_CLOSED: Instagram research companion window was closed. Please keep the companion window open during batch research.');
+  }
+  if (!companionWindowId) return;
+  const winStatus = await checkCompanionWindowState();
+  if (!winStatus.valid || winStatus.state === 'closed') {
+    companionWindowClosedByUser = true;
+    throw new Error('COMPANION_WINDOW_CLOSED: Instagram research companion window was closed. Please keep the companion window open during batch research.');
+  }
+
+  if (winStatus.state === 'minimized') {
+    const pauseStartTs = Date.now();
+    logBoundedDiag('pause_start', normalizedUser, {
+      stage,
+      winId: companionWindowId,
+      winState: 'minimized',
+      timestamp: pauseStartTs
+    });
+    if (sender) {
+      sendEventToSender(sender, 'RESEARCH_PAUSED', {
+        ...payload,
+        reason: 'companion_window_minimized'
+      });
+    }
+
+    const MAX_PAUSE_MS = 35000;
+    while (true) {
+      await new Promise(r => setTimeout(r, 600));
+      if (companionWindowClosedByUser) {
+        throw new Error('COMPANION_WINDOW_CLOSED: Instagram research companion window was closed while paused.');
+      }
+      const currentWin = await checkCompanionWindowState();
+      if (!currentWin.valid || currentWin.state === 'closed') {
+        companionWindowClosedByUser = true;
+        throw new Error('COMPANION_WINDOW_CLOSED: Instagram research companion window was closed while paused.');
+      }
+      if (currentWin.state !== 'minimized') {
+        const pausedDuration = Date.now() - pauseStartTs;
+        logBoundedDiag('pause_resumed', normalizedUser, {
+          stage,
+          winId: companionWindowId,
+          winState: currentWin.state,
+          pausedDurationMs: pausedDuration
+        });
+        if (sender) {
+          sendEventToSender(sender, 'RESEARCH_RESUMED', {
+            ...payload,
+            pausedDurationMs: pausedDuration
+          });
+        }
+        // Give browser 1000ms after restore for rendering pipeline to stabilize
+        await new Promise(r => setTimeout(r, 1000));
+        break;
+      }
+      if (Date.now() - pauseStartTs > MAX_PAUSE_MS) {
+        logBoundedDiag('pause_timeout_exceeded', normalizedUser, { winId: companionWindowId, pauseDurationMs: Date.now() - pauseStartTs });
+        throw new Error('COMPANION_WINDOW_MINIMIZED_TIMEOUT: Instagram research companion window remained minimized for over 35 seconds. Please keep the companion window open during research.');
+      }
+    }
+  }
+}
+
+chrome.windows.onRemoved.addListener((closedWindowId) => {
+  if (companionWindowId === closedWindowId) {
+    logBoundedDiag('companion_window_removed', null, { winId: closedWindowId, isResearchActive });
+    companionWindowId = null;
+    companionTabId = null;
+    companionWindowCreatedByUs = false;
+    lastUsedIgTabId = null;
+
+    // Set persistent closure error signal if removed during active batch
+    if (isResearchActive) {
+      companionWindowClosedByUser = true;
+    }
+  }
+});
+
 chrome.tabs.onRemoved.addListener((closedTabId) => {
+  if (companionTabId === closedTabId) {
+    companionTabId = null;
+  }
   if (lastUsedIgTabId === closedTabId) {
     logTabOp('tab_removed_event', null, closedTabId, null, 'Clearing stale lastUsedIgTabId');
     lastUsedIgTabId = null;
@@ -55,59 +289,107 @@ async function getValidTabById(tabId, username, stage) {
 }
 
 async function acquireOrCreateInstagramTab(normalizedUser, stage, forceRecreate = false) {
-  // 1. Validate existing lastUsedIgTabId first if not forcing re-query
-  if (!forceRecreate && lastUsedIgTabId) {
-    const existingTab = await getValidTabById(lastUsedIgTabId, normalizedUser, `${stage}:validate_cached`);
-    if (existingTab && !existingTab.discarded && (existingTab.url || '').includes('instagram.com')) {
-      lastUsedIgTabId = existingTab.id;
-      logTabOp(`${stage}:reusing_valid_tab`, normalizedUser, existingTab.id, existingTab.url);
-      return existingTab;
-    }
-    logTabOp(`${stage}:cached_tab_invalid`, normalizedUser, lastUsedIgTabId, existingTab?.url, 'Clearing cached tab ID');
-    lastUsedIgTabId = null;
+  if (companionWindowClosedByUser) {
+    throw new Error('COMPANION_WINDOW_CLOSED: Instagram research companion window was closed by user during this batch.');
   }
 
-  // 2. Query open Instagram tabs and validate the chosen one via chrome.tabs.get
-  const tabs = await new Promise((res) => chrome.tabs.query({ url: "*://*.instagram.com/*" }, res));
-  if (tabs && tabs.length > 0) {
-    const userLower = (normalizedUser || '').toLowerCase();
-    const candidates = [
-      tabs.find(t => !t.discarded && userLower && (t.url || '').toLowerCase().includes(`/${userLower}`)),
-      tabs.find(t => !t.discarded && (t.url || '').toLowerCase().includes('/reels')),
-      tabs.find(t => !t.discarded && t.active),
-      tabs.find(t => !t.discarded),
-      tabs[0]
-    ].filter(Boolean);
+  if (companionIdleCloseTimer) {
+    clearTimeout(companionIdleCloseTimer);
+    companionIdleCloseTimer = null;
+  }
 
-    for (const candidate of candidates) {
-      const verified = await getValidTabById(candidate.id, normalizedUser, `${stage}:verify_queried_tab`);
-      if (verified) {
-        lastUsedIgTabId = verified.id;
-        logTabOp(`${stage}:acquired_queried_tab`, normalizedUser, verified.id, verified.url);
-        return verified;
+  // 1. If companionWindowId exists and forceRecreate is false, validate and reuse it
+  if (!forceRecreate && companionWindowId && companionTabId) {
+    const companionWin = await getValidCompanionWindow(companionWindowId);
+    if (companionWin) {
+      const existingTab = await getValidTabById(companionTabId, normalizedUser, `${stage}:validate_companion_tab`);
+      if (existingTab && !existingTab.discarded && (existingTab.url || '').includes('instagram.com')) {
+        // Keep the research tab active within the companion window
+        if (!existingTab.active) {
+          await new Promise(res => chrome.tabs.update(existingTab.id, { active: true }, res));
+        }
+        lastUsedIgTabId = existingTab.id;
+        logTabOp(`${stage}:reusing_companion_window_tab`, normalizedUser, existingTab.id, existingTab.url);
+        return existingTab;
+      }
+    }
+    logTabOp(`${stage}:companion_window_invalid`, normalizedUser, companionTabId, null, 'Resetting companion window refs');
+    companionTabId = null;
+    companionWindowId = null;
+    companionWindowCreatedByUs = false;
+  }
+
+  // 2. Service-worker restart recovery: Look for an existing popup window created for Instagram research
+  if (!forceRecreate) {
+    const windows = await new Promise(res => chrome.windows.getAll({ populate: true }, res));
+    if (windows && windows.length > 0) {
+      const existingPopup = windows.find(w =>
+        w.type === 'popup' && w.tabs && w.tabs.some(t => !t.discarded && (t.url || '').includes('instagram.com'))
+      );
+      if (existingPopup) {
+        companionWindowId = existingPopup.id;
+        companionWindowCreatedByUs = true;
+        const igTab = existingPopup.tabs.find(t => !t.discarded && (t.url || '').includes('instagram.com')) || existingPopup.tabs[0];
+        companionTabId = igTab.id;
+        lastUsedIgTabId = igTab.id;
+        if (!igTab.active) {
+          await new Promise(res => chrome.tabs.update(igTab.id, { active: true }, res));
+        }
+        logBoundedDiag('companion_window_adopted', normalizedUser, {
+          winId: companionWindowId,
+          tabId: companionTabId,
+          state: existingPopup.state,
+          focused: existingPopup.focused
+        });
+        return igTab;
       }
     }
   }
 
-  // 3. No valid open Instagram tab exists: create a new research tab safely
+  // 3. Create dedicated companion window (popup, unfocused, active tab)
   const initialUrl = normalizedUser
     ? `https://www.instagram.com/${normalizedUser}/reels/`
     : 'https://www.instagram.com/';
-  logTabOp(`${stage}:chrome.tabs.create`, normalizedUser, null, initialUrl, 'Creating new Instagram research tab');
-  const createdTab = await new Promise((resolve, reject) => {
-    chrome.tabs.create({ url: initialUrl, active: false }, (tab) => {
-      if (chrome.runtime.lastError || !tab) {
-        reject(new Error(chrome.runtime.lastError?.message || 'Failed to create Instagram tab.'));
+
+  logTabOp(`${stage}:chrome.windows.create`, normalizedUser, null, initialUrl, 'Opening dedicated companion window');
+
+  const createdWin = await new Promise((resolve, reject) => {
+    chrome.windows.create({
+      url: initialUrl,
+      type: 'popup',
+      focused: false, // Attempt unfocused so user's active application is not interrupted
+      width: 1024,
+      height: 768,
+      top: 80,
+      left: 80
+    }, (win) => {
+      if (chrome.runtime.lastError || !win) {
+        reject(new Error(`COMPANION_WINDOW_CREATION_FAILED: ${chrome.runtime.lastError?.message || 'Failed to create Instagram companion window.'}`));
       } else {
-        resolve(tab);
+        resolve(win);
       }
     });
   });
 
-  lastUsedIgTabId = createdTab.id;
-  logTabOp(`${stage}:created_new_tab`, normalizedUser, createdTab.id, createdTab.url || initialUrl);
+  companionWindowId = createdWin.id;
+  companionWindowCreatedByUs = true;
+  const tab = (createdWin.tabs && createdWin.tabs.length > 0) ? createdWin.tabs[0] : null;
+  companionTabId = tab ? tab.id : null;
+  lastUsedIgTabId = companionTabId;
+
+  logBoundedDiag('companion_window_created', normalizedUser, {
+    winId: createdWin.id,
+    tabId: companionTabId,
+    state: createdWin.state,
+    focused: createdWin.focused,
+    type: createdWin.type
+  });
+
+  // Wait 1500ms for window & initial renderer initialization
   await new Promise(r => setTimeout(r, 1500));
-  return createdTab;
+
+  const initializedTab = await getValidTabById(companionTabId, normalizedUser, `${stage}:init_companion_tab`);
+  return initializedTab || tab;
 }
 
 async function updateInstagramTabUrl(tabId, targetUrl, normalizedUser, stage) {
@@ -126,7 +408,7 @@ async function updateInstagramTabUrl(tabId, targetUrl, normalizedUser, stage) {
   const attemptTabUpdate = (targetTabId, currentTabUrl, attemptLabel) => {
     logTabOp(`${stage}:${attemptLabel}`, normalizedUser, targetTabId, targetUrl, `currentTabUrl=${currentTabUrl || 'unknown'}`);
     return new Promise((resolve, reject) => {
-      chrome.tabs.update(targetTabId, { url: targetUrl }, (tab) => {
+      chrome.tabs.update(targetTabId, { url: targetUrl, active: true }, (tab) => {
         if (chrome.runtime.lastError) {
           const rawMsg = chrome.runtime.lastError.message || 'Unknown chrome.tabs.update error';
           const navErr = new Error(rawMsg);
@@ -221,6 +503,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.type === 'CLOSE_COMPANION_WINDOW' || request.type === 'BATCH_RESEARCH_COMPLETE' || request.type === 'CANCEL_RESEARCH') {
+    markBatchCompleted(request.type.toLowerCase());
+    closeCompanionWindow(request.type.toLowerCase()).then(() => {
+      sendResponse({ status: 'OK', message: 'Companion window closed' });
+    }).catch(err => {
+      sendResponse({ status: 'ERROR', error: err.message });
+    });
+    return true;
+  }
+
   if (request.type === 'CHECK_INSTAGRAM_SESSION' || request.type === 'CHECK_INSTAGRAM_LOGIN') {
     checkInstagramStatus().then(status => {
       sendResponse({ type: 'INSTAGRAM_STATUS', ...status });
@@ -231,6 +523,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.type === 'START_PROFILE_RESEARCH') {
+    beginOrContinueBatch(request.payload?.jobId);
     // Enforce strict sequential execution across profile research requests
     researchQueue = researchQueue.catch(() => {}).then(async () => {
       try {
@@ -244,19 +537,69 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.type === 'DIAGNOSE_REEL_DISCOVERY') {
-    runReelDiagnostic(request.payload, sender).then(result => {
-      sendResponse({ type: 'DIAGNOSTIC_COMPLETED', payload: result });
-    }).catch(err => {
+    // 1. Immediate synchronous mutual exclusion check: reject if a research batch is currently active
+    if (isResearchActive) {
       sendResponse({
         type: 'DIAGNOSTIC_COMPLETED',
         payload: {
           success: false,
-          stage: 'communication_failure',
-          message: err.message || err.toString(),
-          error: err.toString()
+          stage: 'batch_in_progress',
+          message: 'A batch research run is currently active on the companion tab. Please wait for the batch to finish before running a diagnostic.',
+          error: 'BATCH_IN_PROGRESS'
         }
       });
+      return true;
+    }
+
+    // 2. Serialize through researchQueue so it cannot interleave with queued profile research
+    let responded = false;
+    const safeSendResponse = (resp) => {
+      if (!responded) {
+        responded = true;
+        try {
+          sendResponse(resp);
+        } catch (e) {
+          console.warn('[DIAGNOSE_REEL_DISCOVERY] sendResponse failed:', e);
+        }
+      }
+    };
+
+    researchQueue = researchQueue.catch(() => {}).then(async () => {
+      try {
+        // 3. Re-check isResearchActive immediately before executing in case a batch became active while waiting
+        if (isResearchActive) {
+          safeSendResponse({
+            type: 'DIAGNOSTIC_COMPLETED',
+            payload: {
+              success: false,
+              stage: 'batch_in_progress',
+              message: 'A batch research run became active while waiting in queue. Please wait for the batch to finish before running a diagnostic.',
+              error: 'BATCH_IN_PROGRESS'
+            }
+          });
+          return;
+        }
+
+        const result = await runReelDiagnostic(request.payload, sender);
+        safeSendResponse({ type: 'DIAGNOSTIC_COMPLETED', payload: result });
+      } catch (err) {
+        safeSendResponse({
+          type: 'DIAGNOSTIC_COMPLETED',
+          payload: {
+            success: false,
+            stage: 'communication_failure',
+            message: err.message || err.toString(),
+            error: err.toString()
+          }
+        });
+      } finally {
+        // 5. Correctly participate in companion window idle-close lifecycle if research is not active
+        if (!isResearchActive) {
+          scheduleCompanionIdleClose(45000);
+        }
+      }
     });
+
     return true; // asynchronous response
   }
 
@@ -328,9 +671,8 @@ async function injectScript(tabId, func, args = [], meta = {}) {
   });
 }
 
-async function verifyProfile(igTabId, targetUsername) {
+async function verifyProfile(igTabId, targetUsername, timeout = 15000, sender = null, payload = null) {
   let elapsed = 0;
-  const timeout = 15000;
   const interval = 1000;
   let consecutiveNotFound = 0;
   let lastDiag = null;
@@ -338,6 +680,9 @@ async function verifyProfile(igTabId, targetUsername) {
   logTabOp('verifyProfile:start', targetUsername, igTabId, targetUrl);
 
   while (elapsed < timeout) {
+    // Check companion window state before verifying profile: pause countdown if minimized
+    await handleCompanionWindowPauseIfNeeded(targetUsername, sender, payload, 'verifyProfile');
+
     let res;
     try {
       res = await injectScript(igTabId, (u) => {
@@ -759,6 +1104,9 @@ async function scrollUntilEnoughReels(igTabId, sender, payload) {
   const maxStableRounds = 5; // Bounded adaptive pagination: allow up to 5 stable rounds for background tab lazy loading
 
   while (scrollRounds < maxScrolls) {
+    // Check companion window state before scroll round: pause if minimized
+    await handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, 'scrollUntilEnoughReels');
+
     const currentBatch = await discoverReelLinks(igTabId, normalizedUser);
     const previousUniqueCount = uniqueReelCount;
 
@@ -988,7 +1336,7 @@ function processDiscoveredReels(discoveredArray, sender, payload) {
   };
 }
 
-async function waitForReelsPage(igTabId, normalizedUser, timeoutMs = 15000) {
+async function waitForReelsPage(igTabId, normalizedUser, timeoutMs = 15000, sender = null, payload = null) {
   const targetReelsUrl = `https://www.instagram.com/${normalizedUser}/reels/`;
   logTabOp('waitForReelsPage:start', normalizedUser, igTabId, targetReelsUrl);
 
@@ -998,7 +1346,12 @@ async function waitForReelsPage(igTabId, normalizedUser, timeoutMs = 15000) {
   let lastSnapshot = null;
   let routeToggleTriggered = false;
 
+  let firstReelLogged = false;
+
   while (elapsed < timeoutMs) {
+    // Check companion window state: pause countdown if minimized
+    await handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, 'waitForReelsPage');
+
     await new Promise(r => setTimeout(r, interval));
     elapsed += interval;
 
@@ -1007,6 +1360,8 @@ async function waitForReelsPage(igTabId, normalizedUser, timeoutMs = 15000) {
         const url = window.location.href;
         const urlLower = url.toLowerCase();
         const userLower = targetUser.toLowerCase();
+        const visibilityState = document.visibilityState;
+        const hidden = document.hidden;
 
         // STRICT: URL must actually be on the target user's reels page
         const isReels = urlLower.includes(`/${userLower}/reels`);
@@ -1076,7 +1431,9 @@ async function waitForReelsPage(igTabId, normalizedUser, timeoutMs = 15000) {
           isLoginWall,
           hasNoReelsMessage,
           noReelsConfirmed,
-          isLoadingSpinner
+          isLoadingSpinner,
+          visibilityState,
+          hidden
         };
       }, [normalizedUser]);
 
@@ -1097,6 +1454,14 @@ async function waitForReelsPage(igTabId, normalizedUser, timeoutMs = 15000) {
       // ONLY return success if page is ACTUALLY on target user's reels page!
       if (pageInfo && pageInfo.ready && pageInfo.isReels) {
         if (pageInfo.reelCount > 0) {
+          if (!firstReelLogged) {
+            firstReelLogged = true;
+            logBoundedDiag('first_reel_anchor', normalizedUser, {
+              elapsedMs: elapsed,
+              reelCount: pageInfo.reelCount,
+              docVisibility: pageInfo.visibilityState
+            });
+          }
           console.log(`[waitForReelsPage] Reels grid rendered for @${normalizedUser} with ${pageInfo.reelCount} reel anchors after ${elapsed}ms.`);
           return { ...pageInfo, elapsed, timedOut: false };
         }
@@ -1232,9 +1597,9 @@ async function executeProfileResearchOnTab(payload, sender, normalizedUser, star
   let followerDisplay = null;
   let followerExtractionDiag = null;
   try {
-    followerDisplay = await verifyProfile(igTabId, normalizedUser);
+    followerDisplay = await verifyProfile(igTabId, normalizedUser, 15000, sender, payload);
   } catch (verifyErr) {
-    if (isTabInvalidError(verifyErr)) {
+    if (isTabInvalidError(verifyErr) || String(verifyErr?.message || '').includes('COMPANION_WINDOW_CLOSED')) {
       throw verifyErr;
     }
     console.warn(`[startProfileResearch] verifyProfile had issue for @${normalizedUser}:`, verifyErr.message);
@@ -1254,12 +1619,12 @@ async function executeProfileResearchOnTab(payload, sender, normalizedUser, star
         window.scrollTo({ top: 0, behavior: 'instant' });
       });
       await new Promise(r => setTimeout(r, 800));
-      followerDisplay = await verifyProfile(igTabId, normalizedUser, 4000);
+      followerDisplay = await verifyProfile(igTabId, normalizedUser, 4000, sender, payload);
       if (followerDisplay) {
         logTabOp('verifyProfile:retry_success', normalizedUser, igTabId, null, `Extracted followers on retry: ${followerDisplay}`);
       }
     } catch (retryErr) {
-      if (isTabInvalidError(retryErr)) throw retryErr;
+      if (isTabInvalidError(retryErr) || String(retryErr?.message || '').includes('COMPANION_WINDOW_CLOSED')) throw retryErr;
       followerExtractionDiag = {
         attempted: true,
         error: retryErr.message
@@ -1271,7 +1636,7 @@ async function executeProfileResearchOnTab(payload, sender, normalizedUser, star
 
   // 4. Milestone 2: Reel Discovery with bounded wait
   sendEventToSender(sender, 'REELS_PAGE_OPENING', payload);
-  let pageState = await waitForReelsPage(igTabId, normalizedUser, 15000);
+  let pageState = await waitForReelsPage(igTabId, normalizedUser, 15000, sender, payload);
 
   // Exact moment extraction begins: log and verify DOM evidence
   let extractionMoment = {
@@ -1340,7 +1705,7 @@ async function executeProfileResearchOnTab(payload, sender, normalizedUser, star
       await new Promise(r => setTimeout(r, 1500));
     }
 
-    pageState = await waitForReelsPage(igTabId, normalizedUser, 15000);
+    pageState = await waitForReelsPage(igTabId, normalizedUser, 15000, sender, payload);
     extractionMoment = {
       actualUrl: pageState.url,
       finalUrl: pageState.url,
@@ -1426,11 +1791,135 @@ async function startProfileResearch(payload, sender) {
 
   if (!normalizedUser) throw new Error('Invalid or missing username');
 
+  if (companionWindowClosedByUser) {
+    const closedReason = 'Instagram research companion window was closed. Please keep the companion window open during batch research.';
+    logBoundedDiag('research_failed_window_closed_early', normalizedUser, { error: closedReason });
+    return {
+      jobId,
+      influencerCode,
+      requestedUsername: username,
+      verifiedUsername: normalizedUser,
+      finalUrl: targetReelsUrl,
+      navigationSuccess: false,
+      pageReadiness: 'companion_window_closed',
+      reelAnchorsAtStart: 0,
+      followerDisplay: null,
+      followerCount: 0,
+      reelsDiscovered: 0,
+      pinnedReelsExcluded: 0,
+      selectedReelCount: 0,
+      selectedReels: [],
+      validViewCountsCount: 0,
+      averageViews: 0,
+      rawViewCounts: [],
+      missingViewCountsCount: 15,
+      status: 'failed',
+      failureStage: 'companion_window_closed',
+      failureReason: closedReason,
+      error: closedReason,
+      startedAt: startTs,
+      completedAt: Date.now()
+    };
+  }
+
   sendEventToSender(sender, 'PROFILE_OPENING', payload);
 
   try {
     return await executeProfileResearchOnTab(payload, sender, normalizedUser, startTs, false);
   } catch (err) {
+    if (err && String(err.message || '').includes('COMPANION_WINDOW_CLOSED')) {
+      const closedReason = 'Instagram research companion window was closed. Please keep the companion window open during batch research.';
+      logBoundedDiag('research_failed_window_closed', normalizedUser, { error: closedReason });
+      return {
+        jobId,
+        influencerCode,
+        requestedUsername: username,
+        verifiedUsername: normalizedUser,
+        finalUrl: targetReelsUrl,
+        navigationSuccess: false,
+        pageReadiness: 'companion_window_closed',
+        reelAnchorsAtStart: 0,
+        followerDisplay: null,
+        followerCount: 0,
+        reelsDiscovered: 0,
+        pinnedReelsExcluded: 0,
+        selectedReelCount: 0,
+        selectedReels: [],
+        validViewCountsCount: 0,
+        averageViews: 0,
+        rawViewCounts: [],
+        missingViewCountsCount: 15,
+        status: 'failed',
+        failureStage: 'companion_window_closed',
+        failureReason: closedReason,
+        error: closedReason,
+        startedAt: startTs,
+        completedAt: Date.now()
+      };
+    }
+
+    if (err && String(err.message || '').includes('COMPANION_WINDOW_MINIMIZED_TIMEOUT')) {
+      const timeoutReason = 'Instagram research companion window was minimized for over 35 seconds. Please keep the companion window open during batch research.';
+      logBoundedDiag('research_failed_window_minimized_timeout', normalizedUser, { error: timeoutReason });
+      return {
+        jobId,
+        influencerCode,
+        requestedUsername: username,
+        verifiedUsername: normalizedUser,
+        finalUrl: targetReelsUrl,
+        navigationSuccess: false,
+        pageReadiness: 'companion_window_minimized_timeout',
+        reelAnchorsAtStart: 0,
+        followerDisplay: null,
+        followerCount: 0,
+        reelsDiscovered: 0,
+        pinnedReelsExcluded: 0,
+        selectedReelCount: 0,
+        selectedReels: [],
+        validViewCountsCount: 0,
+        averageViews: 0,
+        rawViewCounts: [],
+        missingViewCountsCount: 15,
+        status: 'failed',
+        failureStage: 'companion_window_minimized_timeout',
+        failureReason: timeoutReason,
+        error: timeoutReason,
+        startedAt: startTs,
+        completedAt: Date.now()
+      };
+    }
+
+    if (err && String(err.message || '').includes('COMPANION_WINDOW_CREATION_FAILED')) {
+      const creationReason = String(err.message);
+      logBoundedDiag('research_failed_creation', normalizedUser, { error: creationReason });
+      return {
+        jobId,
+        influencerCode,
+        requestedUsername: username,
+        verifiedUsername: normalizedUser,
+        finalUrl: targetReelsUrl,
+        navigationSuccess: false,
+        pageReadiness: 'companion_window_creation_failed',
+        reelAnchorsAtStart: 0,
+        followerDisplay: null,
+        followerCount: 0,
+        reelsDiscovered: 0,
+        pinnedReelsExcluded: 0,
+        selectedReelCount: 0,
+        selectedReels: [],
+        validViewCountsCount: 0,
+        averageViews: 0,
+        rawViewCounts: [],
+        missingViewCountsCount: 15,
+        status: 'failed',
+        failureStage: 'companion_window_creation_failed',
+        failureReason: creationReason,
+        error: creationReason,
+        startedAt: startTs,
+        completedAt: Date.now()
+      };
+    }
+
     if (isTabInvalidError(err)) {
       logTabOp('startProfileResearch:tab_recovery_retry', normalizedUser, lastUsedIgTabId, null, `Recovering from invalid tab error: ${err.message}`);
       lastUsedIgTabId = null;
@@ -1485,6 +1974,8 @@ async function startProfileResearch(payload, sender) {
     }
 
     throw err;
+  } finally {
+    scheduleBatchCompletionCheck();
   }
 }
 
