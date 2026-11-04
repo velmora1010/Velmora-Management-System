@@ -167,38 +167,38 @@ function getStatusBadgeConfig(status: WelfareSelectionStatus): {
     case 'not_selected':
       return {
         label: 'Not Selected',
-        classes: 'bg-slate-100 text-slate-600 border-slate-200',
-        dotColor: 'bg-slate-400',
+        classes: 'bg-[#0F172A] text-[#94A3B8] border border-[#334155]',
+        dotColor: 'bg-[#94A3B8]',
       };
     case 'selected':
       return {
         label: 'Selected',
-        classes: 'bg-blue-50 text-[#206DA6] border-blue-200',
-        dotColor: 'bg-[#206DA6]',
+        classes: 'bg-blue-500/15 text-blue-300 border border-blue-500/30',
+        dotColor: 'bg-blue-400',
       };
     case 'prepared':
       return {
         label: 'Prepared',
-        classes: 'bg-amber-50 text-amber-700 border-amber-200',
-        dotColor: 'bg-amber-500',
+        classes: 'bg-amber-500/15 text-amber-300 border border-amber-500/30',
+        dotColor: 'bg-amber-400',
       };
     case 'distributed':
       return {
         label: 'Distributed',
-        classes: 'bg-purple-50 text-purple-700 border-purple-200',
-        dotColor: 'bg-purple-600',
+        classes: 'bg-purple-500/15 text-purple-300 border border-purple-500/30',
+        dotColor: 'bg-purple-400',
       };
     case 'received':
       return {
         label: 'Received',
-        classes: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-        dotColor: 'bg-emerald-500',
+        classes: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30',
+        dotColor: 'bg-emerald-400',
       };
     case 'cancelled':
       return {
         label: 'Cancelled',
-        classes: 'bg-rose-50 text-rose-700 border-rose-200',
-        dotColor: 'bg-rose-500',
+        classes: 'bg-rose-500/15 text-rose-300 border border-rose-500/30',
+        dotColor: 'bg-rose-400',
       };
   }
 }
@@ -978,11 +978,11 @@ export const EmployeeWelfareModule: React.FC = () => {
   const renderAdminSelectionsTableSection = () => (
     <div className="space-y-4">
       {/* Filter Bar */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs space-y-3">
+      <div className="bg-[#1E293B] p-4 rounded-2xl border border-[#334155] shadow-xs space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-bold text-[#172B4D]">Employee Product Selections</h3>
-            <p className="text-xs text-slate-500">
+            <h3 className="text-sm font-bold text-[#F8FAFC]">Employee Product Selections</h3>
+            <p className="text-xs text-[#94A3B8]">
               Showing eligible employees and welfare distribution status for{' '}
               <span className="font-semibold text-[#206DA6]">
                 {getMonthName(selectedMonth)} {selectedYear}
@@ -996,21 +996,21 @@ export const EmployeeWelfareModule: React.FC = () => {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search employee, ID, product..."
-              className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
+              className="w-full pl-9 pr-3 py-1.5 text-xs bg-[#151F30] border border-[#334155] text-[#F8FAFC] placeholder-[#94A3B8] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#6D28D9]"
             />
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 pt-2 border-t border-slate-100">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 pt-2 border-t border-[#334155]">
           {/* 1. Select Year */}
           <div>
-            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+            <label className="block text-[10px] font-bold text-[#CBD5E1] uppercase tracking-wider mb-1">
               Select Year
             </label>
             <select
               value={selectedYear}
               onChange={(e) => setSelectedYear(Number(e.target.value))}
-              className="w-full px-2.5 py-1.5 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
+              className="w-full px-2.5 py-1.5 text-xs font-semibold bg-[#151F30] border border-[#334155] text-[#F8FAFC] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#6D28D9]"
             >
               {availableYears.map((yr) => (
                 <option key={yr} value={yr}>
@@ -1022,13 +1022,13 @@ export const EmployeeWelfareModule: React.FC = () => {
 
           {/* 2. Select Month */}
           <div>
-            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+            <label className="block text-[10px] font-bold text-[#CBD5E1] uppercase tracking-wider mb-1">
               Select Month
             </label>
             <select
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(Number(e.target.value))}
-              className="w-full px-2.5 py-1.5 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
+              className="w-full px-2.5 py-1.5 text-xs font-semibold bg-[#151F30] border border-[#334155] text-[#F8FAFC] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#6D28D9]"
             >
               {WELFARE_MONTH_NAMES.map((mName, idx) => (
                 <option key={mName} value={idx + 1}>
@@ -1040,13 +1040,13 @@ export const EmployeeWelfareModule: React.FC = () => {
 
           {/* 3. Employee Filter */}
           <div>
-            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+            <label className="block text-[10px] font-bold text-[#CBD5E1] uppercase tracking-wider mb-1">
               Employee
             </label>
             <select
               value={filterEmployeeId}
               onChange={(e) => setFilterEmployeeId(e.target.value)}
-              className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
+              className="w-full px-2.5 py-1.5 text-xs bg-[#151F30] border border-[#334155] text-[#F8FAFC] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#6D28D9]"
             >
               <option value="all">All Employees</option>
               {eligibleEmployees.map((emp) => (
@@ -1059,13 +1059,13 @@ export const EmployeeWelfareModule: React.FC = () => {
 
           {/* 4. Department Filter */}
           <div>
-            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+            <label className="block text-[10px] font-bold text-[#CBD5E1] uppercase tracking-wider mb-1">
               Department
             </label>
             <select
               value={filterDepartmentId}
               onChange={(e) => setFilterDepartmentId(e.target.value)}
-              className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
+              className="w-full px-2.5 py-1.5 text-xs bg-[#151F30] border border-[#334155] text-[#F8FAFC] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#6D28D9]"
             >
               <option value="all">All Departments</option>
               {Array.from(
@@ -1083,13 +1083,13 @@ export const EmployeeWelfareModule: React.FC = () => {
 
           {/* 5. Product Filter */}
           <div>
-            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+            <label className="block text-[10px] font-bold text-[#CBD5E1] uppercase tracking-wider mb-1">
               Product
             </label>
             <select
               value={filterProductId}
               onChange={(e) => setFilterProductId(e.target.value)}
-              className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
+              className="w-full px-2.5 py-1.5 text-xs bg-[#151F30] border border-[#334155] text-[#F8FAFC] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#6D28D9]"
             >
               <option value="all">All Products</option>
               {products.map((prod) => (
@@ -1102,13 +1102,13 @@ export const EmployeeWelfareModule: React.FC = () => {
 
           {/* 6. Distribution Status Filter */}
           <div>
-            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+            <label className="block text-[10px] font-bold text-[#CBD5E1] uppercase tracking-wider mb-1">
               Distribution Status
             </label>
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
-              className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
+              className="w-full px-2.5 py-1.5 text-xs bg-[#151F30] border border-[#334155] text-[#F8FAFC] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#6D28D9]"
             >
               <option value="all">All Statuses</option>
               <option value="not_selected">Not Selected</option>
@@ -1123,10 +1123,10 @@ export const EmployeeWelfareModule: React.FC = () => {
       </div>
 
       {/* Selections Table */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+      <div className="bg-[#1E293B] rounded-2xl border border-[#334155] shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase tracking-wider font-bold text-[10px]">
+            <thead className="bg-[#111827] border-b border-[#334155] text-[#CBD5E1] uppercase tracking-wider font-bold text-[10px]">
               <tr>
                 <th className="py-3.5 px-4">Employee Name</th>
                 <th className="py-3.5 px-4">Employee ID</th>
@@ -1141,7 +1141,7 @@ export const EmployeeWelfareModule: React.FC = () => {
                 <th className="py-3.5 px-4 text-right whitespace-nowrap">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-[#334155]">
               {filteredMonthlyRows.length === 0 ? (
                 <tr>
                   <td colSpan={11} className="py-12 text-center text-slate-400">
@@ -1154,14 +1154,14 @@ export const EmployeeWelfareModule: React.FC = () => {
                 filteredMonthlyRows.map(({ employee: emp, selection: sel, status, product }) => {
                   const badgeCfg = getStatusBadgeConfig(status);
                   return (
-                    <tr key={emp.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-3 px-4 font-bold text-[#172B4D] whitespace-nowrap">
+                    <tr key={emp.id} className="hover:bg-[#151D2B]/80 transition-colors bg-[#1E293B]">
+                      <td className="py-3 px-4 font-bold text-[#F8FAFC] whitespace-nowrap">
                         {emp.fullName}
                       </td>
-                      <td className="py-3 px-4 font-mono text-slate-600 whitespace-nowrap">
+                      <td className="py-3 px-4 font-mono font-bold text-[#CBD5E1] whitespace-nowrap">
                         {emp.employeeCode}
                       </td>
-                      <td className="py-3 px-3 text-slate-600">{emp.departmentName}</td>
+                      <td className="py-3 px-3 text-[#CBD5E1] font-medium">{emp.departmentName}</td>
                       <td className="py-3 px-3">
                         {sel ? (
                           <div className="flex items-center gap-2 whitespace-nowrap">
@@ -1179,7 +1179,7 @@ export const EmployeeWelfareModule: React.FC = () => {
                                 )}
                               </div>
                             )}
-                            <span className="font-semibold text-[#172B4D]">{sel.product_name}</span>
+                            <span className="font-semibold text-[#F8FAFC]">{sel.product_name}</span>
                           </div>
                         ) : (
                           <span className="text-slate-400 italic whitespace-nowrap">
@@ -1187,13 +1187,13 @@ export const EmployeeWelfareModule: React.FC = () => {
                           </span>
                         )}
                       </td>
-                      <td className="py-3 px-3 text-slate-600 font-mono text-[11px] whitespace-nowrap">
+                      <td className="py-3 px-3 text-[#CBD5E1] font-mono text-[11px] whitespace-nowrap">
                         {sel ? formatKolkataDateTime(sel.selected_at).date : '—'}
                       </td>
-                      <td className="py-3 px-3 text-slate-700 font-medium whitespace-nowrap">
+                      <td className="py-3 px-3 text-[#CBD5E1] font-medium whitespace-nowrap">
                         {getMonthName(selectedMonth)}
                       </td>
-                      <td className="py-3 px-3 font-mono text-slate-700 whitespace-nowrap">
+                      <td className="py-3 px-3 font-mono text-[#CBD5E1] whitespace-nowrap">
                         {selectedYear}
                       </td>
                       <td className="py-3 px-3 whitespace-nowrap">
@@ -1204,10 +1204,10 @@ export const EmployeeWelfareModule: React.FC = () => {
                           {badgeCfg.label}
                         </span>
                       </td>
-                      <td className="py-3 px-3 text-slate-600 font-mono text-[11px] whitespace-nowrap">
+                      <td className="py-3 px-3 text-[#CBD5E1] font-mono text-[11px] whitespace-nowrap">
                         {sel?.distributed_at ? formatKolkataDateTime(sel.distributed_at).date : '—'}
                       </td>
-                      <td className="py-3 px-3 text-slate-600 font-mono text-[11px] whitespace-nowrap">
+                      <td className="py-3 px-3 text-[#CBD5E1] font-mono text-[11px] whitespace-nowrap">
                         {sel?.received_at ? formatKolkataDateTime(sel.received_at).date : '—'}
                       </td>
                       <td className="py-3 px-4 text-right whitespace-nowrap">
@@ -1222,7 +1222,7 @@ export const EmployeeWelfareModule: React.FC = () => {
                                 month: selectedMonth,
                               })
                             }
-                            className="inline-flex items-center justify-center px-2.5 py-1 text-[11px] font-bold text-[#206DA6] bg-blue-50 hover:bg-blue-100 border border-transparent rounded-lg transition-colors whitespace-nowrap"
+                            className="inline-flex items-center justify-center px-3 py-1.5 text-xs font-bold text-[#F8FAFC] bg-[#151D2B] hover:bg-[#151F30] border border-[#334155] hover:border-violet-500/50 rounded-xl transition-all shadow-2xs whitespace-nowrap"
                           >
                             View Details
                           </button>
@@ -1231,7 +1231,7 @@ export const EmployeeWelfareModule: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => handleMarkPrepared(sel, emp)}
-                              className="inline-flex items-center justify-center px-2.5 py-1 text-[11px] font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors whitespace-nowrap"
+                              className="inline-flex items-center justify-center px-3 py-1.5 text-xs font-bold text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 rounded-xl transition-all whitespace-nowrap"
                             >
                               Mark Prepared
                             </button>
@@ -1248,7 +1248,7 @@ export const EmployeeWelfareModule: React.FC = () => {
                                     selection: sel,
                                   })
                                 }
-                                className="inline-flex items-center justify-center px-2.5 py-1 text-[11px] font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg transition-colors whitespace-nowrap"
+                                className="inline-flex items-center justify-center px-3 py-1.5 text-xs font-bold text-purple-300 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 rounded-xl transition-all whitespace-nowrap"
                               >
                                 Mark Distributed
                               </button>
@@ -1267,7 +1267,7 @@ export const EmployeeWelfareModule: React.FC = () => {
                                     month: selectedMonth,
                                   })
                                 }
-                                className="inline-flex items-center justify-center px-2.5 py-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors whitespace-nowrap"
+                                className="inline-flex items-center justify-center px-3 py-1.5 text-xs font-bold text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 rounded-xl transition-all whitespace-nowrap"
                               >
                                 View Receipt Status
                               </button>
@@ -1321,14 +1321,14 @@ export const EmployeeWelfareModule: React.FC = () => {
 
       {/* ================= ROLE-BASED NAVIGATION TABS ================= */}
       {isAdminOrHR ? (
-        <div className="flex flex-wrap border-b border-slate-200 gap-6 text-xs font-bold uppercase tracking-wider">
+        <div className="flex flex-wrap border-b border-[#334155] gap-6 text-xs font-bold uppercase tracking-wider">
           <button
             type="button"
             onClick={() => setAdminTab('dashboard')}
             className={`pb-3 transition-colors ${
               adminTab === 'dashboard'
-                ? 'text-[#206DA6] border-b-2 border-[#206DA6]'
-                : 'text-slate-400 hover:text-slate-700'
+                ? 'text-violet-400 border-b-2 border-violet-500'
+                : 'text-[#94A3B8] hover:text-[#F8FAFC]'
             }`}
           >
             Welfare Dashboard
@@ -1338,8 +1338,8 @@ export const EmployeeWelfareModule: React.FC = () => {
             onClick={() => setAdminTab('selections')}
             className={`pb-3 transition-colors ${
               adminTab === 'selections'
-                ? 'text-[#206DA6] border-b-2 border-[#206DA6]'
-                : 'text-slate-400 hover:text-slate-700'
+                ? 'text-violet-400 border-b-2 border-violet-500'
+                : 'text-[#94A3B8] hover:text-[#F8FAFC]'
             }`}
           >
             Employee Product Selections
@@ -1349,8 +1349,8 @@ export const EmployeeWelfareModule: React.FC = () => {
             onClick={() => setAdminTab('catalog')}
             className={`pb-3 transition-colors ${
               adminTab === 'catalog'
-                ? 'text-[#206DA6] border-b-2 border-[#206DA6]'
-                : 'text-slate-400 hover:text-slate-700'
+                ? 'text-violet-400 border-b-2 border-violet-500'
+                : 'text-[#94A3B8] hover:text-[#F8FAFC]'
             }`}
           >
             Product Catalog ({products.length})
@@ -1360,22 +1360,22 @@ export const EmployeeWelfareModule: React.FC = () => {
             onClick={() => setAdminTab('history')}
             className={`pb-3 transition-colors ${
               adminTab === 'history'
-                ? 'text-[#206DA6] border-b-2 border-[#206DA6]'
-                : 'text-slate-400 hover:text-slate-700'
+                ? 'text-violet-400 border-b-2 border-violet-500'
+                : 'text-[#94A3B8] hover:text-[#F8FAFC]'
             }`}
           >
             Monthly History
           </button>
         </div>
       ) : (
-        <div className="flex flex-wrap border-b border-slate-200 gap-6 text-xs font-bold uppercase tracking-wider">
+        <div className="flex flex-wrap border-b border-[#334155] gap-6 text-xs font-bold uppercase tracking-wider">
           <button
             type="button"
             onClick={() => setEmployeeTab('choose')}
             className={`pb-3 transition-colors ${
               employeeTab === 'choose'
-                ? 'text-[#206DA6] border-b-2 border-[#206DA6]'
-                : 'text-slate-400 hover:text-slate-700'
+                ? 'text-violet-400 border-b-2 border-violet-500'
+                : 'text-[#94A3B8] hover:text-[#F8FAFC]'
             }`}
           >
             Choose My Product
@@ -1385,8 +1385,8 @@ export const EmployeeWelfareModule: React.FC = () => {
             onClick={() => setEmployeeTab('my_selection')}
             className={`pb-3 transition-colors flex items-center gap-1.5 ${
               employeeTab === 'my_selection'
-                ? 'text-[#206DA6] border-b-2 border-[#206DA6]'
-                : 'text-slate-400 hover:text-slate-700'
+                ? 'text-violet-400 border-b-2 border-violet-500'
+                : 'text-[#94A3B8] hover:text-[#F8FAFC]'
             }`}
           >
             <span>My Selection</span>
@@ -1401,8 +1401,8 @@ export const EmployeeWelfareModule: React.FC = () => {
             onClick={() => setEmployeeTab('my_history')}
             className={`pb-3 transition-colors ${
               employeeTab === 'my_history'
-                ? 'text-[#206DA6] border-b-2 border-[#206DA6]'
-                : 'text-slate-400 hover:text-slate-700'
+                ? 'text-violet-400 border-b-2 border-violet-500'
+                : 'text-[#94A3B8] hover:text-[#F8FAFC]'
             }`}
           >
             My Welfare History ({myWelfareHistory.length})
@@ -1415,66 +1415,66 @@ export const EmployeeWelfareModule: React.FC = () => {
         <div className="space-y-6">
           {/* 6 Summary Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-            <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+            <div className="p-4 bg-[#1E293B] rounded-2xl border border-[#334155] shadow-xs">
+              <span className="text-[10px] font-bold text-[#CBD5E1] uppercase tracking-wider block">
                 Total Eligible Employees
               </span>
-              <span className="text-2xl font-black text-[#172B4D] font-mono mt-1 block">
+              <span className="text-2xl font-black text-[#F8FAFC] font-mono mt-1 block">
                 {summaryStats.totalEligible}
               </span>
-              <span className="text-[10px] text-slate-400">
+              <span className="text-[10px] text-[#94A3B8]">
                 {getMonthName(selectedMonth)} {selectedYear}
               </span>
             </div>
 
-            <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+            <div className="p-4 bg-[#1E293B] rounded-2xl border border-[#334155] shadow-xs">
+              <span className="text-[10px] font-bold text-[#CBD5E1] uppercase tracking-wider block">
                 Products Selected
               </span>
-              <span className="text-2xl font-black text-[#206DA6] font-mono mt-1 block">
+              <span className="text-2xl font-black text-violet-400 font-mono mt-1 block">
                 {summaryStats.productsSelected}
               </span>
-              <span className="text-[10px] text-slate-400">Confirmed choices</span>
+              <span className="text-[10px] text-[#94A3B8]">Confirmed choices</span>
             </div>
 
-            <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+            <div className="p-4 bg-[#1E293B] rounded-2xl border border-[#334155] shadow-xs">
+              <span className="text-[10px] font-bold text-[#CBD5E1] uppercase tracking-wider block">
                 Pending Selections
               </span>
-              <span className="text-2xl font-black text-slate-600 font-mono mt-1 block">
+              <span className="text-2xl font-black text-[#CBD5E1] font-mono mt-1 block">
                 {summaryStats.pendingSelections}
               </span>
-              <span className="text-[10px] text-slate-400">Yet to choose</span>
+              <span className="text-[10px] text-[#94A3B8]">Yet to choose</span>
             </div>
 
-            <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+            <div className="p-4 bg-[#1E293B] rounded-2xl border border-[#334155] shadow-xs">
+              <span className="text-[10px] font-bold text-[#CBD5E1] uppercase tracking-wider block">
                 Products Distributed
               </span>
-              <span className="text-2xl font-black text-purple-600 font-mono mt-1 block">
+              <span className="text-2xl font-black text-purple-400 font-mono mt-1 block">
                 {summaryStats.productsDistributed}
               </span>
-              <span className="text-[10px] text-slate-400">Issued by HR</span>
+              <span className="text-[10px] text-[#94A3B8]">Issued by HR</span>
             </div>
 
-            <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+            <div className="p-4 bg-[#1E293B] rounded-2xl border border-[#334155] shadow-xs">
+              <span className="text-[10px] font-bold text-[#CBD5E1] uppercase tracking-wider block">
                 Pending Distribution
               </span>
               <span className="text-2xl font-black text-amber-600 font-mono mt-1 block">
                 {summaryStats.pendingDistribution}
               </span>
-              <span className="text-[10px] text-slate-400">Awaiting handover</span>
+              <span className="text-[10px] text-[#94A3B8]">Awaiting handover</span>
             </div>
 
-            <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+            <div className="p-4 bg-[#1E293B] rounded-2xl border border-[#334155] shadow-xs">
+              <span className="text-[10px] font-bold text-[#CBD5E1] uppercase tracking-wider block">
                 Products Received
               </span>
               <span className="text-2xl font-black text-emerald-600 font-mono mt-1 block">
                 {summaryStats.productsReceived}
               </span>
-              <span className="text-[10px] text-slate-400">Receipt confirmed</span>
+              <span className="text-[10px] text-[#94A3B8]">Receipt confirmed</span>
             </div>
           </div>
 
@@ -1492,7 +1492,7 @@ export const EmployeeWelfareModule: React.FC = () => {
               <h3 className="text-sm font-bold text-[#172B4D]">
                 Welfare Product Catalog ({products.length} Official Items)
               </h3>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-[#94A3B8]">
                 Upload or update official product photos (JPG, JPEG, PNG, WEBP up to 5 MB). Each
                 product is provided free of charge.
               </p>
@@ -1547,7 +1547,7 @@ export const EmployeeWelfareModule: React.FC = () => {
                       <p className="text-[10px] text-slate-500 mt-0.5 leading-tight">
                         Monthly Free Employee Welfare Benefit
                       </p>
-                      <p className="text-[10px] text-slate-400 mt-1">
+                      <p className="text-[10px] text-[#94A3B8] mt-1">
                         Selected:{' '}
                         <span className="font-bold text-[#206DA6]">{monthlyCount}</span> in{' '}
                         {getMonthName(selectedMonth).slice(0, 3)} {selectedYear}
@@ -1597,11 +1597,11 @@ export const EmployeeWelfareModule: React.FC = () => {
       {/* ADMIN TAB 4: MONTHLY HISTORY */}
       {isAdminOrHR && adminTab === 'history' && (
         <div className="space-y-4">
-          <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs space-y-3">
+          <div className="bg-[#1E293B] p-4 rounded-2xl border border-[#334155] shadow-xs space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-bold text-[#172B4D]">Monthly Welfare History</h3>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-[#94A3B8]">
                   Complete archive of monthly employee product selections and distribution records
                 </p>
               </div>
@@ -1615,16 +1615,16 @@ export const EmployeeWelfareModule: React.FC = () => {
               </button>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 pt-2 border-t border-slate-100">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 pt-2 border-t border-[#334155]">
               {/* Select Year */}
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                <label className="block text-[10px] font-bold text-[#CBD5E1] uppercase tracking-wider mb-1">
                   Select Year
                 </label>
                 <select
                   value={historyYear}
                   onChange={(e) => setHistoryYear(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
+                  className="w-full px-2.5 py-1.5 text-xs font-semibold bg-[#151F30] border border-[#334155] text-[#F8FAFC] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#6D28D9]"
                 >
                   <option value="all">All Years</option>
                   {availableYears.map((yr) => (
@@ -1637,13 +1637,13 @@ export const EmployeeWelfareModule: React.FC = () => {
 
               {/* Select Month */}
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                <label className="block text-[10px] font-bold text-[#CBD5E1] uppercase tracking-wider mb-1">
                   Select Month
                 </label>
                 <select
                   value={historyMonth}
                   onChange={(e) => setHistoryMonth(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
+                  className="w-full px-2.5 py-1.5 text-xs font-semibold bg-[#151F30] border border-[#334155] text-[#F8FAFC] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#6D28D9]"
                 >
                   <option value="all">All Months</option>
                   {WELFARE_MONTH_NAMES.map((mName, idx) => (
@@ -1656,13 +1656,13 @@ export const EmployeeWelfareModule: React.FC = () => {
 
               {/* All Employees */}
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                <label className="block text-[10px] font-bold text-[#CBD5E1] uppercase tracking-wider mb-1">
                   Employee
                 </label>
                 <select
                   value={historyEmployeeId}
                   onChange={(e) => setHistoryEmployeeId(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
+                  className="w-full px-2.5 py-1.5 text-xs bg-[#151F30] border border-[#334155] text-[#F8FAFC] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#6D28D9]"
                 >
                   <option value="all">All Employees</option>
                   {employees.map((emp) => (
@@ -1675,13 +1675,13 @@ export const EmployeeWelfareModule: React.FC = () => {
 
               {/* All Departments */}
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                <label className="block text-[10px] font-bold text-[#CBD5E1] uppercase tracking-wider mb-1">
                   Department
                 </label>
                 <select
                   value={historyDepartmentId}
                   onChange={(e) => setHistoryDepartmentId(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
+                  className="w-full px-2.5 py-1.5 text-xs bg-[#151F30] border border-[#334155] text-[#F8FAFC] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#6D28D9]"
                 >
                   <option value="all">All Departments</option>
                   {Array.from(
@@ -1699,13 +1699,13 @@ export const EmployeeWelfareModule: React.FC = () => {
 
               {/* All Products */}
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                <label className="block text-[10px] font-bold text-[#CBD5E1] uppercase tracking-wider mb-1">
                   Product
                 </label>
                 <select
                   value={historyProductId}
                   onChange={(e) => setHistoryProductId(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
+                  className="w-full px-2.5 py-1.5 text-xs bg-[#151F30] border border-[#334155] text-[#F8FAFC] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#6D28D9]"
                 >
                   <option value="all">All Products</option>
                   {products.map((prod) => (
@@ -1718,13 +1718,13 @@ export const EmployeeWelfareModule: React.FC = () => {
 
               {/* All Distribution Statuses */}
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                <label className="block text-[10px] font-bold text-[#CBD5E1] uppercase tracking-wider mb-1">
                   Distribution Status
                 </label>
                 <select
                   value={historyStatus}
                   onChange={(e) => setHistoryStatus(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
+                  className="w-full px-2.5 py-1.5 text-xs bg-[#151F30] border border-[#334155] text-[#F8FAFC] rounded-xl focus:outline-hidden focus:ring-2 focus:ring-[#6D28D9]"
                 >
                   <option value="all">All Distribution Statuses</option>
                   <option value="selected">Selected</option>
@@ -1737,10 +1737,10 @@ export const EmployeeWelfareModule: React.FC = () => {
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+          <div className="bg-[#1E293B] rounded-2xl border border-[#334155] shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase tracking-wider font-bold text-[10px]">
+                <thead className="bg-[#111827] border-b border-[#334155] text-[#CBD5E1] uppercase tracking-wider font-bold text-[10px]">
                   <tr>
                     <th className="py-3.5 px-4">Employee Name</th>
                     <th className="py-3.5 px-4">Employee ID</th>
@@ -1754,7 +1754,7 @@ export const EmployeeWelfareModule: React.FC = () => {
                     <th className="py-3.5 px-4">Received Date</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-[#334155]">
                   {filteredHistoryRecords.length === 0 ? (
                     <tr>
                       <td colSpan={10} className="py-12 text-center text-slate-400">
@@ -2303,17 +2303,17 @@ export const EmployeeWelfareModule: React.FC = () => {
 
           {/* EMPLOYEE TAB 3: MY WELFARE HISTORY */}
           {employeeTab === 'my_history' && (
-            <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+            <div className="bg-[#1E293B] rounded-2xl border border-[#334155] shadow-xs overflow-hidden">
               <div className="p-4 border-b border-slate-100">
                 <h3 className="text-sm font-bold text-[#172B4D]">My Welfare History</h3>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-[#94A3B8]">
                   Your personal monthly welfare product selections and receipt history
                 </p>
               </div>
 
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase tracking-wider font-bold text-[10px]">
+                  <thead className="bg-[#111827] border-b border-[#334155] text-[#CBD5E1] uppercase tracking-wider font-bold text-[10px]">
                     <tr>
                       <th className="py-3.5 px-4">Month</th>
                       <th className="py-3.5 px-4">Year</th>
@@ -2325,7 +2325,7 @@ export const EmployeeWelfareModule: React.FC = () => {
                       <th className="py-3.5 px-4 text-right">Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-[#334155]">
                     {myWelfareHistory.length === 0 ? (
                       <tr>
                         <td colSpan={8} className="py-12 text-center text-slate-400">
@@ -2339,7 +2339,7 @@ export const EmployeeWelfareModule: React.FC = () => {
                         const prod = products.find((p) => p.id === sel.product_id);
                         const badgeCfg = getStatusBadgeConfig(sel.selection_status);
                         return (
-                          <tr key={sel.id} className="hover:bg-slate-50/80 transition-colors">
+                          <tr key={sel.id} className="hover:bg-[#151D2B]/80 transition-colors bg-[#1E293B]">
                             <td className="py-3 px-4 font-bold text-[#172B4D]">
                               {getMonthName(sel.welfare_month)}
                             </td>
@@ -2514,7 +2514,7 @@ export const EmployeeWelfareModule: React.FC = () => {
                   <h4 className="text-sm font-bold text-[#172B4D]">
                     {detailsModalData.employee.fullName}
                   </h4>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-[#94A3B8]">
                     {detailsModalData.employee.departmentName} &bull;{' '}
                     <span className="font-mono font-semibold text-slate-700">
                       {detailsModalData.employee.employeeCode}

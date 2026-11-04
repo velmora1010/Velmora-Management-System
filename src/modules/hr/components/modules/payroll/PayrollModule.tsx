@@ -503,15 +503,11 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
     switch (effectiveStatus) {
       case 'paid':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-            <CheckCircle className="w-3 h-3" /> Paid
-          </span>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"><CheckCircle className="w-3 h-3" /> Paid</span>
         );
       case 'overdue':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-            <AlertTriangle className="w-3 h-3" /> Overdue
-          </span>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30"><AlertTriangle className="w-3 h-3" /> Overdue</span>
         );
       case 'approved':
         return (
@@ -528,9 +524,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
       case 'scheduled':
       default:
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-50 text-[#206DA6] border border-blue-200">
-            <Calendar className="w-3 h-3" /> Scheduled
-          </span>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-sky-500/15 text-sky-300 border border-sky-500/30"><Calendar className="w-3 h-3" /> Scheduled</span>
         );
     }
   };
@@ -656,7 +650,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
             <button
               type="button"
               onClick={handleClearAllFilters}
-              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-all"
+              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-[#151F30] border border-[#334155] hover:bg-slate-50 rounded-xl transition-all"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Clear Filters</span>
@@ -681,7 +675,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
             <div>
               <label
                 htmlFor="filter-select-year"
-                className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1"
+                className="block text-[11px] font-bold text-[#CBD5E1] uppercase tracking-wider mb-1"
               >
                 Select Year
               </label>
@@ -690,7 +684,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
                 aria-label="Select Year"
                 value={yearFilter}
                 onChange={(e) => handleYearFilterChange(e.target.value)}
-                className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl text-slate-700 font-medium focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
+                className="w-full px-3 py-2 text-xs bg-[#151F30] border border-[#334155] rounded-xl text-slate-700 font-medium focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
               >
                 <option value="all">All Years</option>
                 {yearOptions.map((yr) => (
@@ -705,7 +699,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
             <div>
               <label
                 htmlFor="filter-select-month"
-                className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1"
+                className="block text-[11px] font-bold text-[#CBD5E1] uppercase tracking-wider mb-1"
               >
                 Select Month
               </label>
@@ -739,7 +733,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
             <div>
               <label
                 htmlFor="filter-all-employees"
-                className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1"
+                className="block text-[11px] font-bold text-[#CBD5E1] uppercase tracking-wider mb-1"
               >
                 All Employees
               </label>
@@ -748,7 +742,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
                 aria-label="All Employees"
                 value={employeeFilter}
                 onChange={(e) => setEmployeeFilter(e.target.value)}
-                className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl text-slate-700 font-medium focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
+                className="w-full px-3 py-2 text-xs bg-[#151F30] border border-[#334155] rounded-xl text-slate-700 font-medium focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
               >
                 <option value="all">All Employees</option>
                 {activeEmployees.map((emp) => (
@@ -763,7 +757,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
             <div>
               <label
                 htmlFor="filter-all-departments"
-                className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1"
+                className="block text-[11px] font-bold text-[#CBD5E1] uppercase tracking-wider mb-1"
               >
                 All Departments
               </label>
@@ -772,7 +766,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
                 aria-label="All Departments"
                 value={departmentFilter}
                 onChange={(e) => setDepartmentFilter(e.target.value)}
-                className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl text-slate-700 font-medium focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
+                className="w-full px-3 py-2 text-xs bg-[#151F30] border border-[#334155] rounded-xl text-slate-700 font-medium focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
               >
                 <option value="all">All Departments</option>
                 {departments.map((dept) => (
@@ -787,7 +781,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
             <div>
               <label
                 htmlFor="filter-payment-status"
-                className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1"
+                className="block text-[11px] font-bold text-[#CBD5E1] uppercase tracking-wider mb-1"
               >
                 All Payment Statuses
               </label>
@@ -796,7 +790,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
                 aria-label="All Payment Statuses"
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl text-slate-700 font-medium focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
+                className="w-full px-3 py-2 text-xs bg-[#151F30] border border-[#334155] rounded-xl text-slate-700 font-medium focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
               >
                 <option value="all">All Statuses</option>
                 <option value="scheduled">Scheduled</option>
@@ -848,7 +842,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
                 <div>
                   <label
                     htmlFor="filter-salary-range"
-                    className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1"
+                    className="block text-[11px] font-bold text-[#CBD5E1] uppercase tracking-wider mb-1"
                   >
                     Salary Range
                   </label>
@@ -857,7 +851,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
                     aria-label="Salary Range"
                     value={salaryRangeFilter}
                     onChange={(e) => setSalaryRangeFilter(e.target.value)}
-                    className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl text-slate-700 font-medium focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
+                    className="w-full px-3 py-2 text-xs bg-[#151F30] border border-[#334155] rounded-xl text-slate-700 font-medium focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
                   >
                     <option value="all">All Salary Amounts</option>
                     <option value="below_10000">Below ₹10,000</option>
@@ -873,7 +867,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
                 <div>
                   <label
                     htmlFor="filter-payment-date"
-                    className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1"
+                    className="block text-[11px] font-bold text-[#CBD5E1] uppercase tracking-wider mb-1"
                   >
                     Payment Date
                   </label>
@@ -882,7 +876,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
                     aria-label="Payment Date"
                     value={paymentDateFilter}
                     onChange={(e) => setPaymentDateFilter(e.target.value)}
-                    className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl text-slate-700 font-medium focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
+                    className="w-full px-3 py-2 text-xs bg-[#151F30] border border-[#334155] rounded-xl text-slate-700 font-medium focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
                   >
                     <option value="all">All Dates</option>
                     <option value="today">Today</option>
@@ -897,7 +891,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
                 <div>
                   <label
                     htmlFor="filter-payment-frequency"
-                    className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1"
+                    className="block text-[11px] font-bold text-[#CBD5E1] uppercase tracking-wider mb-1"
                   >
                     Payment Frequency
                   </label>
@@ -906,7 +900,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
                     aria-label="Payment Frequency"
                     value={frequencyFilter}
                     onChange={(e) => setFrequencyFilter(e.target.value)}
-                    className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl text-slate-700 font-medium focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
+                    className="w-full px-3 py-2 text-xs bg-[#151F30] border border-[#334155] rounded-xl text-slate-700 font-medium focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
                   >
                     <option value="all">All Frequencies</option>
                     <option value="monthly">Monthly</option>
@@ -919,7 +913,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
                 <div>
                   <label
                     htmlFor="filter-payment-method"
-                    className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1"
+                    className="block text-[11px] font-bold text-[#CBD5E1] uppercase tracking-wider mb-1"
                   >
                     Payment Method
                   </label>
@@ -928,7 +922,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
                     aria-label="Payment Method"
                     value={methodFilter}
                     onChange={(e) => setMethodFilter(e.target.value)}
-                    className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl text-slate-700 font-medium focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
+                    className="w-full px-3 py-2 text-xs bg-[#151F30] border border-[#334155] rounded-xl text-slate-700 font-medium focus:outline-hidden focus:ring-2 focus:ring-[#206DA6]"
                   >
                     <option value="all">All Payment Methods</option>
                     <option value="bank_transfer">Bank Transfer</option>
@@ -1005,7 +999,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
                 <button
                   type="button"
                   onClick={handleClearAllFilters}
-                  className="px-3.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-white border border-slate-200 hover:bg-slate-100 rounded-xl transition-colors"
+                  className="px-3.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-[#151F30] border border-[#334155] hover:bg-slate-100 rounded-xl transition-colors"
                 >
                   Clear All Filters
                 </button>
@@ -1022,68 +1016,68 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
         </div>
 
         {/* 4 Small Salary Record Summary Cards */}
-        <div className="p-5 border-b border-slate-200/80 bg-white">
+        <div className="p-5 border-b border-[#334155] bg-[#1E293B]">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Card 1: Total Salary Schedules */}
-            <div className="p-4 rounded-2xl border border-slate-200/80 bg-slate-50/50 flex items-center justify-between">
+            <div className="p-4 rounded-2xl border border-[#334155] bg-[#151D2B] flex items-center justify-between shadow-xs">
               <div>
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                <span className="text-[11px] font-bold text-[#CBD5E1] uppercase tracking-wider block">
                   Total Salary Schedules
                 </span>
-                <span className="text-xl font-extrabold text-[#172B4D] mt-1 block">
+                <span className="text-xl font-extrabold text-[#F8FAFC] mt-1 block">
                   {summaryMetrics.totalSchedules}
                 </span>
                 <span className="text-[11px] text-slate-400">Matching schedule records</span>
               </div>
-              <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#206DA6] flex items-center justify-center border border-blue-100">
+              <div className="w-10 h-10 rounded-xl bg-[#0F172A] text-violet-400 flex items-center justify-center border border-[#334155]">
                 <FileSpreadsheet className="w-5 h-5" />
               </div>
             </div>
 
             {/* Card 2: Total Scheduled Amount */}
-            <div className="p-4 rounded-2xl border border-slate-200/80 bg-slate-50/50 flex items-center justify-between">
+            <div className="p-4 rounded-2xl border border-[#334155] bg-[#151D2B] flex items-center justify-between shadow-xs">
               <div>
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                <span className="text-[11px] font-bold text-[#CBD5E1] uppercase tracking-wider block">
                   Total Scheduled Amount
                 </span>
-                <span className="text-xl font-extrabold text-[#206DA6] font-mono mt-1 block">
+                <span className="text-xl font-extrabold text-violet-400 font-mono mt-1 block">
                   {formatPaiseToINR(summaryMetrics.totalScheduledPaise)}
                 </span>
                 <span className="text-[11px] text-slate-400">Combined scheduled payout</span>
               </div>
-              <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#206DA6] flex items-center justify-center border border-blue-100">
+              <div className="w-10 h-10 rounded-xl bg-[#0F172A] text-violet-400 flex items-center justify-center border border-[#334155]">
                 <IndianRupee className="w-5 h-5" />
               </div>
             </div>
 
             {/* Card 3: Paid Amount */}
-            <div className="p-4 rounded-2xl border border-slate-200/80 bg-slate-50/50 flex items-center justify-between">
+            <div className="p-4 rounded-2xl border border-[#334155] bg-[#151D2B] flex items-center justify-between shadow-xs">
               <div>
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                <span className="text-[11px] font-bold text-[#CBD5E1] uppercase tracking-wider block">
                   Paid Amount
                 </span>
-                <span className="text-xl font-extrabold text-emerald-700 font-mono mt-1 block">
+                <span className="text-xl font-extrabold text-[#10B981] font-mono mt-1 block">
                   {formatPaiseToINR(summaryMetrics.paidPaise)}
                 </span>
                 <span className="text-[11px] text-slate-400">Confirmed disbursements</span>
               </div>
-              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100">
+              <div className="w-10 h-10 rounded-xl bg-[#0F172A] text-[#10B981] flex items-center justify-center border border-emerald-500/30">
                 <CheckCircle className="w-5 h-5" />
               </div>
             </div>
 
             {/* Card 4: Overdue Amount */}
-            <div className="p-4 rounded-2xl border border-slate-200/80 bg-slate-50/50 flex items-center justify-between">
+            <div className="p-4 rounded-2xl border border-[#334155] bg-[#151D2B] flex items-center justify-between shadow-xs">
               <div>
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                <span className="text-[11px] font-bold text-[#CBD5E1] uppercase tracking-wider block">
                   Overdue Amount
                 </span>
-                <span className="text-xl font-extrabold text-rose-600 font-mono mt-1 block">
+                <span className="text-xl font-extrabold text-[#F43F5E] font-mono mt-1 block">
                   {formatPaiseToINR(summaryMetrics.overduePaise)}
                 </span>
                 <span className="text-[11px] text-slate-400">Past due unpaid schedules</span>
               </div>
-              <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-100">
+              <div className="w-10 h-10 rounded-xl bg-[#0F172A] text-[#F43F5E] flex items-center justify-center border border-rose-500/30">
                 <AlertTriangle className="w-5 h-5" />
               </div>
             </div>
@@ -1093,9 +1087,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
         {/* Employee Salary Payment Details Table Section */}
         <div className="p-5 space-y-3">
           <div className="flex items-center justify-between">
-            <h4 className="text-sm font-extrabold text-[#172B4D] tracking-tight">
-              Employee Salary Payment Details
-            </h4>
+            <h4 className="text-sm font-extrabold text-[#F8FAFC] tracking-tight">Employee Salary Payment Details</h4>
             <span className="text-xs font-semibold text-slate-500">
               Showing {filteredSchedules.length} of {authorizedSchedules.length} record(s)
             </span>
@@ -1135,10 +1127,10 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
             </div>
           ) : (
             /* 10-Column Salary Payment Records Table */
-            <div className="overflow-x-auto rounded-xl border border-slate-200/80">
+            <div className="overflow-x-auto rounded-xl border border-[#334155]">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200/80 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                  <tr className="bg-[#111827] border-b border-[#334155] text-[11px] font-bold text-[#CBD5E1] uppercase tracking-wider">
                     <th className="py-3 px-4">Employee</th>
                     <th className="py-3 px-3">Employee ID</th>
                     <th className="py-3 px-3">Department</th>
@@ -1151,7 +1143,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
                     <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200/60 text-xs bg-white">
+                <tbody className="divide-y divide-[#334155] text-xs bg-[#1E293B]">
                   {filteredSchedules.map((schedule) => {
                     const emp = employees.find(
                       (e) =>
@@ -1187,11 +1179,11 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
                               </div>
                             )}
                             <div>
-                              <span className="font-bold text-[#172B4D] block">
+                              <span className="font-bold text-[#F8FAFC] block">
                                 {emp?.fullName || schedule.employeeName}
                               </span>
                               {emp?.designation && (
-                                <span className="text-[11px] text-slate-400 block">
+                                <span className="text-[11px] text-[#94A3B8] block">
                                   {emp.designation}
                                 </span>
                               )}
@@ -1200,39 +1192,39 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
                         </td>
 
                         {/* 2. Employee ID */}
-                        <td className="py-3 px-3 font-mono font-bold text-slate-600">
+                        <td className="py-3 px-3 font-mono font-bold text-[#CBD5E1]">
                           {emp?.employeeCode || schedule.employeeCode}
                         </td>
 
                         {/* 3. Department */}
-                        <td className="py-3 px-3 text-slate-700 font-medium">
+                        <td className="py-3 px-3 text-[#CBD5E1] font-medium">
                           {dept?.name || schedule.departmentName || emp?.departmentName || '—'}
                         </td>
 
                         {/* 4. Payroll Month */}
-                        <td className="py-3 px-3 font-medium text-slate-800">
+                        <td className="py-3 px-3 font-medium text-[#CBD5E1]">
                           {period
                             ? formatPayrollMonthLabel(period.yearMonth)
                             : 'Unassigned Period'}
                         </td>
 
                         {/* 5. Scheduled Payment Date */}
-                        <td className="py-3 px-3 font-mono font-semibold text-slate-700">
+                        <td className="py-3 px-3 font-mono font-semibold text-[#CBD5E1]">
                           {formatPaymentDateDisplay(schedule.scheduledPaymentDate)}
                         </td>
 
                         {/* 6. Salary Amount (₹) */}
-                        <td className="py-3 px-3 font-mono font-bold text-emerald-700">
+                        <td className="py-3 px-3 font-mono font-bold text-[#10B981]">
                           {formatPaiseToINR(paise)}
                         </td>
 
                         {/* 7. Payment Frequency */}
-                        <td className="py-3 px-3 text-slate-700">
+                        <td className="py-3 px-3 text-[#CBD5E1]">
                           {formatPaymentFrequencyLabel(schedule.paymentFrequency)}
                         </td>
 
                         {/* 8. Payment Method */}
-                        <td className="py-3 px-3 text-slate-700">
+                        <td className="py-3 px-3 text-[#CBD5E1]">
                           {formatPaymentMethodLabel(schedule.paymentMethod)}
                         </td>
 
@@ -1244,7 +1236,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
                           <button
                             type="button"
                             onClick={() => setSelectedDetailScheduleId(schedule.id)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#206DA6] bg-blue-50/70 hover:bg-blue-100 border border-blue-200/80 rounded-xl transition-colors"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#F8FAFC] bg-[#151D2B] hover:bg-[#151F30] border border-[#334155] hover:border-violet-500/50 rounded-xl transition-all shadow-2xs"
                           >
                             <Eye className="w-3.5 h-3.5" />
                             <span>View Details</span>
@@ -1277,7 +1269,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
             {/* Sticky Popup Header */}
             <div className="sticky top-0 z-20 flex items-center justify-between px-6 py-4 bg-white border-b border-slate-200/80">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#206DA6] flex items-center justify-center border border-blue-100">
+                <div className="w-10 h-10 rounded-xl bg-[#0F172A] text-violet-400 flex items-center justify-center border border-[#334155]">
                   <Calendar className="w-5 h-5" />
                 </div>
                 <div>
@@ -1313,7 +1305,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({
               <button
                 type="button"
                 onClick={() => setIsCalendarModalOpen(false)}
-                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
+                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-[#151F30] border border-[#334155] rounded-xl hover:bg-slate-50 transition-colors"
               >
                 Close
               </button>

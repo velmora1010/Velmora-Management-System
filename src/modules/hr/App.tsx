@@ -1,3 +1,4 @@
+import './index.css';
 import React, { useState, useEffect, useCallback } from 'react';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -220,7 +221,7 @@ const HRMSAppContent: React.FC = () => {
   const [isGeneratePayrollOpen, setIsGeneratePayrollOpen] = useState(false);
 
   return (
-    <div className="flex min-h-screen bg-[#F6F8FC] text-[#172B4D]">
+    <div className="hr-module-root flex min-h-screen bg-[#0B0F14] text-[#F8FAFC]">
       {/* Collapsible Left Sidebar */}
       <Sidebar
         currentTab={effectiveTab}

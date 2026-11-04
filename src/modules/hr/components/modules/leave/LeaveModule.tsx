@@ -65,7 +65,7 @@ export const LeaveModule: React.FC<LeaveModuleProps> = ({
   return (
     <div className="space-y-6">
       {/* Top Header & Apply Button */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+      <div className="bg-[#1E293B] p-5 rounded-2xl border border-[#334155] shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-base font-extrabold text-[#172B4D] tracking-tight">
             {canApproveLeave ? 'Leave Management' : 'My Leave History'}
@@ -103,7 +103,7 @@ export const LeaveModule: React.FC<LeaveModuleProps> = ({
 
       {/* Leave Allowance Policy Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+        <div className="p-4 bg-[#1E293B] rounded-2xl border border-[#334155] shadow-xs flex items-center justify-between">
           <div>
             <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
               Annual Vacation
@@ -118,7 +118,7 @@ export const LeaveModule: React.FC<LeaveModuleProps> = ({
           </div>
         </div>
 
-        <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+        <div className="p-4 bg-[#1E293B] rounded-2xl border border-[#334155] shadow-xs flex items-center justify-between">
           <div>
             <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
               Casual Leave
@@ -133,7 +133,7 @@ export const LeaveModule: React.FC<LeaveModuleProps> = ({
           </div>
         </div>
 
-        <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+        <div className="p-4 bg-[#1E293B] rounded-2xl border border-[#334155] shadow-xs flex items-center justify-between">
           <div>
             <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
               Medical / Sick
@@ -148,7 +148,7 @@ export const LeaveModule: React.FC<LeaveModuleProps> = ({
           </div>
         </div>
 
-        <div className="p-4 bg-white rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+        <div className="p-4 bg-[#1E293B] rounded-2xl border border-[#334155] shadow-xs flex items-center justify-between">
           <div>
             <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
               Maternity / Care
@@ -170,8 +170,8 @@ export const LeaveModule: React.FC<LeaveModuleProps> = ({
           onClick={() => setActiveTab('all')}
           className={`pb-2.5 transition-colors ${
             activeTab === 'all'
-              ? 'text-[#206DA6] border-b-2 border-[#206DA6]'
-              : 'text-slate-400 hover:text-slate-700'
+              ? 'text-violet-400 border-b-2 border-violet-500'
+              : 'text-slate-400 hover:text-[#CBD5E1]'
           }`}
         >
           All Requests ({roleScopedLeaves.length})
@@ -180,8 +180,8 @@ export const LeaveModule: React.FC<LeaveModuleProps> = ({
           onClick={() => setActiveTab('pending')}
           className={`pb-2.5 transition-colors flex items-center gap-1.5 ${
             activeTab === 'pending'
-              ? 'text-[#206DA6] border-b-2 border-[#206DA6]'
-              : 'text-slate-400 hover:text-slate-700'
+              ? 'text-violet-400 border-b-2 border-violet-500'
+              : 'text-slate-400 hover:text-[#CBD5E1]'
           }`}
         >
           <span>Pending Approvals</span>
@@ -195,8 +195,8 @@ export const LeaveModule: React.FC<LeaveModuleProps> = ({
           onClick={() => setActiveTab('approved')}
           className={`pb-2.5 transition-colors ${
             activeTab === 'approved'
-              ? 'text-[#206DA6] border-b-2 border-[#206DA6]'
-              : 'text-slate-400 hover:text-slate-700'
+              ? 'text-violet-400 border-b-2 border-violet-500'
+              : 'text-slate-400 hover:text-[#CBD5E1]'
           }`}
         >
           Approved ({approvedCount})
@@ -205,8 +205,8 @@ export const LeaveModule: React.FC<LeaveModuleProps> = ({
           onClick={() => setActiveTab('rejected')}
           className={`pb-2.5 transition-colors ${
             activeTab === 'rejected'
-              ? 'text-[#206DA6] border-b-2 border-[#206DA6]'
-              : 'text-slate-400 hover:text-slate-700'
+              ? 'text-violet-400 border-b-2 border-violet-500'
+              : 'text-slate-400 hover:text-[#CBD5E1]'
           }`}
         >
           Rejected ({rejectedCount})
@@ -214,7 +214,7 @@ export const LeaveModule: React.FC<LeaveModuleProps> = ({
       </div>
 
       {/* Requests Table */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-card overflow-hidden">
+      <div className="bg-[#1E293B] rounded-2xl border border-[#334155] shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase tracking-wider font-bold text-[10px]">
@@ -232,7 +232,7 @@ export const LeaveModule: React.FC<LeaveModuleProps> = ({
               {filteredLeaves.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-12 text-center text-slate-400 text-xs">
-                    <p className="font-semibold text-slate-600">No leave requests available.</p>
+                    <p className="font-semibold text-[#CBD5E1]">No leave requests available.</p>
                     <p className="text-[11px] text-slate-400 mt-1">Submit a new leave application to request time off.</p>
                   </td>
                 </tr>
@@ -252,7 +252,7 @@ export const LeaveModule: React.FC<LeaveModuleProps> = ({
                         </div>
                       </div>
                     </td>
-                    <td className="py-3 px-4 font-semibold text-slate-700">
+                    <td className="py-3 px-4 font-semibold text-[#CBD5E1]">
                       {leave.leaveType === 'others'
                         ? leave.customLeaveType
                           ? `Others — ${leave.customLeaveType}`
@@ -267,7 +267,7 @@ export const LeaveModule: React.FC<LeaveModuleProps> = ({
                         {leave.daysCount} Day{leave.daysCount > 1 ? 's' : ''}
                       </span>
                     </td>
-                    <td className="py-3 px-4 text-slate-600 max-w-xs truncate italic">
+                    <td className="py-3 px-4 text-[#CBD5E1] max-w-xs truncate italic">
                       "{leave.reason}"
                     </td>
                     <td className="py-3 px-4 text-slate-500 text-[11px] font-mono">

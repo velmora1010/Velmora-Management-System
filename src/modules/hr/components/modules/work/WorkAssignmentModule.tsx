@@ -141,14 +141,14 @@ export const WorkAssignmentModule: React.FC = () => {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-[#206DA6]/10 text-[#206DA6] flex items-center justify-center font-bold">
+            <div className="w-10 h-10 rounded-2xl bg-[#151D2B] text-violet-400 border border-[#334155] flex items-center justify-center font-bold">
               <ClipboardList className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#172B4D]">
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#F8FAFC]">
                 Work Assignment
               </h1>
-              <p className="text-xs sm:text-sm text-[#64748B] mt-0.5">
+              <p className="text-xs sm:text-sm text-[#94A3B8] mt-0.5">
                 Assign daily work and manage employee tasks.
               </p>
             </div>
@@ -160,7 +160,7 @@ export const WorkAssignmentModule: React.FC = () => {
           <div className="flex items-center gap-3">
             <button
               onClick={handleOpenAssignToAllModal}
-              className="px-5 py-2.5 bg-[#206DA6] hover:bg-[#1a5682] text-white rounded-xl text-xs font-bold shadow-sm hover:shadow-md transition-all flex items-center gap-2 group"
+              className="px-5 py-2.5 bg-[#6D28D9] hover:bg-[#5B21B6] text-white rounded-xl text-xs font-bold shadow-sm hover:shadow-md transition-all flex items-center gap-2 group border border-[#7C3AED]"
             >
               <Plus className="w-4 h-4 text-white/90 group-hover:scale-110 transition-transform" />
               <span>Assign Work to All</span>
@@ -172,66 +172,66 @@ export const WorkAssignmentModule: React.FC = () => {
       {/* ================= 2. TOP SUMMARY METRIC CARDS ================= */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Total Employees */}
-        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs hover:shadow-sm transition-shadow">
+        <div className="bg-[#1E293B] rounded-2xl p-5 border border-[#334155] shadow-xs hover:border-[#6D28D9]/50 transition-all">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+            <span className="text-xs font-bold text-[#CBD5E1] uppercase tracking-wider">
               Total Employees
             </span>
-            <div className="w-9 h-9 rounded-xl bg-blue-50 text-[#206DA6] flex items-center justify-center">
+            <div className="w-9 h-9 rounded-xl bg-[#151D2B] text-violet-400 flex items-center justify-center border border-[#334155]">
               <Users className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3">
-            <span className="text-2xl font-black text-[#172B4D]">{totalEmployeesCount}</span>
-            <span className="text-[11px] text-slate-400 block mt-0.5">Assigned workforce</span>
+            <span className="text-2xl font-black text-[#F8FAFC]">{totalEmployeesCount}</span>
+            <span className="text-[11px] text-[#94A3B8] block mt-0.5">Assigned workforce</span>
           </div>
         </div>
 
         {/* Total Assigned Tasks */}
-        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs hover:shadow-sm transition-shadow">
+        <div className="bg-[#1E293B] rounded-2xl p-5 border border-[#334155] shadow-xs hover:border-[#6D28D9]/50 transition-all">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+            <span className="text-xs font-bold text-[#CBD5E1] uppercase tracking-wider">
               Total Assigned Tasks
             </span>
-            <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+            <div className="w-9 h-9 rounded-xl bg-[#151D2B] text-indigo-400 flex items-center justify-center border border-[#334155]">
               <ClipboardList className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3">
-            <span className="text-2xl font-black text-[#172B4D]">{totalTasksCount}</span>
-            <span className="text-[11px] text-slate-400 block mt-0.5">Active database tasks</span>
+            <span className="text-2xl font-black text-[#F8FAFC]">{totalTasksCount}</span>
+            <span className="text-[11px] text-[#94A3B8] block mt-0.5">Active database tasks</span>
           </div>
         </div>
 
         {/* Pending Tasks */}
-        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs hover:shadow-sm transition-shadow">
+        <div className="bg-[#1E293B] rounded-2xl p-5 border border-[#334155] shadow-xs hover:border-[#6D28D9]/50 transition-all">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+            <span className="text-xs font-bold text-[#CBD5E1] uppercase tracking-wider">
               Pending Tasks
             </span>
-            <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+            <div className="w-9 h-9 rounded-xl bg-[#151D2B] text-amber-400 flex items-center justify-center border border-amber-500/30">
               <Clock className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3">
-            <span className="text-2xl font-black text-amber-600">{pendingTasksCount}</span>
-            <span className="text-[11px] text-slate-400 block mt-0.5">Awaiting completion</span>
+            <span className="text-2xl font-black text-amber-400">{pendingTasksCount}</span>
+            <span className="text-[11px] text-[#94A3B8] block mt-0.5">Awaiting completion</span>
           </div>
         </div>
 
         {/* Completed Tasks */}
-        <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs hover:shadow-sm transition-shadow">
+        <div className="bg-[#1E293B] rounded-2xl p-5 border border-[#334155] shadow-xs hover:border-[#6D28D9]/50 transition-all">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+            <span className="text-xs font-bold text-[#CBD5E1] uppercase tracking-wider">
               Completed Tasks
             </span>
-            <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <div className="w-9 h-9 rounded-xl bg-[#151D2B] text-emerald-400 flex items-center justify-center border border-emerald-500/30">
               <CheckCircle2 className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3">
-            <span className="text-2xl font-black text-emerald-600">{completedTasksCount}</span>
-            <span className="text-[11px] text-slate-400 block mt-0.5">Finished deliverables</span>
+            <span className="text-2xl font-black text-emerald-400">{completedTasksCount}</span>
+            <span className="text-[11px] text-[#94A3B8] block mt-0.5">Finished deliverables</span>
           </div>
         </div>
       </div>
@@ -239,8 +239,8 @@ export const WorkAssignmentModule: React.FC = () => {
       {/* ================= 3. EMPLOYEE TASK ROSTER ================= */}
       {isEmployeeRole ? (
         /* EMPLOYEE VIEW — MY ASSIGNED WORK */
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+        <div className="bg-[#1E293B] rounded-2xl border border-[#334155] p-6 shadow-sm space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#334155] pb-5">
             <div className="flex items-center gap-3.5">
               <Avatar
                 src={loggedInEmployee?.avatar}
@@ -251,11 +251,11 @@ export const WorkAssignmentModule: React.FC = () => {
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="text-base font-bold text-[#172B4D]">{loggedInEmployee?.fullName || currentUser.name}</h2>
-                  <span className="px-2 py-0.5 rounded-md text-xs font-mono font-bold bg-slate-100 text-slate-700">
+                  <span className="px-2 py-0.5 rounded-md text-xs font-mono font-bold bg-[#151D2B] text-[#CBD5E1] border border-[#334155]">
                     {loggedInEmployee?.employeeCode || 'EMP'}
                   </span>
                 </div>
-                <p className="text-xs text-slate-500 mt-0.5">
+                <p className="text-xs text-[#CBD5E1] mt-0.5">
                   {loggedInEmployee?.designation || 'Staff'} • {loggedInEmployee?.departmentName || 'General Department'}
                 </p>
               </div>
@@ -274,7 +274,7 @@ export const WorkAssignmentModule: React.FC = () => {
 
           <div>
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+              <h3 className="text-xs font-bold text-[#CBD5E1] uppercase tracking-wider">
                 My Assigned Work Orders ({myAssignedTasks.length})
               </h3>
               <span className="text-xs text-slate-400">
@@ -300,7 +300,7 @@ export const WorkAssignmentModule: React.FC = () => {
                   return (
                     <div
                       key={t.id}
-                      className="p-4 bg-white rounded-xl border border-slate-200 shadow-2xs hover:shadow-xs transition-shadow space-y-3 flex flex-col justify-between"
+                      className="p-4 bg-[#151D2B] rounded-xl border border-[#334155] shadow-2xs transition-shadow space-y-3 flex flex-col justify-between"
                     >
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
@@ -309,11 +309,7 @@ export const WorkAssignmentModule: React.FC = () => {
                           </span>
                           <span
                             className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                              status === 'completed'
-                                ? 'bg-emerald-100 text-emerald-700'
-                                : status === 'in_progress'
-                                ? 'bg-blue-100 text-blue-700'
-                                : 'bg-amber-100 text-amber-700'
+                              status === 'completed' ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' : status === 'in_progress' ? 'bg-blue-500/15 text-blue-300 border border-blue-500/30' : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
                             }`}
                           >
                             {status === 'completed' ? 'Completed' : status === 'in_progress' ? 'In Progress' : 'Pending'}
@@ -358,12 +354,11 @@ export const WorkAssignmentModule: React.FC = () => {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-bold text-[#172B4D]">Employee Task Roster</h2>
-              <p className="text-xs text-slate-500">
-                Select an employee card below to create or review daily work assignments.
+              <h2 className="text-sm font-bold text-[#F8FAFC]">Employee Task Roster</h2>
+              <p className="text-xs text-[#94A3B8]">Select an employee card below to create or review daily work assignments.
               </p>
             </div>
-            <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full border border-slate-200">
+            <span className="text-xs font-bold text-[#CBD5E1] bg-[#151D2B] px-3 py-1 rounded-full border border-[#334155]">
               {targetEmployees.length} Active Employees
             </span>
           </div>
@@ -381,10 +376,10 @@ export const WorkAssignmentModule: React.FC = () => {
               return (
                 <div
                   key={emp.id}
-                  className="bg-white rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-md transition-all flex flex-col overflow-hidden group hover:border-[#206DA6]/50"
+                  className="bg-[#1E293B] rounded-2xl border border-[#334155] shadow-sm hover:shadow-md transition-all flex flex-col overflow-hidden group hover:border-[#6D28D9]/60"
                 >
                   {/* Card Header Profile Banner */}
-                  <div className="p-5 border-b border-slate-100 bg-linear-to-b from-slate-50/80 to-white">
+                  <div className="p-5 border-b border-[#334155] bg-[#151D2B]">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3.5">
                         <Avatar
@@ -395,18 +390,18 @@ export const WorkAssignmentModule: React.FC = () => {
                         />
                         <div>
                           <div className="flex items-center gap-2">
-                            <h3 className="text-sm font-bold text-[#172B4D] group-hover:text-[#206DA6] transition-colors">
+                            <h3 className="text-sm font-bold text-[#F8FAFC] group-hover:text-violet-300 transition-colors">
                               {emp.fullName}
                             </h3>
-                            <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-[#0F172A] text-[#CBD5E1] border border-[#334155]">
                               {emp.employeeCode}
                             </span>
                           </div>
-                          <p className="text-xs font-medium text-slate-500 flex items-center gap-1.5 mt-0.5">
+                          <p className="text-xs font-medium text-[#CBD5E1] flex items-center gap-1.5 mt-0.5">
                             <Briefcase className="w-3.5 h-3.5 text-slate-400" />
                             {emp.designation || 'Specialist'}
                           </p>
-                          <p className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
+                          <p className="text-[11px] text-[#94A3B8] flex items-center gap-1 mt-0.5">
                             <Building2 className="w-3 h-3 text-slate-300" />
                             {emp.departmentName || 'Software Development'}
                           </p>
@@ -415,48 +410,28 @@ export const WorkAssignmentModule: React.FC = () => {
                     </div>
 
                     {/* Employee Task Statistics Row (Total, Pending, Done, Acknowledged) */}
-                    <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-4 gap-2 text-center">
-                      <div className="p-2 bg-slate-50 rounded-xl">
-                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">
-                          Total
-                        </span>
-                        <span className="text-sm font-extrabold text-[#172B4D]">{empTotal}</span>
-                      </div>
-                      <div className="p-2 bg-amber-50/70 rounded-xl">
-                        <span className="text-[9px] font-bold text-amber-600 uppercase tracking-wider block">
-                          Pending
-                        </span>
-                        <span className="text-sm font-extrabold text-amber-700">{empPending}</span>
-                      </div>
-                      <div className="p-2 bg-emerald-50/70 rounded-xl">
-                        <span className="text-[9px] font-bold text-emerald-600 uppercase tracking-wider block">
-                          Done
-                        </span>
-                        <span className="text-sm font-extrabold text-emerald-700">{empCompleted}</span>
-                      </div>
-                      <div className="p-2 bg-blue-50/70 rounded-xl">
-                        <span className="text-[9px] font-bold text-[#206DA6] uppercase tracking-wider block">
-                          Seen
-                        </span>
-                        <span className="text-sm font-extrabold text-[#206DA6]">{empAck}/{empTotal}</span>
-                      </div>
+                    <div className="mt-4 pt-4 border-t border-[#334155] grid grid-cols-4 gap-2 text-center">
+                      <div className="p-2 bg-[#0F172A] rounded-xl border border-[#334155]"><span className="text-[9px] font-bold text-[#94A3B8] uppercase tracking-wider block">Total</span><span className="text-sm font-extrabold text-[#F8FAFC]">{empTotal}</span></div>
+                      <div className="p-2 bg-[#0F172A] rounded-xl border border-amber-500/30"><span className="text-[9px] font-bold text-amber-400 uppercase tracking-wider block">Pending</span><span className="text-sm font-extrabold text-amber-300">{empPending}</span></div>
+                      <div className="p-2 bg-[#0F172A] rounded-xl border border-emerald-500/30"><span className="text-[9px] font-bold text-emerald-400 uppercase tracking-wider block">Done</span><span className="text-sm font-extrabold text-emerald-300">{empCompleted}</span></div>
+                      <div className="p-2 bg-[#0F172A] rounded-xl border border-indigo-500/30"><span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider block">Seen</span><span className="text-sm font-extrabold text-indigo-300">{empAck}/{empTotal}</span></div>
                     </div>
                   </div>
 
                   {/* Card Body: Task List */}
-                  <div className="p-4 flex-1 flex flex-col justify-between space-y-3 bg-white">
+                  <div className="p-4 flex-1 flex flex-col justify-between space-y-3 bg-[#1E293B]">
                     <div>
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                        <span className="text-[11px] font-bold text-[#CBD5E1] uppercase tracking-wider">
                           Assigned Work ({empTotal})
                         </span>
                       </div>
 
                       {empAssignments.length === 0 ? (
-                        <div className="py-6 text-center bg-slate-50/60 rounded-xl border border-dashed border-slate-200">
+                        <div className="py-6 text-center bg-[#151D2B] rounded-xl border border-dashed border-[#334155]">
                           <ClipboardList className="w-6 h-6 text-slate-300 mx-auto mb-1" />
-                          <p className="text-xs font-semibold text-slate-500">No tasks assigned yet</p>
-                          <p className="text-[10px] text-slate-400 mt-0.5">
+                          <p className="text-xs font-semibold text-[#CBD5E1]">No tasks assigned yet</p>
+                          <p className="text-[10px] text-[#94A3B8] mt-0.5">
                             Click Assign Work to create daily assignments.
                           </p>
                         </div>
@@ -473,26 +448,26 @@ export const WorkAssignmentModule: React.FC = () => {
                               <div
                                 key={assign.id}
                                 onClick={() => handleOpenAssignedWorkModal(emp)}
-                                className="p-2.5 bg-slate-50/70 hover:bg-blue-50/40 rounded-xl border border-slate-200/80 hover:border-blue-200 transition-colors cursor-pointer group/task flex items-center justify-between gap-2"
+                                className="p-2.5 bg-[#151D2B] hover:bg-[#151F30] rounded-xl border border-[#334155] hover:border-violet-500/50 transition-colors cursor-pointer group/task flex items-center justify-between gap-2"
                               >
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-1.5">
-                                    <span className="text-[10px] font-mono font-bold text-[#206DA6]">
+                                    <span className="text-[10px] font-mono font-bold text-violet-400">
                                       {taskCode}
                                     </span>
-                                    <h4 className="text-xs font-bold text-[#172B4D] truncate group-hover/task:text-[#206DA6]">
+                                    <h4 className="text-xs font-bold text-[#F8FAFC] truncate group-hover/task:text-violet-300">
                                       {title}
                                     </h4>
                                   </div>
                                   <div className="flex items-center gap-2 mt-0.5">
-                                    <span className="text-[10px] text-slate-400">
+                                    <span className="text-[10px] text-[#94A3B8]">
                                       Seen:{' '}
                                       {isAck ? (
-                                        <span className="text-emerald-700 font-bold">Seen ✓</span>
+                                        <span className="text-emerald-400 font-bold">Seen ✓</span>
                                       ) : assign.firstViewedAt ? (
-                                        <span className="text-blue-700 font-medium">Seen</span>
+                                        <span className="text-violet-400 font-medium">Seen</span>
                                       ) : (
-                                        <span className="text-amber-600">Not Seen</span>
+                                        <span className="text-amber-400">Not Seen</span>
                                       )}
                                     </span>
                                   </div>
@@ -500,11 +475,7 @@ export const WorkAssignmentModule: React.FC = () => {
 
                                 <span
                                   className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
-                                    status === 'completed'
-                                      ? 'bg-emerald-100 text-emerald-700'
-                                      : status === 'in_progress'
-                                      ? 'bg-blue-100 text-blue-700'
-                                      : 'bg-amber-100 text-amber-700'
+                                    status === 'completed' ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' : status === 'in_progress' ? 'bg-blue-500/15 text-blue-300 border border-blue-500/30' : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
                                   }`}
                                 >
                                   {status === 'completed'
@@ -524,7 +495,7 @@ export const WorkAssignmentModule: React.FC = () => {
                     <div className="pt-2 grid grid-cols-2 gap-2">
                       <button
                         onClick={() => handleOpenAssignModal(emp)}
-                        className="py-2.5 px-3 bg-[#206DA6] hover:bg-[#1a5682] text-white text-xs font-bold rounded-xl shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                        className="py-2.5 px-3 bg-[#6D28D9] hover:bg-[#5B21B6] text-white text-xs font-bold rounded-xl shadow-2xs transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-[#7C3AED]"
                       >
                         <Plus className="w-3.5 h-3.5" />
                         <span>Assign Work</span>
@@ -532,7 +503,7 @@ export const WorkAssignmentModule: React.FC = () => {
 
                       <button
                         onClick={() => handleOpenAssignedWorkModal(emp)}
-                        className="py-2.5 px-3 bg-[#1E293B] hover:bg-[#334155] text-white hover:text-white border border-[#334155] hover:border-[#206DA6] text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                        className="py-2.5 px-3 bg-[#151D2B] hover:bg-[#151F30] text-[#CBD5E1] hover:text-[#F8FAFC] border border-[#334155] hover:border-violet-500/50 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
                       >
                         <Eye className="w-3.5 h-3.5 text-[#94A3B8]" />
                         <span>View Assigned Work</span>
