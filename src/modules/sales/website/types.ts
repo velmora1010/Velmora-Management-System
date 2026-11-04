@@ -144,6 +144,7 @@ export interface WebsiteConsolidatedOrder {
   discount_amount?: number;
   refund_amount?: number;
   shipment_status?: string;
+  raw_status?: string;
   tracking_url?: string;
   manifested_date?: string;
   dispatched_date?: string;
