@@ -16,6 +16,8 @@ import {
   PaymentFrequency,
   PaymentMethod,
   ScheduleAuditEntry,
+  EmployeeFile,
+  EmployeeFileCategory,
 } from '../types/hrms';
 import {
   INITIAL_SETTINGS,
@@ -184,6 +186,7 @@ const LOCAL_STORAGE_KEYS = {
   NOTIFS: 'hrms_notifications_v3',
   SETTINGS: 'hrms_settings_v3',
   DESIGNATIONS: 'hrms_designations_v3',
+  FILES: 'hrms_employee_files_v1',
 };
 
 export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -370,6 +373,18 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   });
 
+  // 11. Employee Files State
+  const [employeeFiles, setEmployeeFiles] = useState<EmployeeFile[]>(() => {
+    const saved = safeGetItem(LOCAL_STORAGE_KEYS.FILES);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch {}
+    }
+    return INITIAL_EMPLOYEE_FILES;
+  });
+
   // Dashboard Filters
   const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
   const [selectedDate, setSelectedDate] = useState<string>(() => {
@@ -452,6 +467,13 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
 
+    fetchEmployeeFilesFromSupabase().then((remoteFiles) => {
+      if (active && remoteFiles && remoteFiles.length > 0) {
+        setEmployeeFiles(remoteFiles);
+        safeSetItem(LOCAL_STORAGE_KEYS.FILES, JSON.stringify(remoteFiles));
+      }
+    });
+
     return () => {
       active = false;
     };
@@ -509,6 +531,10 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     safeSetItem(LOCAL_STORAGE_KEYS.DESIGNATIONS, JSON.stringify(designations));
   }, [designations]);
+
+  useEffect(() => {
+    safeSetItem(LOCAL_STORAGE_KEYS.FILES, JSON.stringify(employeeFiles));
+  }, [employeeFiles]);
 
   const addDesignation = useCallback((desig: Omit<DesignationItem, 'id'>): DesignationItem => {
     const newDesig: DesignationItem = {
@@ -676,7 +702,7 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setEmployeeFiles((prev) => {
       const updated = [newFile, ...prev];
-      safeSetItem('velmora_hrms_employee_files', JSON.stringify(updated));
+      safeSetItem(LOCAL_STORAGE_KEYS.FILES, JSON.stringify(updated));
       return updated;
     });
 
@@ -692,7 +718,7 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const deleteEmployeeFile = async (fileId: string): Promise<boolean> => {
     setEmployeeFiles((prev) => {
       const updated = prev.filter((f) => f.id !== fileId);
-      safeSetItem('velmora_hrms_employee_files', JSON.stringify(updated));
+      safeSetItem(LOCAL_STORAGE_KEYS.FILES, JSON.stringify(updated));
       return updated;
     });
 
@@ -2018,6 +2044,7 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setShiftTemplates(INITIAL_SHIFTS);
     setPayrollRecords(INITIAL_PAYROLL);
     setPayrollSchedules(INITIAL_PAYROLL_SCHEDULES);
+    setEmployeeFiles(INITIAL_EMPLOYEE_FILES);
     setActivityLogs(INITIAL_ACTIVITY_LOGS);
     setNotifications(INITIAL_NOTIFICATIONS);
     setSettings(INITIAL_SETTINGS);

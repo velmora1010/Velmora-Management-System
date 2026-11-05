@@ -22,8 +22,8 @@ import { Employee, EmployeeFile, EmployeeFileCategory } from '../../../types/hrm
 import { Avatar } from '../../common/Avatar';
 
 interface EmployeeFilesSectionProps {
-  employees: Employee[];
-  employeeFiles: EmployeeFile[];
+  employees?: Employee[];
+  employeeFiles?: EmployeeFile[];
   onUploadFile: (params: {
     employeeId: string;
     file: File;
@@ -45,8 +45,8 @@ const ALLOWED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx'];
 const MAX_FILE_SIZE_MB = 15;
 
 export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
-  employees,
-  employeeFiles,
+  employees = [],
+  employeeFiles = [],
   onUploadFile,
   onDeleteFile,
   canManage,
