@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   UploadCloud,
   FileText,
@@ -11,12 +11,9 @@ import {
   Clock,
   AlertCircle,
   Search,
-  Filter,
-  User,
-  ExternalLink,
-  Plus,
-  Loader2,
   FolderOpen,
+  Loader2,
+  X,
 } from 'lucide-react';
 import { Employee, EmployeeFile, EmployeeFileCategory } from '../../../types/hrms';
 import { Avatar } from '../../common/Avatar';
@@ -31,6 +28,13 @@ interface EmployeeFilesSectionProps {
   }) => Promise<any>;
   onDeleteFile: (fileId: string) => Promise<any>;
   canManage: boolean;
+}
+
+interface StagedFile {
+  id: string;
+  file: File;
+  previewUrl?: string;
+  category: EmployeeFileCategory;
 }
 
 const CATEGORIES: EmployeeFileCategory[] = [
@@ -59,12 +63,33 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [filterEmployee, setFilterEmployee] = useState<string>('all');
 
+  const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Keep selectedEmployeeId updated if employees list loads asynchronously
+  useEffect(() => {
+    if (!selectedEmployeeId && employees.length > 0) {
+      setSelectedEmployeeId(employees[0].id);
+    }
+  }, [employees, selectedEmployeeId]);
+
+  // Clean up object URLs on unmount
+  useEffect(() => {
+    return () => {
+      stagedFiles.forEach((sf) => {
+        if (sf.previewUrl) URL.revokeObjectURL(sf.previewUrl);
+      });
+    };
+  }, [stagedFiles]);
+
+  const selectedEmployee = useMemo(() => {
+    return employees.find((e) => e.id === selectedEmployeeId);
+  }, [employees, selectedEmployeeId]);
 
   // Validate single file
   const validateFile = (file: File): string | null => {
@@ -78,9 +103,66 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
     return null;
   };
 
-  // Handle file drop / select
-  const handleFiles = async (fileList: FileList | null) => {
+  // Handle file selection (drag & drop or browse)
+  const handleFileSelection = (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
+    if (!selectedEmployeeId) {
+      setUploadError('Please select an employee before uploading documentation.');
+      return;
+    }
+
+    setUploadError(null);
+    setUploadSuccess(null);
+
+    const filesArray = Array.from(fileList);
+    const newStaged: StagedFile[] = [];
+
+    for (const file of filesArray) {
+      const error = validateFile(file);
+      if (error) {
+        setUploadError(error);
+        return;
+      }
+
+      let previewUrl: string | undefined;
+      if (file.type.startsWith('image/')) {
+        previewUrl = URL.createObjectURL(file);
+      }
+
+      newStaged.push({
+        id: `staged-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        file,
+        previewUrl,
+        category: selectedCategory,
+      });
+    }
+
+    setStagedFiles((prev) => [...prev, ...newStaged]);
+  };
+
+  // Remove a staged file before upload
+  const handleRemoveStaged = (indexToRemove: number) => {
+    setStagedFiles((prev) => {
+      const target = prev[indexToRemove];
+      if (target?.previewUrl) {
+        URL.revokeObjectURL(target.previewUrl);
+      }
+      return prev.filter((_, i) => i !== indexToRemove);
+    });
+  };
+
+  // Clear all staged files
+  const handleClearAllStaged = () => {
+    stagedFiles.forEach((sf) => {
+      if (sf.previewUrl) URL.revokeObjectURL(sf.previewUrl);
+    });
+    setStagedFiles([]);
+    setUploadError(null);
+  };
+
+  // Perform bulk upload of staged files
+  const handleUploadStaged = async () => {
+    if (stagedFiles.length === 0) return;
     if (!selectedEmployeeId) {
       setUploadError('Please select an employee before uploading documentation.');
       return;
@@ -91,25 +173,17 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
     setIsUploading(true);
 
     try {
-      const filesArray = Array.from(fileList);
-      for (const file of filesArray) {
-        const error = validateFile(file);
-        if (error) {
-          setUploadError(error);
-          setIsUploading(false);
-          return;
-        }
-      }
-
-      for (const file of filesArray) {
+      for (const staged of stagedFiles) {
         await onUploadFile({
           employeeId: selectedEmployeeId,
-          file,
-          category: selectedCategory,
+          file: staged.file,
+          category: staged.category,
         });
       }
 
-      setUploadSuccess(`Successfully uploaded ${filesArray.length} document(s).`);
+      const count = stagedFiles.length;
+      handleClearAllStaged();
+      setUploadSuccess(`Successfully uploaded ${count} document${count > 1 ? 's' : ''}.`);
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err: any) {
       setUploadError(err.message || 'Failed to upload files.');
@@ -118,7 +192,7 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
     }
   };
 
-  // Filtered files list
+  // Filtered files list for table
   const filteredFiles = useMemo(() => {
     return employeeFiles.filter((f) => {
       // Category filter
@@ -159,7 +233,6 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
       a.click();
       document.body.removeChild(a);
     } else {
-      // Fallback: create mock text download or alert
       const blob = new Blob([`Documentation for ${file.employeeName} (${file.employeeCode}) - ${file.fileName}`], {
         type: 'text/plain;charset=utf-8',
       });
@@ -175,7 +248,7 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
   };
 
   // Get File Extension Icon
-  const getFileIcon = (fileName: string, type: string) => {
+  const getFileIcon = (fileName: string, _type: string) => {
     const ext = fileName.split('.').pop()?.toLowerCase();
     if (ext === 'pdf') {
       return (
@@ -224,7 +297,7 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
           </div>
           <div>
             <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <span>Upload Employee Files</span>
+              <span>Employee Documents</span>
               <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold">
                 {employeeFiles.length} Records
               </span>
@@ -239,7 +312,8 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
       {/* UPLOAD FORM PANEL (If Authorized) */}
       {canManage && (
         <div className="bg-[#151D2B] rounded-xl border border-[#334155] p-4 sm:p-5 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Dropdowns placed neatly above upload card */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
             {/* Employee Selector */}
             <div>
               <label className="block text-xs font-semibold text-white uppercase mb-1">
@@ -277,50 +351,186 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
             </div>
           </div>
 
-          {/* Drag & Drop Upload Zone */}
-          <div
-            onDragOver={(e) => {
-              e.preventDefault();
-              setIsDragging(true);
-            }}
-            onDragLeave={() => setIsDragging(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setIsDragging(false);
-              handleFiles(e.dataTransfer.files);
-            }}
-            onClick={() => fileInputRef.current?.click()}
-            className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all flex flex-col items-center justify-center space-y-2 ${
-              isDragging
-                ? 'border-[#3B82F6] bg-blue-500/10'
-                : 'border-[#334155] hover:border-[#60A5FA] bg-[#0F172A]/70 hover:bg-[#0F172A]'
-            }`}
-          >
-            <input
-              type="file"
-              ref={fileInputRef}
-              multiple
-              accept=".pdf, .jpg, .jpeg, .png, .doc, .docx"
-              onChange={(e) => handleFiles(e.target.files)}
-              className="hidden"
-            />
+          {/* Compact Upload Section: Passport-size upload card on left + Selected preview area on right */}
+          <div className="flex flex-col sm:flex-row items-start gap-4 pt-1">
+            {/* Passport-size Upload Card */}
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragging(true);
+              }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDragging(false);
+                handleFileSelection(e.dataTransfer.files);
+              }}
+              onClick={() => fileInputRef.current?.click()}
+              className={`w-[180px] h-[220px] shrink-0 border-2 border-dashed rounded-2xl p-3 flex flex-col items-center justify-between text-center cursor-pointer transition-all duration-200 select-none ${
+                isDragging
+                  ? 'border-[#3B82F6] bg-blue-500/10 shadow-lg shadow-blue-500/10'
+                  : 'border-[#334155] hover:border-[#60A5FA] bg-[#0F172A]/80 hover:bg-[#0F172A]'
+              }`}
+            >
+              <input
+                type="file"
+                ref={fileInputRef}
+                multiple
+                accept=".pdf, .jpg, .jpeg, .png, .doc, .docx"
+                onChange={(e) => {
+                  handleFileSelection(e.target.files);
+                  if (e.target) e.target.value = '';
+                }}
+                className="hidden"
+              />
 
-            <div className="w-10 h-10 rounded-xl bg-[#1E293B] border border-[#334155] text-[#60A5FA] flex items-center justify-center shadow-xs">
-              {isUploading ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <UploadCloud className="w-5 h-5" />
-              )}
+              {/* Centered Light Upload Icon */}
+              <div className="w-11 h-11 mt-1 rounded-xl bg-[#1E293B] border border-[#334155] text-[#60A5FA] flex items-center justify-center shadow-xs">
+                {isUploading ? (
+                  <Loader2 className="w-5 h-5 animate-spin text-[#60A5FA]" />
+                ) : (
+                  <UploadCloud className="w-5 h-5 text-[#60A5FA]" />
+                )}
+              </div>
+
+              {/* Centered Text Info */}
+              <div className="space-y-1 px-1">
+                <h4 className="text-xs font-bold text-white tracking-wide">
+                  Upload Document
+                </h4>
+                <p className="text-[11px] text-[#94A3B8] leading-tight">
+                  Click or drag file here
+                </p>
+                <p className="text-[10px] text-[#64748B] pt-0.5 font-medium">
+                  PDF, JPG, PNG, DOC, DOCX
+                </p>
+              </div>
+
+              {/* Small Browse Files button inside card */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  fileInputRef.current?.click();
+                }}
+                className="mb-1 px-3 py-1 text-[11px] font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-lg transition-colors shadow-xs cursor-pointer"
+              >
+                Browse Files
+              </button>
             </div>
 
-            <div>
-              <p className="text-xs font-bold text-white">
-                {isUploading ? 'Uploading files...' : 'Click to select or drag & drop employee files here'}
-              </p>
-              <p className="text-[11px] text-[#94A3B8] mt-0.5">
-                Supports PDF, JPG, PNG, DOC, and DOCX (Max 15MB each • Multiple uploads supported)
-              </p>
-            </div>
+            {/* Selected Staged Files / Status Area */}
+            {stagedFiles.length === 0 ? (
+              <div className="flex-1 w-full border border-dashed border-[#334155]/60 rounded-2xl p-5 h-[220px] flex flex-col items-center justify-center text-center bg-[#0F172A]/40">
+                <div className="w-9 h-9 rounded-xl bg-[#1E293B]/70 border border-[#334155] flex items-center justify-center text-[#64748B] mb-2">
+                  <FolderOpen className="w-4 h-4" />
+                </div>
+                <p className="text-xs font-bold text-[#CBD5E1]">No files queued for upload</p>
+                <p className="text-[11px] text-[#94A3B8] mt-1 max-w-sm">
+                  Drag and drop documents or click <span className="text-[#60A5FA] font-medium">Browse Files</span> to stage employee files with preview and removal options before saving.
+                </p>
+              </div>
+            ) : (
+              <div className="flex-1 w-full bg-[#0F172A]/90 border border-[#334155] rounded-2xl p-3.5 flex flex-col justify-between h-[220px]">
+                <div>
+                  <div className="flex items-center justify-between pb-2 border-b border-[#334155]">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-white">Selected Documents</span>
+                      <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/30">
+                        {stagedFiles.length} {stagedFiles.length === 1 ? 'file' : 'files'}
+                      </span>
+                      {selectedEmployee && (
+                        <span className="text-[11px] text-[#94A3B8] hidden md:inline truncate max-w-[200px]">
+                          for {selectedEmployee.fullName}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleClearAllStaged}
+                      disabled={isUploading}
+                      className="text-[11px] text-[#94A3B8] hover:text-rose-400 transition-colors cursor-pointer"
+                    >
+                      Clear All
+                    </button>
+                  </div>
+
+                  {/* Staged file list */}
+                  <div className="mt-2.5 space-y-1.5 max-h-[110px] overflow-y-auto pr-1">
+                    {stagedFiles.map((sf, index) => (
+                      <div
+                        key={sf.id}
+                        className="flex items-center justify-between gap-2.5 px-2.5 py-1.5 rounded-xl bg-[#151D2B] border border-[#334155] hover:border-[#475569] transition-colors"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          {sf.previewUrl ? (
+                            <img
+                              src={sf.previewUrl}
+                              alt={sf.file.name}
+                              className="w-7 h-7 rounded-lg object-cover border border-[#334155] shrink-0"
+                            />
+                          ) : (
+                            <div className="w-7 h-7 rounded-lg bg-blue-500/10 border border-blue-500/30 text-[#60A5FA] flex items-center justify-center shrink-0">
+                              <FileText className="w-3.5 h-3.5" />
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <p
+                              className="text-xs font-semibold text-white truncate max-w-[180px] sm:max-w-xs"
+                              title={sf.file.name}
+                            >
+                              {sf.file.name}
+                            </p>
+                            <div className="flex items-center gap-2 text-[10px] text-[#94A3B8]">
+                              <span>{(sf.file.size / (1024 * 1024)).toFixed(2)} MB</span>
+                              <span>•</span>
+                              <span className="text-[#60A5FA]">{sf.category}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveStaged(index)}
+                          disabled={isUploading}
+                          className="p-1 rounded-lg text-[#94A3B8] hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                          title="Remove file"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Bottom upload action bar */}
+                <div className="pt-2 border-t border-[#334155] flex items-center justify-between">
+                  <span className="text-[11px] text-[#94A3B8] truncate mr-2">
+                    Ready to upload to secure storage
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleUploadStaged}
+                    disabled={isUploading || stagedFiles.length === 0}
+                    className="px-3.5 py-1.5 text-xs font-bold text-white bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 disabled:cursor-not-allowed rounded-xl flex items-center gap-2 transition-colors shadow-xs cursor-pointer shrink-0"
+                  >
+                    {isUploading ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Uploading...</span>
+                      </>
+                    ) : (
+                      <>
+                        <UploadCloud className="w-3.5 h-3.5" />
+                        <span>
+                          Upload {stagedFiles.length} {stagedFiles.length === 1 ? 'File' : 'Files'}
+                        </span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Upload Feedback */}
