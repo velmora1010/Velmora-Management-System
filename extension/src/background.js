@@ -111,6 +111,34 @@ async function getValidCompanionWindow(winId) {
   });
 }
 
+async function checkTabVisibility(tabId) {
+  if (!tabId) return { visible: true, visibilityState: 'visible' };
+  try {
+    const res = await new Promise((resolve) => {
+      chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => ({
+          visibilityState: document.visibilityState,
+          hidden: document.hidden
+        })
+      }, (results) => {
+        if (chrome.runtime.lastError || !results || !results[0]) {
+          resolve(null);
+        } else {
+          resolve(results[0].result);
+        }
+      });
+    });
+    if (!res) return { visible: true, visibilityState: 'unknown' };
+    return {
+      visible: res.visibilityState === 'visible' && !res.hidden,
+      visibilityState: res.visibilityState
+    };
+  } catch (e) {
+    return { visible: true, visibilityState: 'unknown' };
+  }
+}
+
 async function checkCompanionWindowState() {
   if (!companionWindowId) return { valid: false, state: 'unknown', focused: false };
   return new Promise((resolve) => {
@@ -174,24 +202,31 @@ function scheduleCompanionIdleClose(delayMs = 45000) {
   }, delayMs);
 }
 
-async function handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, stage) {
+async function handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, stage, igTabId = null) {
   // If companion window was closed during this batch, persistently throw COMPANION_WINDOW_CLOSED
   if (companionWindowClosedByUser) {
     throw new Error('COMPANION_WINDOW_CLOSED: Instagram research companion window was closed. Please keep the companion window open during batch research.');
   }
-  if (!companionWindowId) return;
+  if (!companionWindowId) return false;
   const winStatus = await checkCompanionWindowState();
   if (!winStatus.valid || winStatus.state === 'closed') {
     companionWindowClosedByUser = true;
     throw new Error('COMPANION_WINDOW_CLOSED: Instagram research companion window was closed. Please keep the companion window open during batch research.');
   }
 
-  if (winStatus.state === 'minimized') {
+  const effectiveTabId = igTabId || companionTabId;
+  const tabVis = await checkTabVisibility(effectiveTabId);
+
+  // Minimized window is primary signal; tab visibility hidden (when window state is not yet reported or occluded) is secondary
+  const isInactive = winStatus.state === 'minimized' || (winStatus.state === 'normal' && !winStatus.focused && !tabVis.visible && tabVis.visibilityState === 'hidden');
+
+  if (isInactive) {
     const pauseStartTs = Date.now();
     logBoundedDiag('pause_start', normalizedUser, {
       stage,
       winId: companionWindowId,
-      winState: 'minimized',
+      winState: winStatus.state,
+      docVisibility: tabVis.visibilityState,
       timestamp: pauseStartTs
     });
     if (sender) {
@@ -221,12 +256,22 @@ async function handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payloa
         companionWindowClosedByUser = true;
         throw new Error('COMPANION_WINDOW_CLOSED: Instagram research companion window was closed while paused.');
       }
-      if (currentWin.state !== 'minimized') {
+
+      // Check tab visibility on restore candidate
+      let currentTabVis = { visible: true };
+      if (currentWin.state !== 'minimized' && effectiveTabId) {
+        currentTabVis = await checkTabVisibility(effectiveTabId);
+      }
+
+      const stillInactive = currentWin.state === 'minimized' || (!currentTabVis.visible && currentTabVis.visibilityState === 'hidden');
+
+      if (!stillInactive) {
         const pausedDuration = Date.now() - pauseStartTs;
         logBoundedDiag('pause_resumed', normalizedUser, {
           stage,
           winId: companionWindowId,
           winState: currentWin.state,
+          docVisibility: currentTabVis.visibilityState,
           pausedDurationMs: pausedDuration
         });
         if (sender) {
@@ -237,9 +282,24 @@ async function handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payloa
             isPaused: false
           });
         }
-        // Give browser 1000ms after restore for rendering pipeline to stabilize
-        await new Promise(r => setTimeout(r, 1000));
-        break;
+        // Stabilization wait: 1500ms for Blink compositor and React virtual DOM
+        await new Promise(r => setTimeout(r, 1500));
+
+        // Active wake-up: trigger IntersectionObserver and virtual scroller
+        if (effectiveTabId) {
+          try {
+            await injectScript(effectiveTabId, () => {
+              try {
+                window.scrollBy(0, -100);
+                window.scrollBy(0, 150);
+                window.dispatchEvent(new Event('scroll', { bubbles: true }));
+                window.dispatchEvent(new Event('resize', { bubbles: true }));
+              } catch (e) {}
+            });
+            await new Promise(r => setTimeout(r, 500));
+          } catch (e) {}
+        }
+        return true;
       }
 
       // Heartbeat event every 5 seconds so client UI and Mini Player stay informed of paused duration
@@ -263,6 +323,7 @@ async function handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payloa
       }
     }
   }
+  return false;
 }
 
 chrome.windows.onRemoved.addListener((closedWindowId) => {
@@ -708,7 +769,7 @@ async function verifyProfile(igTabId, targetUsername, timeout = 15000, sender = 
 
   while (elapsed < timeout) {
     // Check companion window state before verifying profile: pause countdown if minimized
-    await handleCompanionWindowPauseIfNeeded(targetUsername, sender, payload, 'verifyProfile');
+    await handleCompanionWindowPauseIfNeeded(targetUsername, sender, payload, 'verifyProfile', igTabId);
 
     let res;
     try {
@@ -1199,23 +1260,27 @@ async function discoverReelLinks(igTabId, username = null) {
 }
 
 async function scrollUntilEnoughReels(igTabId, sender, payload) {
-  const normalizedUser = normalizeUsername(payload?.username || '');
-  logTabOp('scrollUntilEnoughReels:start', normalizedUser, igTabId, `https://www.instagram.com/${normalizedUser}/reels/`);
-  sendEventToSender(sender, 'REELS_SCROLLING', payload);
+  const normalizedUser = normalizeUsername(payload?.username);
+  logTabOp('scrollUntilEnoughReels:start', normalizedUser, igTabId);
 
-  let uniqueReelCount = 0;
   let scrollRounds = 0;
   let stableRounds = 0;
   let zeroRounds = 0;
+  let uniqueReelCount = 0;
   let allDiscovered = [];
 
   const targetValidCounts = 15;
-  const maxScrolls = 16;
-  const maxStableRounds = 5; // Bounded adaptive pagination: allow up to 5 stable rounds for background tab lazy loading
+  const maxScrolls = 20;
+  const maxStableRounds = 5;
 
   while (scrollRounds < maxScrolls) {
-    // Check companion window state before scroll round: pause if minimized
-    await handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, 'scrollUntilEnoughReels');
+    // Check companion window state before scroll round: pause if minimized or hidden
+    const wasPaused = await handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, 'scrollUntilEnoughReels', igTabId);
+    if (wasPaused) {
+      // Explicitly reset stableRounds and zeroRounds when resuming from a pause so pause duration never causes premature plateau!
+      stableRounds = 0;
+      zeroRounds = 0;
+    }
 
     const currentBatch = await discoverReelLinks(igTabId, normalizedUser);
     const previousUniqueCount = uniqueReelCount;
@@ -1253,6 +1318,24 @@ async function scrollUntilEnoughReels(igTabId, sender, payload) {
     if (uniqueReelCount === previousUniqueCount && uniqueReelCount > 0) {
       stableRounds++;
       if (stableRounds >= maxStableRounds) {
+        // If we haven't reached targetValidCounts, attempt adaptive recovery bounce before declaring plateau
+        if (uniqueReelCount < targetValidCounts) {
+          console.log(`[scrollUntilEnoughReels] Plateau encountered (${stableRounds} rounds) at ${uniqueReelCount} reels for @${normalizedUser}. Attempting adaptive recovery bounce...`);
+          try {
+            await injectScript(igTabId, () => {
+              window.scrollBy(0, -400);
+              window.scrollBy(0, 600);
+              window.dispatchEvent(new Event('scroll', { bubbles: true }));
+              window.dispatchEvent(new Event('resize', { bubbles: true }));
+            });
+            await new Promise(r => setTimeout(r, 2000));
+            const recoveryBatch = await discoverReelLinks(igTabId, normalizedUser);
+            if (recoveryBatch.length > currentBatch.length) {
+              stableRounds = 0;
+              continue;
+            }
+          } catch (e) {}
+        }
         console.log(`[scrollUntilEnoughReels] Plateau confirmed after ${stableRounds} stable rounds for @${normalizedUser} (${uniqueReelCount} discovered, ${validNonPinnedCount} valid non-pinned).`);
         break; // Plateau reached after bounded adaptive attempts
       }
@@ -1468,7 +1551,7 @@ async function waitForReelsPage(igTabId, normalizedUser, timeoutMs = 15000, send
 
   while (elapsed < timeoutMs) {
     // Check companion window state: pause countdown if minimized
-    await handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, 'waitForReelsPage');
+    await handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, 'waitForReelsPage', igTabId);
 
     await new Promise(r => setTimeout(r, interval));
     elapsed += interval;
@@ -1970,7 +2053,7 @@ async function executeProfileResearchOnTab(payload, sender, normalizedUser, star
     let anyViewUpdated = false;
     for (const reel of reelsToInspect) {
       try {
-        await handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, 'reel_metric_fallback');
+        await handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, 'reel_metric_fallback', igTabId);
         logTabOp('reel_metric_fallback:nav', normalizedUser, igTabId, reel.reelUrl);
         igTabId = await updateInstagramTabUrl(igTabId, reel.reelUrl, normalizedUser, 'startProfileResearch:reel_metric_fallback');
         await new Promise(r => setTimeout(r, 1800));
