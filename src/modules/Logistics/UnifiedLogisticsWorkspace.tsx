@@ -124,6 +124,8 @@ import { AllFiltersModal } from './components/filters/AllFiltersModal';
 
 import { LogisticsAnalyticsDashboard } from './components/LogisticsAnalyticsDashboard';
 
+import { DeliveryDelaysView } from './components/DeliveryDelaysView';
+
 import { DateRangeCalendarModal } from './components/DateRangeCalendarModal';
 
 import { LogisticsSectionSidebar } from './components/LogisticsSectionSidebar';
@@ -3023,7 +3025,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
           ) : currentStage === 'delivery_delays' ? (
             <DeliveryDelaysView
-              orders={operationalOrders}
+              orders={stageShipments}
               onTrackOrder={handleTrackOrder}
               onViewCustomer={(key) => setSelectedCustomerKey(key)}
               onRefresh={handleRefresh}

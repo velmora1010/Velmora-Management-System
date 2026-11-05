@@ -741,3 +741,6 @@ export const DeliveryDelaysView: React.FC<DeliveryDelaysViewProps> = ({
     </div>
   );
 };
+
+export default DeliveryDelaysView;
+
