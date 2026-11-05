@@ -15,12 +15,10 @@ import {
   Loader2,
   ArrowLeft,
   ChevronRight,
-  UserCheck,
-  FileCheck2,
-  LayoutGrid,
-  Table as TableIcon,
   ShieldCheck,
   Plus,
+  Table as TableIcon,
+  XCircle,
 } from 'lucide-react';
 import { Employee, EmployeeFile, EmployeeFileCategory } from '../../../types/hrms';
 import { Avatar } from '../../common/Avatar';
@@ -60,16 +58,13 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
   );
   const [selectedCategory, setSelectedCategory] = useState<EmployeeFileCategory>('ID Proof');
 
-  // Active view: 'employees' (cards) vs 'all-documents' (global table)
-  const [activeTab, setActiveTab] = useState<'employees' | 'all-documents'>('employees');
-
-  // Currently focused employee for dedicated document details view (null = show all employee cards)
+  // Currently focused employee for dedicated document details view (null = show employee table)
   const [activeEmployeeId, setActiveEmployeeId] = useState<string | null>(null);
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState('');
   const [filterDepartment, setFilterDepartment] = useState<string>('all');
-  const [filterStatus, setFilterStatus] = useState<string>('all'); // 'all' | 'submitted' | 'pending'
+  const [filterStatus, setFilterStatus] = useState<string>('all'); // 'all' | 'verified' | 'submitted' | 'pending'
   const [filterCategory, setFilterCategory] = useState<string>('all');
 
   // Upload state
@@ -104,6 +99,13 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
     });
   };
 
+  // Helper to compute submission status: Verified, Submitted, or Pending
+  const getSubmissionStatus = (docs: EmployeeFile[]): 'Pending' | 'Submitted' | 'Verified' => {
+    if (docs.length === 0) return 'Pending';
+    const allVerified = docs.every((d) => (d.uploadStatus || '').toLowerCase() === 'verified');
+    return allVerified ? 'Verified' : 'Submitted';
+  };
+
   // Currently active employee object
   const activeEmployee = useMemo(() => {
     if (!activeEmployeeId) return null;
@@ -125,15 +127,14 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
     return Array.from(set);
   }, [employees]);
 
-  // Filtered employees for the employee-wise submission cards
+  // Filtered employees for the main column-based table
   const filteredEmployees = useMemo(() => {
     return employees.filter((emp) => {
       const docs = getEmployeeDocs(emp);
-      const hasDocs = docs.length > 0;
+      const status = getSubmissionStatus(docs).toLowerCase();
 
       // Status filter
-      if (filterStatus === 'submitted' && !hasDocs) return false;
-      if (filterStatus === 'pending' && hasDocs) return false;
+      if (filterStatus !== 'all' && status !== filterStatus) return false;
 
       // Department filter
       if (filterDepartment !== 'all' && emp.departmentName !== filterDepartment) return false;
@@ -152,23 +153,6 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
     });
   }, [employees, employeeFiles, filterDepartment, filterStatus, searchQuery]);
 
-  // Filtered documents for the all-documents master table
-  const filteredAllDocuments = useMemo(() => {
-    return employeeFiles.filter((f) => {
-      if (filterCategory !== 'all' && f.category !== filterCategory) return false;
-
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase().trim();
-        const matchFile = f.fileName.toLowerCase().includes(q);
-        const matchCode = (f.employeeCode || '').toLowerCase().includes(q);
-        const matchName = (f.employeeName || '').toLowerCase().includes(q);
-        const matchCat = (f.category || '').toLowerCase().includes(q);
-        if (!matchFile && !matchCode && !matchName && !matchCat) return false;
-      }
-      return true;
-    });
-  }, [employeeFiles, filterCategory, searchQuery]);
-
   // Validate single file
   const validateFile = (file: File): string | null => {
     const ext = '.' + file.name.split('.').pop()?.toLowerCase();
@@ -181,7 +165,7 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
     return null;
   };
 
-  // Direct upload handler (instantly uploads dropped or browsed files)
+  // Direct upload handler
   const handleDirectUpload = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
     if (!selectedEmployeeId) {
@@ -263,20 +247,20 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
     const ext = fileName.split('.').pop()?.toLowerCase();
     if (ext === 'pdf') {
       return (
-        <div className="w-9 h-9 rounded-xl bg-red-500/15 border border-red-500/30 text-red-400 flex items-center justify-center shrink-0">
+        <div className="w-8 h-8 rounded-lg bg-red-500/15 border border-red-500/30 text-red-400 flex items-center justify-center shrink-0">
           <FileText className="w-4 h-4" />
         </div>
       );
     }
     if (['jpg', 'jpeg', 'png', 'webp'].includes(ext || '')) {
       return (
-        <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
+        <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
           <ImageIcon className="w-4 h-4" />
         </div>
       );
     }
     return (
-      <div className="w-9 h-9 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-400 flex items-center justify-center shrink-0">
+      <div className="w-8 h-8 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400 flex items-center justify-center shrink-0">
         <FileCode className="w-4 h-4" />
       </div>
     );
@@ -298,7 +282,7 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
     }
   };
 
-  // Scroll to upload card when clicking quick upload
+  // Quick upload trigger for focused employee
   const handleQuickUploadFor = (empId: string) => {
     setSelectedEmployeeId(empId);
     uploadSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -306,7 +290,7 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
 
   return (
     <div className="mt-8 bg-[#1E293B] rounded-2xl border border-[#334155] p-6 shadow-card space-y-6">
-      {/* SECTION HEADER & VIEW SWITCHER */}
+      {/* SECTION HEADER */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#334155] pb-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-[#2563EB]/15 border border-[#2563EB]/30 text-[#60A5FA] flex items-center justify-center">
@@ -314,52 +298,22 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-base font-bold text-white">Employee Documents</h3>
+              <h3 className="text-base font-bold text-white">Employee Documents &amp; Submissions</h3>
               <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold">
                 {employeeFiles.length} Total Files
               </span>
               <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
-                {employees.length} Staff Members
+                {employees.length} Employees
               </span>
             </div>
             <p className="text-xs text-[#94A3B8] mt-0.5">
-              Secure document repository linked by Employee ID (ID Proof, Offer Letter, Resume, Contract).
+              Structured column repository tracking employee verification, document counts, and compliance status.
             </p>
           </div>
         </div>
-
-        {/* View Switcher Tabs */}
-        {!activeEmployeeId && (
-          <div className="flex items-center bg-[#0F172A] p-1 rounded-xl border border-[#334155]">
-            <button
-              type="button"
-              onClick={() => setActiveTab('employees')}
-              className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                activeTab === 'employees'
-                  ? 'bg-[#2563EB] text-white shadow-xs'
-                  : 'text-[#94A3B8] hover:text-white'
-              }`}
-            >
-              <LayoutGrid className="w-3.5 h-3.5" />
-              <span>Employee Submissions</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('all-documents')}
-              className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                activeTab === 'all-documents'
-                  ? 'bg-[#2563EB] text-white shadow-xs'
-                  : 'text-[#94A3B8] hover:text-white'
-              }`}
-            >
-              <TableIcon className="w-3.5 h-3.5" />
-              <span>All Documents</span>
-            </button>
-          </div>
-        )}
       </div>
 
-      {/* UPLOAD PANEL (Left-aligned Passport-Size Upload Card, Right-Side Queue Removed) */}
+      {/* UPLOAD PANEL (Unchanged Compact Passport-Size Upload Card) */}
       {canManage && (
         <div
           ref={uploadSectionRef}
@@ -585,117 +539,139 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
                 <thead className="bg-[#111827] border-b border-[#334155] text-[#94A3B8] uppercase text-[10px] tracking-wider font-bold">
                   <tr>
                     <th className="py-3 px-4">Document Name</th>
-                    <th className="py-3 px-4">Category</th>
-                    <th className="py-3 px-4">File Size &amp; Type</th>
-                    <th className="py-3 px-4">Upload Info</th>
-                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4">Document Category</th>
+                    <th className="py-3 px-4">File Type</th>
+                    <th className="py-3 px-4">File Size</th>
+                    <th className="py-3 px-4">Upload Date</th>
+                    <th className="py-3 px-4">Verification Status</th>
                     <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#334155]/60 bg-[#151D2B]">
-                  {activeEmployeeDocs.map((file) => (
-                    <tr key={file.id} className="hover:bg-[#1E293B]/60 transition-colors">
-                      {/* Document Name */}
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-3">
-                          {getFileIcon(file.fileName)}
-                          <div className="min-w-0 max-w-xs">
-                            <p className="font-semibold text-white truncate text-xs" title={file.fileName}>
-                              {file.fileName}
-                            </p>
-                            <span className="text-[10px] text-[#64748B] block truncate font-mono">
-                              {file.storagePath || 'Stored Securely'}
-                            </span>
+                  {activeEmployeeDocs.map((file) => {
+                    const ext = (file.fileName.split('.').pop() || 'FILE').toUpperCase();
+                    const statusLower = (file.uploadStatus || 'Verified').toLowerCase();
+
+                    return (
+                      <tr key={file.id} className="hover:bg-[#1E293B]/60 transition-colors">
+                        {/* Document Name */}
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-2.5">
+                            {getFileIcon(file.fileName)}
+                            <div className="min-w-0 max-w-xs">
+                              <p className="font-semibold text-white truncate text-xs" title={file.fileName}>
+                                {file.fileName}
+                              </p>
+                              <span className="text-[10px] text-[#64748B] block truncate font-mono">
+                                {file.storagePath || 'Stored Securely'}
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                      </td>
+                        </td>
 
-                      {/* Category Badge */}
-                      <td className="py-3 px-4">
-                        <span
-                          className={`px-2.5 py-1 rounded-md text-[10px] font-bold border ${getCategoryBadge(
-                            file.category
-                          )}`}
-                        >
-                          {file.category}
-                        </span>
-                      </td>
-
-                      {/* File Size & Type */}
-                      <td className="py-3 px-4 text-[#CBD5E1]">
-                        <span className="font-medium text-xs block">{file.fileSize}</span>
-                        <span className="text-[10px] text-[#64748B] uppercase font-mono">
-                          {file.fileName.split('.').pop() || 'File'}
-                        </span>
-                      </td>
-
-                      {/* Upload Info */}
-                      <td className="py-3 px-4 text-[#94A3B8]">
-                        <div className="flex items-center gap-1.5 text-xs text-white font-medium">
-                          <Clock className="w-3 h-3 text-[#64748B]" />
-                          <span>{file.uploadedAt || 'Recent'}</span>
-                        </div>
-                        <span className="text-[10px] text-[#64748B] block">
-                          By {file.uploadedBy || 'HR Admin'}
-                        </span>
-                      </td>
-
-                      {/* Status */}
-                      <td className="py-3 px-4">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                          <CheckCircle2 className="w-3 h-3" />
-                          <span>{file.uploadStatus || 'Verified'}</span>
-                        </span>
-                      </td>
-
-                      {/* Actions */}
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleViewFile(file)}
-                            className="p-1.5 rounded-lg border border-[#334155] hover:border-[#60A5FA] text-[#60A5FA] hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
-                            title="View File"
+                        {/* Document Category */}
+                        <td className="py-3 px-4">
+                          <span
+                            className={`px-2.5 py-1 rounded-md text-[10px] font-bold border ${getCategoryBadge(
+                              file.category
+                            )}`}
                           >
-                            <Eye className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDownloadFile(file)}
-                            className="p-1.5 rounded-lg border border-[#334155] hover:border-emerald-500 text-emerald-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
-                            title="Download File"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                          </button>
-                          {canManage && (
+                            {file.category}
+                          </span>
+                        </td>
+
+                        {/* File Type */}
+                        <td className="py-3 px-4 text-[#CBD5E1]">
+                          <span className="font-mono text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-[#0F172A] border border-[#334155] text-[#94A3B8]">
+                            {ext}
+                          </span>
+                        </td>
+
+                        {/* File Size */}
+                        <td className="py-3 px-4 text-[#CBD5E1]">
+                          <span className="font-medium text-xs">{file.fileSize}</span>
+                        </td>
+
+                        {/* Upload Date */}
+                        <td className="py-3 px-4 text-[#94A3B8]">
+                          <div className="flex items-center gap-1.5 text-xs text-white font-medium">
+                            <Clock className="w-3 h-3 text-[#64748B]" />
+                            <span>{file.uploadedAt || 'Recent'}</span>
+                          </div>
+                          <span className="text-[10px] text-[#64748B] block">
+                            By {file.uploadedBy || 'HR Admin'}
+                          </span>
+                        </td>
+
+                        {/* Verification Status */}
+                        <td className="py-3 px-4">
+                          {statusLower === 'verified' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>Verified</span>
+                            </span>
+                          ) : statusLower === 'rejected' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/25">
+                              <XCircle className="w-3 h-3" />
+                              <span>Rejected</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/25">
+                              <Clock className="w-3 h-3" />
+                              <span>Pending</span>
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Actions */}
+                        <td className="py-3 px-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
                             <button
                               type="button"
-                              onClick={() => {
-                                if (
-                                  window.confirm(
-                                    `Are you sure you want to delete ${file.fileName} for ${activeEmployee.fullName}?`
-                                  )
-                                ) {
-                                  onDeleteFile(file.id);
-                                }
-                              }}
-                              className="p-1.5 rounded-lg border border-[#334155] hover:border-rose-500 text-rose-400 hover:text-white hover:bg-rose-500/10 transition-colors cursor-pointer"
-                              title="Delete File"
+                              onClick={() => handleViewFile(file)}
+                              className="p-1.5 rounded-lg border border-[#334155] hover:border-[#60A5FA] text-[#60A5FA] hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+                              title="View File"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Eye className="w-3.5 h-3.5" />
                             </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadFile(file)}
+                              className="p-1.5 rounded-lg border border-[#334155] hover:border-emerald-500 text-emerald-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
+                              title="Download File"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                            </button>
+                            {canManage && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (
+                                    window.confirm(
+                                      `Are you sure you want to delete ${file.fileName} for ${activeEmployee.fullName}?`
+                                    )
+                                  ) {
+                                    onDeleteFile(file.id);
+                                  }
+                                }}
+                                className="p-1.5 rounded-lg border border-[#334155] hover:border-rose-500 text-rose-400 hover:text-white hover:bg-rose-500/10 transition-colors cursor-pointer"
+                                title="Delete File"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
         </div>
-      ) : activeTab === 'employees' ? (
-        /* VIEW 2: EMPLOYEE-WISE DOCUMENT SUBMISSION GRID */
+      ) : (
+        /* VIEW 2: COLUMN-BASED EMPLOYEE DOCUMENT SUBMISSION TABLE */
         <div className="space-y-4">
           {/* Search & Filter Toolbar */}
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -734,13 +710,14 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
                 className="px-3 py-1.5 text-xs rounded-xl border border-[#334155] bg-[#151D2B] text-[#CBD5E1] focus:outline-hidden"
               >
                 <option value="all">All Statuses</option>
-                <option value="submitted">Submitted (Has Files)</option>
-                <option value="pending">Pending Submission (0 Files)</option>
+                <option value="verified">Verified</option>
+                <option value="submitted">Submitted</option>
+                <option value="pending">Pending</option>
               </select>
             </div>
           </div>
 
-          {/* Responsive Grid of Employee Cards */}
+          {/* Column-Based Employee Table */}
           {filteredEmployees.length === 0 ? (
             <div className="p-10 text-center border border-dashed border-[#334155] rounded-xl bg-[#151D2B]/40">
               <FolderOpen className="w-9 h-9 text-[#64748B] mx-auto mb-2" />
@@ -750,259 +727,132 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredEmployees.map((emp) => {
-                const docs = getEmployeeDocs(emp);
-                const hasDocs = docs.length > 0;
-
-                return (
-                  <div
-                    key={emp.id}
-                    onClick={() => setActiveEmployeeId(emp.id)}
-                    className="bg-[#151D2B] border border-[#334155] hover:border-[#3B82F6] rounded-2xl p-4.5 transition-all duration-200 cursor-pointer shadow-xs hover:shadow-md hover:bg-[#1A2436] flex flex-col justify-between group"
-                  >
-                    <div>
-                      {/* Top Row: Avatar + Employee Identity */}
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <Avatar name={emp.fullName} size="md" />
-                          <div>
-                            <h4 className="text-sm font-bold text-white group-hover:text-[#60A5FA] transition-colors">
-                              {emp.fullName}
-                            </h4>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <span className="font-mono text-[10px] font-semibold text-[#60A5FA] bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20">
-                                {emp.employeeCode}
-                              </span>
-                              <span className="text-[11px] text-[#94A3B8] truncate max-w-[140px]">
-                                {emp.departmentName}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Submission Status Badge */}
-                        {hasDocs ? (
-                          <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 shrink-0 flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3" />
-                            <span>Submitted</span>
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/25 shrink-0 flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            <span>Pending</span>
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Designation */}
-                      <p className="text-xs text-[#CBD5E1] mt-3 font-medium">
-                        {emp.designation}
-                      </p>
-
-                      {/* Document Count Metric */}
-                      <div className="mt-3 pt-3 border-t border-[#334155]/60 flex items-center justify-between text-xs">
-                        <span className="text-[#94A3B8]">Documents Submitted</span>
-                        <span className="font-bold text-white flex items-center gap-1.5">
-                          <FileCheck2 className={`w-3.5 h-3.5 ${hasDocs ? 'text-[#60A5FA]' : 'text-[#64748B]'}`} />
-                          <span className={hasDocs ? 'text-white' : 'text-[#64748B]'}>{docs.length}</span>
-                        </span>
-                      </div>
-
-                      {/* Category preview chips if documents exist */}
-                      {hasDocs && (
-                        <div className="mt-2.5 flex flex-wrap gap-1.5">
-                          {Array.from(new Set(docs.map((d) => d.category))).map((cat) => (
-                            <span
-                              key={cat}
-                              className="text-[10px] px-2 py-0.5 rounded bg-[#0F172A] border border-[#334155] text-[#94A3B8]"
-                            >
-                              {cat}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* View Documents Button */}
-                    <div className="mt-4 pt-3 border-t border-[#334155]/60">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveEmployeeId(emp.id);
-                        }}
-                        className="w-full py-2 px-3 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-xl flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer"
-                      >
-                        <span>View Documents</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      ) : (
-        /* VIEW 3: ALL DOCUMENTS MASTER TABLE VIEW */
-        <div className="space-y-4">
-          {/* Search & Category Filter */}
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2 flex-1 min-w-[240px]">
-              <div className="relative w-full max-w-sm">
-                <Search className="w-3.5 h-3.5 text-[#64748B] absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search documents by name, employee, or category..."
-                  className="w-full pl-9 pr-3 py-1.5 text-xs rounded-xl border border-[#334155] bg-[#151D2B] text-white placeholder-[#64748B] focus:outline-hidden focus:border-[#3B82F6]"
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <select
-                value={filterCategory}
-                onChange={(e) => setFilterCategory(e.target.value)}
-                className="px-3 py-1.5 text-xs rounded-xl border border-[#334155] bg-[#151D2B] text-[#CBD5E1] focus:outline-hidden"
-              >
-                <option value="all">All Categories</option>
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {filteredAllDocuments.length === 0 ? (
-            <div className="p-10 text-center border border-dashed border-[#334155] rounded-xl bg-[#151D2B]/40">
-              <FolderOpen className="w-9 h-9 text-[#64748B] mx-auto mb-2" />
-              <p className="text-xs font-bold text-white">No documents found matching criteria</p>
-              <p className="text-[11px] text-[#94A3B8] mt-0.5">
-                Upload new files using the panel above or adjust search filters.
-              </p>
-            </div>
-          ) : (
             <div className="border border-[#334155] rounded-xl overflow-x-auto shadow-sm">
               <table className="w-full text-left text-xs whitespace-nowrap">
                 <thead className="bg-[#111827] border-b border-[#334155] text-[#94A3B8] uppercase text-[10px] tracking-wider font-bold">
                   <tr>
-                    <th className="py-3 px-4">Document</th>
-                    <th className="py-3 px-4">Category</th>
-                    <th className="py-3 px-4">Associated Employee</th>
-                    <th className="py-3 px-4">File Size &amp; Type</th>
-                    <th className="py-3 px-4">Upload Info</th>
-                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4">Employee Name</th>
+                    <th className="py-3 px-4">Employee ID</th>
+                    <th className="py-3 px-4">Department</th>
+                    <th className="py-3 px-4">Designation</th>
+                    <th className="py-3 px-4 text-center">Documents Submitted</th>
+                    <th className="py-3 px-4">Document Categories</th>
+                    <th className="py-3 px-4">Submission Status</th>
                     <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#334155]/60 bg-[#151D2B]">
-                  {filteredAllDocuments.map((file) => (
-                    <tr key={file.id} className="hover:bg-[#1E293B]/60 transition-colors">
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-3">
-                          {getFileIcon(file.fileName)}
-                          <div className="min-w-0 max-w-[240px]">
-                            <p className="font-semibold text-white truncate text-xs" title={file.fileName}>
-                              {file.fileName}
-                            </p>
-                            <span className="text-[10px] text-[#64748B] block truncate font-mono">
-                              {file.storagePath || 'Stored Securely'}
-                            </span>
-                          </div>
-                        </div>
-                      </td>
+                  {filteredEmployees.map((emp) => {
+                    const docs = getEmployeeDocs(emp);
+                    const docsCount = docs.length;
+                    const status = getSubmissionStatus(docs);
+                    const categories = Array.from(new Set(docs.map((d) => d.category)));
 
-                      <td className="py-3 px-4">
-                        <span
-                          className={`px-2.5 py-1 rounded-md text-[10px] font-bold border ${getCategoryBadge(
-                            file.category
-                          )}`}
-                        >
-                          {file.category}
-                        </span>
-                      </td>
-
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-2">
-                          <Avatar name={file.employeeName} size="xs" />
-                          <div>
-                            <span className="font-bold text-white block text-xs">{file.employeeName}</span>
-                            <span className="font-mono text-[10px] text-[#60A5FA]">
-                              {file.employeeCode}
-                            </span>
-                          </div>
-                        </div>
-                      </td>
-
-                      <td className="py-3 px-4 text-[#CBD5E1]">
-                        <span className="font-medium text-xs block">{file.fileSize}</span>
-                        <span className="text-[10px] text-[#64748B] uppercase font-mono">
-                          {file.fileName.split('.').pop() || 'File'}
-                        </span>
-                      </td>
-
-                      <td className="py-3 px-4 text-[#94A3B8]">
-                        <div className="flex items-center gap-1.5 text-xs text-white font-medium">
-                          <Clock className="w-3 h-3 text-[#64748B]" />
-                          <span>{file.uploadedAt || 'Recent'}</span>
-                        </div>
-                        <span className="text-[10px] text-[#64748B] block">
-                          By {file.uploadedBy || 'HR Admin'}
-                        </span>
-                      </td>
-
-                      <td className="py-3 px-4">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                          <CheckCircle2 className="w-3 h-3" />
-                          <span>{file.uploadStatus || 'Verified'}</span>
-                        </span>
-                      </td>
-
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleViewFile(file)}
-                            className="p-1.5 rounded-lg border border-[#334155] hover:border-[#60A5FA] text-[#60A5FA] hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
-                            title="View File"
+                    return (
+                      <tr key={emp.id} className="hover:bg-[#1E293B]/60 transition-colors">
+                        {/* Employee Name (Clickable) */}
+                        <td className="py-3 px-4">
+                          <div
+                            onClick={() => setActiveEmployeeId(emp.id)}
+                            className="flex items-center gap-2.5 cursor-pointer group"
+                            title={`Click to view documents for ${emp.fullName}`}
                           >
-                            <Eye className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDownloadFile(file)}
-                            className="p-1.5 rounded-lg border border-[#334155] hover:border-emerald-500 text-emerald-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer"
-                            title="Download File"
+                            <Avatar name={emp.fullName} size="sm" />
+                            <div>
+                              <span className="font-bold text-white text-xs group-hover:text-[#60A5FA] group-hover:underline transition-colors block">
+                                {emp.fullName}
+                              </span>
+                              <span className="text-[10px] text-[#94A3B8]">
+                                {emp.email}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Employee ID */}
+                        <td className="py-3 px-4">
+                          <span className="font-mono text-xs font-semibold text-[#60A5FA] bg-blue-500/10 px-2 py-0.5 rounded-md border border-blue-500/20">
+                            {emp.employeeCode}
+                          </span>
+                        </td>
+
+                        {/* Department */}
+                        <td className="py-3 px-4 text-[#CBD5E1]">
+                          <span className="text-xs font-medium">{emp.departmentName || 'General'}</span>
+                        </td>
+
+                        {/* Designation */}
+                        <td className="py-3 px-4 text-[#CBD5E1]">
+                          <span className="text-xs">{emp.designation}</span>
+                        </td>
+
+                        {/* Documents Submitted */}
+                        <td className="py-3 px-4 text-center">
+                          <span
+                            className={`inline-flex items-center justify-center font-bold text-xs px-2.5 py-0.5 rounded-full ${
+                              docsCount > 0
+                                ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
+                                : 'bg-slate-700/30 text-slate-400 border border-slate-700'
+                            }`}
                           >
-                            <Download className="w-3.5 h-3.5" />
-                          </button>
-                          {canManage && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (
-                                  window.confirm(
-                                    `Are you sure you want to delete ${file.fileName} for ${file.employeeName}?`
-                                  )
-                                ) {
-                                  onDeleteFile(file.id);
-                                }
-                              }}
-                              className="p-1.5 rounded-lg border border-[#334155] hover:border-rose-500 text-rose-400 hover:text-white hover:bg-rose-500/10 transition-colors cursor-pointer"
-                              title="Delete File"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            {docsCount}
+                          </span>
+                        </td>
+
+                        {/* Document Categories */}
+                        <td className="py-3 px-4">
+                          {categories.length > 0 ? (
+                            <div className="flex flex-wrap gap-1 max-w-xs">
+                              {categories.map((cat) => (
+                                <span
+                                  key={cat}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${getCategoryBadge(
+                                    cat
+                                  )}`}
+                                >
+                                  {cat}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-[#64748B] italic">No categories</span>
                           )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+
+                        {/* Submission Status */}
+                        <td className="py-3 px-4">
+                          {status === 'Verified' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>Verified</span>
+                            </span>
+                          ) : status === 'Submitted' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/25">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>Submitted</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/25">
+                              <Clock className="w-3 h-3" />
+                              <span>Pending</span>
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Actions */}
+                        <td className="py-3 px-4 text-right">
+                          <button
+                            type="button"
+                            onClick={() => setActiveEmployeeId(emp.id)}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-xl transition-colors shadow-xs cursor-pointer"
+                          >
+                            <span>View Documents</span>
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
