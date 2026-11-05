@@ -2214,4 +2214,103 @@ export function matchesPhoneDigitsPartial(order: any, query: string): boolean {
   return oPhone.includes(qPhone) || rawPhoneDigits.includes(qPhone);
 }
 
+// ============================================================================
+// 12. PRODUCT NAME NORMALIZATION & CANONICAL GROUPING
+// ============================================================================
 
+export const KNOWN_CANONICAL_PRODUCT_NAMES: Record<string, string> = {
+  // Individual Products
+  'diy detergent liquid': 'DIY Detergent Liquid',
+  'diy dishwash liquid': 'DIY Dishwash Liquid',
+  'diy fabric conditioner': 'DIY Fabric Conditioner',
+  'magic sponge 6 pieces': 'Magic Sponge - 6 Pieces',
+  'diy floor cleaner': 'DIY Floor Cleaner',
+  'diy kitchen cleaner': 'DIY Kitchen Cleaner',
+  'diy bbc cleaner - brass bronze copper cleaner': 'DIY BBC Cleaner — Brass, Bronze & Copper Cleaner',
+  'diy handwash liquid': 'DIY Handwash Liquid',
+  'bamboo kitchen towel': 'Bamboo Kitchen Towel',
+  'diy car shampoo': 'DIY Car Shampoo',
+  'diy glass cleaner': 'DIY Glass Cleaner',
+  'diy bike shampoo': 'DIY Bike Shampoo',
+  'snow foam sprayer': 'Snow Foam Sprayer',
+
+  // Combos
+  'diy home care combo': 'DIY Home care Combo',
+  'diy complete care combo': 'DIY Complete Care Combo',
+  'diy detegent combo': 'DIY Detegent Combo',
+  'diy laundry combo': 'DIY Laundry Combo',
+  'magic complete care combo': 'Magic Complete Care Combo',
+  'diy dishwash combo': 'DIY Dishwash Combo',
+  'magic home care combo': 'Magic Home Care Combo',
+  'magic sponge combo 12 pieces': 'Magic Sponge Combo - 12 Pieces',
+  '2 diy detegent combo': '2 DIY Detegent Combo',
+  '2 diy dishwash combo': '2 DIY Dishwash Combo',
+  '1 detergent + 1 dishwash + 1 fabric conditioner': '1 Detergent + 1 Dishwash + 1 Fabric Conditioner'
+};
+
+/**
+ * Normalizes product names to group identical products that differ only by:
+ * - Capitalization / Case (e.g. "DIY Detergent Liquid" vs "Diy Detergent Liquid")
+ * - Harmless spacing or punctuation (e.g. multiple spaces, dashes, dashes with or without spaces)
+ * - Promo tags (e.g. "[Special Offer] Magic Sponge (6p)")
+ * - Equivalent pack size representations (e.g. "(6p) - 6 Pieces", "(6p)", "- 6 Pieces", "6 p")
+ * 
+ * Preserves meaningful differences like distinct pack counts (6 Pieces vs 12 Pieces)
+ * and distinct combos vs single items.
+ */
+export function normalizeProductGroupingKey(rawName?: string, rawCode?: string): string {
+  if (!rawName && !rawCode) return 'unspecified';
+  
+  let t = String(rawName || rawCode || 'Unspecified').trim();
+
+  // 1. Remove marketing / promo bracket prefixes
+  t = t.replace(/^\[\s*special offer\s*\]\s*/i, '');
+  t = t.replace(/^\(\s*special offer\s*\)\s*/i, '');
+  t = t.replace(/^\[\s*offer\s*\]\s*/i, '');
+  t = t.replace(/^\(\s*offer\s*\)\s*/i, '');
+
+  // 2. Normalize em-dash / en-dash / Unicode dash characters and repeated spaces
+  t = t.replace(/[\u2013\u2014\u2015\u2212\x97]/g, '-');
+  t = t.replace(/\s*-\s*/g, ' - ');
+
+  // 3. Normalize equivalent pack size representations:
+  // e.g. "(6p) - 6 Pieces" -> " 6 pieces "
+  t = t.replace(/\(\s*(\d+)\s*p(?:cs|ieces)?\s*\)\s*-\s*\1\s*(?:pieces|pcs)/gi, ' $1 pieces ');
+  // e.g. "(6p)" -> " 6 pieces "
+  t = t.replace(/\(\s*(\d+)\s*p(?:cs|ieces)?\s*\)/gi, ' $1 pieces ');
+  // e.g. "- 6 Pieces" -> " 6 pieces "
+  t = t.replace(/-\s*(\d+)\s*(?:pieces|pcs|p)\b/gi, ' $1 pieces ');
+  // e.g. "6 pcs" -> " 6 pieces "
+  t = t.replace(/\b(\d+)\s*(?:pieces|pcs)\b/gi, ' $1 pieces ');
+
+  // 4. Clean up spaces and punctuation
+  t = t.replace(/\s+/g, ' ').trim();
+  t = t.replace(/\s*-\s*$/, '');
+  t = t.replace(/^\s*-\s*/, '');
+  t = t.replace(/\s*-\s*/g, ' - ');
+
+  // 5. Build strict lowercase alphanumeric key
+  let key = t.toLowerCase();
+  key = key.replace(/[^a-z0-9\+\-\s]/g, '');
+  key = key.replace(/\s+/g, ' ').trim();
+  return key;
+}
+
+/**
+ * Resolves a readable canonical display name for a product or combo.
+ * Checks known master catalog, or falls back to cleaned readable name.
+ */
+export function resolveCanonicalProductName(rawName?: string, rawCode?: string): string {
+  const key = normalizeProductGroupingKey(rawName, rawCode);
+  if (KNOWN_CANONICAL_PRODUCT_NAMES[key]) {
+    return KNOWN_CANONICAL_PRODUCT_NAMES[key];
+  }
+
+  // Fallback: clean rawName
+  let clean = String(rawName || rawCode || 'Unspecified').trim();
+  clean = clean.replace(/^\[\s*special offer\s*\]\s*/i, '');
+  clean = clean.replace(/^\(\s*special offer\s*\)\s*/i, '');
+  clean = clean.replace(/[\u2013\u2014\u2015\u2212\x97]/g, '—');
+  clean = clean.replace(/\s+/g, ' ').trim();
+  return clean;
+}

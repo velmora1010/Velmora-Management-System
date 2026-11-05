@@ -24,6 +24,7 @@ import {
 } from 'recharts';
 import toast from 'react-hot-toast';
 import type { WebsiteConsolidatedOrder, WebsiteOrderItem } from '../types';
+import { normalizeProductGroupingKey, resolveCanonicalProductName } from '../websiteSalesUtils';
 
 export interface TopPerformingProductsCombosProps {
   orders: WebsiteConsolidatedOrder[];
@@ -102,8 +103,8 @@ export const TopPerformingProductsCombos: React.FC<TopPerformingProductsCombosPr
 
   // 1. Process All Orders Line Items
   const { productsList, combosList, totalProductsRevenue, totalCombosRevenue, totalAllRevenue } = useMemo(() => {
-    const pMap = new Map<string, { qty: number; rev: number; ordersSet: Set<string>; ordersList: WebsiteConsolidatedOrder[] }>();
-    const cMap = new Map<string, { qty: number; rev: number; ordersSet: Set<string>; ordersList: WebsiteConsolidatedOrder[] }>();
+    const pMap = new Map<string, { canonicalName: string; qty: number; rev: number; ordersSet: Set<string>; ordersList: WebsiteConsolidatedOrder[] }>();
+    const cMap = new Map<string, { canonicalName: string; qty: number; rev: number; ordersSet: Set<string>; ordersList: WebsiteConsolidatedOrder[] }>();
 
     let sumProdRev = 0;
     let sumComboRev = 0;
@@ -126,7 +127,9 @@ export const TopPerformingProductsCombos: React.FC<TopPerformingProductsCombosPr
           const rawName = (it.product_name || 'Unspecified').trim();
           if (!rawName) return;
 
-          const isCombo = isComboItem(rawName);
+          const groupKey = normalizeProductGroupingKey(rawName, it.product_code);
+          const canonicalName = resolveCanonicalProductName(rawName, it.product_code);
+          const isCombo = isComboItem(rawName) || isComboItem(canonicalName);
           const targetMap = isCombo ? cMap : pMap;
 
           const qty = Number(it.quantity) || 1;
@@ -137,10 +140,10 @@ export const TopPerformingProductsCombos: React.FC<TopPerformingProductsCombosPr
           if (isCombo) sumComboRev += rev;
           else sumProdRev += rev;
 
-          if (!targetMap.has(rawName)) {
-            targetMap.set(rawName, { qty: 0, rev: 0, ordersSet: new Set(), ordersList: [] });
+          if (!targetMap.has(groupKey)) {
+            targetMap.set(groupKey, { canonicalName, qty: 0, rev: 0, ordersSet: new Set(), ordersList: [] });
           }
-          const entry = targetMap.get(rawName)!;
+          const entry = targetMap.get(groupKey)!;
           entry.qty += qty;
           entry.rev += rev;
           if (!entry.ordersSet.has(orderKey)) {
@@ -153,7 +156,9 @@ export const TopPerformingProductsCombos: React.FC<TopPerformingProductsCombosPr
         const rawName = (o.product_name || 'Unspecified').trim();
         if (!rawName || rawName === 'N/A') return;
 
-        const isCombo = isComboItem(rawName);
+        const groupKey = normalizeProductGroupingKey(rawName);
+        const canonicalName = resolveCanonicalProductName(rawName);
+        const isCombo = isComboItem(rawName) || isComboItem(canonicalName);
         const targetMap = isCombo ? cMap : pMap;
 
         const qty = Number(o.total_quantity) || 1;
@@ -162,10 +167,10 @@ export const TopPerformingProductsCombos: React.FC<TopPerformingProductsCombosPr
         if (isCombo) sumComboRev += rev;
         else sumProdRev += rev;
 
-        if (!targetMap.has(rawName)) {
-          targetMap.set(rawName, { qty: 0, rev: 0, ordersSet: new Set(), ordersList: [] });
+        if (!targetMap.has(groupKey)) {
+          targetMap.set(groupKey, { canonicalName, qty: 0, rev: 0, ordersSet: new Set(), ordersList: [] });
         }
-        const entry = targetMap.get(rawName)!;
+        const entry = targetMap.get(groupKey)!;
         entry.qty += qty;
         entry.rev += rev;
         if (!entry.ordersSet.has(orderKey)) {
@@ -178,13 +183,13 @@ export const TopPerformingProductsCombos: React.FC<TopPerformingProductsCombosPr
     const sumAllRev = sumProdRev + sumComboRev;
 
     const buildItemsList = (map: typeof pMap, isComboTab: boolean, tabTotal: number): ProductPerformanceItem[] => {
-      return Array.from(map.entries()).map(([name, data]) => {
+      return Array.from(map.entries()).map(([key, data]) => {
         const avgPrice = data.qty > 0 ? data.rev / data.qty : 0;
         const contributionPercent = tabTotal > 0 ? (data.rev / tabTotal) * 100 : 0;
         const overallContributionPercent = sumAllRev > 0 ? (data.rev / sumAllRev) * 100 : 0;
 
         return {
-          name,
+          name: data.canonicalName,
           isCombo: isComboTab,
           totalQuantity: data.qty,
           totalRevenue: data.rev,
