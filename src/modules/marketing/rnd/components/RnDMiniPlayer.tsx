@@ -167,9 +167,16 @@ export const RnDMiniPlayer: React.FC<RnDMiniPlayerProps> = ({
             </span>
           </div>
 
-          <div className="mt-2 pt-2 border-t border-[#1E293B] flex items-center justify-between text-[11px]">
+          <div className={`mt-2 pt-2 border-t border-[#1E293B] flex ${isPaused ? 'flex-col gap-1 items-start' : 'items-center justify-between'} text-[11px]`}>
             <span className="text-[#64748B]">Status:</span>
-            <span className="text-[#94A3B8] font-medium truncate max-w-[200px]" title={stageText}>
+            <span
+              className={
+                isPaused
+                  ? 'text-[#F59E0B] font-medium leading-snug whitespace-normal break-words w-full'
+                  : 'text-[#94A3B8] font-medium truncate max-w-[200px]'
+              }
+              title={stageText}
+            >
               {stageText}
             </span>
           </div>

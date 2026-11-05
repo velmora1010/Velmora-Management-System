@@ -241,7 +241,28 @@ console.log('=== RUNTIME VERIFICATION SUITE: R&D MINI PLAYER ===');
     idleElem.props.onRetryFailed();
   }
   assert.strictEqual(retryTriggered, true, 'onRetryFailed must be callable');
-  console.log('  -> Paused state and Retry Failed callback verified successfully.');
+
+  // Verify occlusion_suspected pause message renders cleanly in the component output tree
+  const occlusionPausedProps: RnDMiniPlayerProps = {
+    ...pausedProps,
+    isPaused: true,
+    researchState: {
+      profileCode: 'HIS003',
+      username: 'covered_creator',
+      statusText: 'Paused — Instagram Companion window appears to be covered. Bring it to the front to continue.'
+    }
+  };
+  const renderedTree = (RnDMiniPlayer as any)(occlusionPausedProps);
+  const treeJson = JSON.stringify(renderedTree);
+  assert.ok(
+    treeJson.includes('Paused — Instagram Companion window appears to be covered. Bring it to the front to continue.'),
+    'Mini Player rendered output must display the full occlusion_suspected pause message'
+  );
+  assert.ok(
+    treeJson.includes('whitespace-normal break-words'),
+    'Mini Player must wrap the pause reason without truncating when isPaused is true'
+  );
+  console.log('  -> Paused state (minimized + occlusion_suspected) and Retry Failed callback verified successfully.');
 }
 
 console.log('PASS: All RnDMiniPlayer tests passed successfully.');

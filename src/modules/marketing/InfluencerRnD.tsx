@@ -400,7 +400,27 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
         'RESEARCH_RETRYING': 'Not enough valid reel views, retrying...',
       };
 
+      if (type === 'RESEARCH_PAUSED') {
+        setIsResearchPaused(true);
+        const pauseMsg =
+          event.payload?.statusText ||
+          (event.payload?.reason === 'occlusion_suspected'
+            ? 'Paused — Instagram Companion window appears to be covered. Bring it to the front to continue.'
+            : 'Paused — Instagram window inactive');
+        setResearchState(prev => (prev ? { ...prev, statusText: pauseMsg, error: null } : null));
+        return;
+      }
+
+      if (type === 'RESEARCH_RESUMED') {
+        setIsResearchPaused(false);
+        setResearchState(prev =>
+          prev ? { ...prev, statusText: 'Resumed — continuing reel discovery...', error: null } : null
+        );
+        return;
+      }
+
       if (textMap[type]) {
+        setIsResearchPaused(false);
         setResearchState(prev => prev ? { ...prev, statusText: textMap[type], error: null } : null);
       }
     });
@@ -440,6 +460,7 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
       for (let i = 0; i < targetProfiles.length; i++) {
         const profile = targetProfiles[i];
 
+        setIsResearchPaused(false);
         setSelectedProfileCode(profile.influencerCode);
         setBatchProgress({
           currentIndex: completedCount + partialCount + failedCount + 1,
@@ -485,6 +506,7 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
             profile.influencerCode,
             profile.username
           );
+          setIsResearchPaused(false);
 
           const isPartial = result.status === 'partial' || result.status === 'reels_not_enough' || (result.validViewCountsCount !== undefined && result.validViewCountsCount < 15);
           const isFailed = result.status === 'reels_not_found' || result.status === 'failed';
@@ -558,6 +580,7 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
           });
 
         } catch (profileErr: any) {
+          setIsResearchPaused(false);
           failedCount++;
           const errorMsg = profileErr?.message || 'An error occurred during research.';
           const failedResult: ProfileResearchResult = {
@@ -1421,6 +1444,7 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
                 setCurrentJob(null);
                 setBatchProgress(null);
                 setIsBatchRunning(false);
+                setIsResearchPaused(false);
                 setResearchResults({});
                 setSelectedProfileCode(null);
                 setResearchState(null);
@@ -1495,6 +1519,18 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
                     </div>
                   </div>
                 </div>
+
+                {isBatchRunning && isResearchPaused && (
+                  <div className="p-3.5 bg-[#F59E0B]/15 border border-[#F59E0B]/40 rounded-xl text-[#F59E0B] text-xs flex items-start gap-2.5 animate-pulse">
+                    <Pause size={16} className="mt-0.5 shrink-0" />
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-bold">Research Paused</span>
+                      <span className="text-[#FDE68A]">
+                        {researchState?.statusText || 'Paused — Instagram Companion window appears to be covered. Bring it to the front to continue.'}
+                      </span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Progress Bar & Sub-indicators */}
                 <div className="space-y-1.5">
@@ -1886,6 +1922,8 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
           researchState={researchState}
           isEngineConnected={isEngineConnected}
           isPipMode={isPipActive}
+          isPaused={isResearchPaused}
+          onRetryFailed={failedProfilesCount > 0 ? handleRetryFailed : undefined}
           onFocusMainApp={handleFocusMainApp}
           onClose={handleCloseMiniPlayer}
         />,
