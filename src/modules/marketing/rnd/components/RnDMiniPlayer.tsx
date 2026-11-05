@@ -6,6 +6,8 @@ import {
   X,
   Loader2,
   CheckCircle2,
+  Pause,
+  RotateCcw,
   AlertTriangle,
   AlertCircle,
   Layers,
@@ -32,6 +34,8 @@ export interface RnDMiniPlayerProps {
   } | null;
   isEngineConnected: boolean;
   isPipMode: boolean;
+  isPaused?: boolean;
+  onRetryFailed?: () => void;
   onFocusMainApp: () => void;
   onClose: () => void;
 }
@@ -63,6 +67,8 @@ export const RnDMiniPlayer: React.FC<RnDMiniPlayerProps> = ({
   researchState,
   isEngineConnected,
   isPipMode,
+  isPaused,
+  onRetryFailed,
   onFocusMainApp,
   onClose,
 }) => {
@@ -130,7 +136,12 @@ export const RnDMiniPlayer: React.FC<RnDMiniPlayerProps> = ({
         <div className="bg-[#111827] border border-[#293548] rounded-xl p-3 shadow-sm">
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-[10px] font-semibold text-[#64748B] uppercase tracking-wider">Current Influencer</span>
-            {isBatchRunning ? (
+            {isPaused ? (
+              <span className="flex items-center gap-1 text-[10px] font-medium text-[#F59E0B] bg-[#F59E0B]/15 px-2 py-0.5 rounded-full border border-[#F59E0B]/30 animate-pulse">
+                <Pause size={10} />
+                <span>Paused</span>
+              </span>
+            ) : isBatchRunning ? (
               <span className="flex items-center gap-1 text-[10px] font-medium text-[#3B82F6] bg-[#3B82F6]/10 px-2 py-0.5 rounded-full border border-[#3B82F6]/20">
                 <Loader2 size={10} className="animate-spin" />
                 <span>Active</span>

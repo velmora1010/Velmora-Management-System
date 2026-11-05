@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, UserSearch, Globe, Camera, CheckCircle2, XCircle, AlertCircle, Activity, AlertTriangle, ExternalLink, X, Code, Layers, Eye, Loader2, Clock, Info } from 'lucide-react';
+import { ArrowLeft, UserSearch, Globe, Camera, CheckCircle2, XCircle, AlertCircle, Activity, AlertTriangle, ExternalLink, X, Code, Layers, Eye, Loader2, Clock, Info, Pause, RotateCcw } from 'lucide-react';
 import { rndExtensionService } from './rnd/services/rndExtensionService';
 import { ExtensionConnectionState, InstagramSessionState, DiagnosticResult } from './rnd/types/extensionTypes';
 import { ResearchJob, DiscoveredReel, ProfileResearchResult, ResearchInputProfile } from './rnd/types/rndTypes';
@@ -84,6 +84,7 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
 
   // Batch Research states
   const [isBatchRunning, setIsBatchRunning] = useState<boolean>(false);
+  const [isResearchPaused, setIsResearchPaused] = useState<boolean>(false);
   const [selectedProfileCode, setSelectedProfileCode] = useState<string | null>(null);
   const [researchResults, setResearchResults] = useState<Record<string, ProfileResearchResult>>({});
   const [batchProgress, setBatchProgress] = useState<{
@@ -107,6 +108,58 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
   const [diagTargetUser, setDiagTargetUser] = useState<string>('');
   const [isDiagModalOpen, setIsDiagModalOpen] = useState(false);
   const [manualUsernameInput, setManualUsernameInput] = useState('');
+
+  // Restore persisted batch session on mount
+  useEffect(() => {
+    try {
+      const savedJob = localStorage.getItem('velmora_rnd_current_job');
+      const savedResults = localStorage.getItem('velmora_rnd_results');
+      const savedProgress = localStorage.getItem('velmora_rnd_progress');
+      if (savedJob) {
+        const parsedJob = JSON.parse(savedJob);
+        setCurrentJob(parsedJob);
+      }
+      if (savedResults) {
+        const parsedResults = JSON.parse(savedResults);
+        setResearchResults(parsedResults);
+      }
+      if (savedProgress) {
+        const parsedProgress = JSON.parse(savedProgress);
+        setBatchProgress(parsedProgress);
+        if (parsedProgress.currentProfileCode) {
+          setSelectedProfileCode(parsedProgress.currentProfileCode);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to restore R&D session from localStorage', e);
+    }
+  }, []);
+
+  // Sync session state to localStorage
+  useEffect(() => {
+    if (currentJob) {
+      try {
+        localStorage.setItem('velmora_rnd_current_job', JSON.stringify(currentJob));
+      } catch (e) {}
+    }
+  }, [currentJob]);
+
+  useEffect(() => {
+    if (researchResults && Object.keys(researchResults).length > 0) {
+      try {
+        localStorage.setItem('velmora_rnd_results', JSON.stringify(researchResults));
+      } catch (e) {}
+    }
+  }, [researchResults]);
+
+  useEffect(() => {
+    if (batchProgress) {
+      try {
+        localStorage.setItem('velmora_rnd_progress', JSON.stringify(batchProgress));
+      } catch (e) {}
+    }
+  }, [batchProgress]);
+
 
   useEffect(() => {
     return () => {
@@ -354,31 +407,43 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
     return unsubscribe;
   }, []);
 
-  const handleStartResearch = async () => {
+  const handleStartResearch = async (options?: { retryOnlyFailed?: boolean }) => {
     if (!currentJob || isBatchRunning) return;
 
     // Eligible profiles: all rows that are not invalid (preserves Excel order)
-    const eligibleProfiles = currentJob.profiles.filter(p => p.validationStatus !== 'invalid');
-    if (eligibleProfiles.length === 0) {
+    const allEligible = currentJob.profiles.filter(p => p.validationStatus !== 'invalid');
+    if (allEligible.length === 0) {
       setResearchMessage("No valid profiles to research.");
       return;
     }
 
+    const targetProfiles = options?.retryOnlyFailed
+      ? allEligible.filter(p => p.researchStatus !== 'completed')
+      : allEligible;
+
+    if (targetProfiles.length === 0) {
+      setResearchMessage("All eligible profiles are already completed.");
+      return;
+    }
+
     setIsBatchRunning(true);
+    setIsResearchPaused(false);
     setResearchMessage(null);
 
-    let completedCount = 0;
+    let completedCount = options?.retryOnlyFailed
+      ? allEligible.filter(p => p.researchStatus === 'completed').length
+      : 0;
     let partialCount = 0;
     let failedCount = 0;
 
     try {
-      for (let i = 0; i < eligibleProfiles.length; i++) {
-        const profile = eligibleProfiles[i];
+      for (let i = 0; i < targetProfiles.length; i++) {
+        const profile = targetProfiles[i];
 
         setSelectedProfileCode(profile.influencerCode);
         setBatchProgress({
-          currentIndex: i + 1,
-          totalEligible: eligibleProfiles.length,
+          currentIndex: completedCount + partialCount + failedCount + 1,
+          totalEligible: allEligible.length,
           currentProfileCode: profile.influencerCode,
           currentUsername: profile.username,
           completedCount,
@@ -543,8 +608,8 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
 
         // Update batch progress after each profile finishes
         setBatchProgress({
-          currentIndex: i + 1,
-          totalEligible: eligibleProfiles.length,
+          currentIndex: Math.min(allEligible.length, completedCount + partialCount + failedCount),
+          totalEligible: allEligible.length,
           currentProfileCode: profile.influencerCode,
           currentUsername: profile.username,
           completedCount,
@@ -553,14 +618,26 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
         });
 
         // Let the browser and Instagram tab settle before transitioning to the next profile
-        if (i < eligibleProfiles.length - 1) {
+        if (i < targetProfiles.length - 1) {
           await new Promise(r => setTimeout(r, 1000));
         }
       }
     } finally {
       setIsBatchRunning(false);
+      setIsResearchPaused(false);
     }
   };
+
+  const handleRetryFailed = () => {
+    handleStartResearch({ retryOnlyFailed: true });
+  };
+
+  const failedProfilesCount = useMemo(() => {
+    if (!currentJob) return 0;
+    const hasAnyRun = currentJob.profiles.some(p => p.researchStatus && p.researchStatus !== 'pending');
+    if (!hasAnyRun && !batchProgress) return 0;
+    return currentJob.profiles.filter(p => p.validationStatus !== 'invalid' && p.researchStatus !== 'completed').length;
+  }, [currentJob, batchProgress]);
 
   const activeCardData = useMemo(() => {
     if (!selectedProfileCode) return researchState;

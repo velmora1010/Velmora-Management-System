@@ -205,4 +205,82 @@ console.log('=== TEST SUITE: rndExtensionService Defensive Error Handling ===');
   console.log('  -> Queue recovery verified: Profile 2 & 3 successfully completed sequentially after Profile 1 timeout.');
 }
 
+// Test 5: Pause and Resume timeout freeze and heartbeat handling
+{
+  console.log('[Test 5] Verifying timeout freezing on RESEARCH_PAUSED and restart on RESEARCH_RESUMED...');
+
+  const testId = 'test_req_pause_' + Math.random().toString(36).substring(2, 9);
+  let timerFired = false;
+  let rejectedError: any = null;
+  let resolvedData: any = null;
+
+  // Simulate a pending START_PROFILE_RESEARCH with a 80ms timeout
+  const mockTimeoutId = setTimeout(() => {
+    timerFired = true;
+  }, 80);
+
+  (rndExtensionService as any).pendingRequests.set(testId, {
+    resolve: (val: any) => { resolvedData = val; },
+    reject: (err: any) => { rejectedError = err; },
+    timeoutId: mockTimeoutId,
+    type: 'START_PROFILE_RESEARCH',
+    timeoutMs: 80
+  });
+
+  // 1. Simulate RESEARCH_PAUSED event arriving at 30ms (before the 80ms timeout fires)
+  await new Promise(r => setTimeout(r, 30));
+  (rndExtensionService as any).handleIncomingMessage({
+    source: 'VELMORA_RND_EXTENSION',
+    isEvent: true,
+    type: 'RESEARCH_PAUSED',
+    payload: { statusText: 'Paused — Instagram window inactive' }
+  });
+
+  const reqItem = (rndExtensionService as any).pendingRequests.get(testId);
+  assert.ok(reqItem, 'Pending request must still exist');
+  assert.ok(!reqItem.timeoutId, 'timeoutId must be cleared (frozen) during pause');
+
+  // 2. Wait 100ms (total 130ms, which exceeds original 80ms timeout). Timer must NOT fire!
+  await new Promise(r => setTimeout(r, 100));
+  assert.strictEqual(timerFired, false, 'Timer must not have fired while paused');
+  assert.strictEqual(rejectedError, null, 'Request must not have been rejected while paused');
+
+  // 3. Simulate RESEARCH_RESUMED event arriving
+  (rndExtensionService as any).handleIncomingMessage({
+    source: 'VELMORA_RND_EXTENSION',
+    isEvent: true,
+    type: 'RESEARCH_RESUMED',
+    payload: { pausedDurationMs: 100 }
+  });
+
+  const resumedReqItem = (rndExtensionService as any).pendingRequests.get(testId);
+  assert.ok(resumedReqItem.timeoutId !== null, 'timeoutId must be restored upon resume');
+
+  // 4. Simulate active progress event (REELS_DISCOVERED) resetting the timer
+  const oldTimer = resumedReqItem.timeoutId;
+  await new Promise(r => setTimeout(r, 20));
+  (rndExtensionService as any).handleIncomingMessage({
+    source: 'VELMORA_RND_EXTENSION',
+    isEvent: true,
+    type: 'REELS_DISCOVERED',
+    payload: { discovered: 15, validViews: 12 }
+  });
+  const refreshedReqItem = (rndExtensionService as any).pendingRequests.get(testId);
+  assert.notStrictEqual(refreshedReqItem.timeoutId, oldTimer, 'Heartbeat event must reset timeout timer');
+
+  // 5. Complete request normally
+  (rndExtensionService as any).handleIncomingMessage({
+    source: 'VELMORA_RND_EXTENSION',
+    id: testId,
+    type: 'PROFILE_COMPLETED',
+    payload: { influencerCode: 'HIS_PAUSE_TEST', status: 'completed' }
+  });
+
+  assert.ok(resolvedData, 'Request must resolve upon completion');
+  assert.strictEqual(resolvedData.payload.influencerCode, 'HIS_PAUSE_TEST');
+  assert.strictEqual((rndExtensionService as any).pendingRequests.has(testId), false);
+
+  console.log('  -> Timeout freeze on RESEARCH_PAUSED, restart on RESEARCH_RESUMED, and heartbeat reset verified.');
+}
+
 console.log('PASS: All rndExtensionService verification checks passed successfully.');

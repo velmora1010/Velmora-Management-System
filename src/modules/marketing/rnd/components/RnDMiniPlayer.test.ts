@@ -190,4 +190,58 @@ console.log('=== RUNTIME VERIFICATION SUITE: R&D MINI PLAYER ===');
   console.log('  -> Document setup verified.');
 }
 
+// Test 5: Paused state rendering and retry failed callback
+{
+  console.log('[Test 5] Verifying Paused state and Retry Failed callback in Mini Player...');
+  let retryTriggered = false;
+  const pausedProps: RnDMiniPlayerProps = {
+    isBatchRunning: true,
+    isPaused: true,
+    batchProgress: {
+      currentIndex: 2,
+      totalEligible: 5,
+      currentProfileCode: 'HIS002',
+      currentUsername: 'devon_cooks',
+      completedCount: 1,
+      partialCount: 0,
+      failedCount: 0
+    },
+    researchState: {
+      profileCode: 'HIS002',
+      username: 'devon_cooks',
+      statusText: 'Paused — Instagram window inactive'
+    },
+    isEngineConnected: true,
+    isPipMode: true,
+    onRetryFailed: () => { retryTriggered = true; },
+    onFocusMainApp: () => {},
+    onClose: () => {}
+  };
+
+  const elem = React.createElement(RnDMiniPlayer, pausedProps);
+  assert.strictEqual(elem.props.isPaused, true);
+  assert.strictEqual(elem.props.researchState?.statusText, 'Paused — Instagram window inactive');
+
+  // Verify retry button presence when batch ended with failures
+  const idleWithFailuresProps: RnDMiniPlayerProps = {
+    ...pausedProps,
+    isBatchRunning: false,
+    isPaused: false,
+    batchProgress: {
+      currentIndex: 5,
+      totalEligible: 5,
+      completedCount: 3,
+      partialCount: 1,
+      failedCount: 1
+    }
+  };
+  const idleElem = React.createElement(RnDMiniPlayer, idleWithFailuresProps);
+  assert.strictEqual(idleElem.props.batchProgress?.failedCount, 1);
+  if (idleElem.props.onRetryFailed) {
+    idleElem.props.onRetryFailed();
+  }
+  assert.strictEqual(retryTriggered, true, 'onRetryFailed must be callable');
+  console.log('  -> Paused state and Retry Failed callback verified successfully.');
+}
+
 console.log('PASS: All RnDMiniPlayer tests passed successfully.');

@@ -197,11 +197,20 @@ async function handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payloa
     if (sender) {
       sendEventToSender(sender, 'RESEARCH_PAUSED', {
         ...payload,
-        reason: 'companion_window_minimized'
+        reason: 'companion_window_inactive',
+        statusText: 'Paused — Instagram window inactive',
+        checkpoint: stage,
+        isPaused: true
       });
     }
 
-    const MAX_PAUSE_MS = 35000;
+    // Configurable inactivity timeout: default 15 minutes (900,000ms), customizable via payload
+    const MAX_PAUSE_MS = typeof payload?.inactivityTimeoutMs === 'number' && payload.inactivityTimeoutMs > 0
+      ? payload.inactivityTimeoutMs
+      : 15 * 60 * 1000;
+
+    let lastHeartbeatTs = Date.now();
+
     while (true) {
       await new Promise(r => setTimeout(r, 600));
       if (companionWindowClosedByUser) {
@@ -223,16 +232,34 @@ async function handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payloa
         if (sender) {
           sendEventToSender(sender, 'RESEARCH_RESUMED', {
             ...payload,
-            pausedDurationMs: pausedDuration
+            pausedDurationMs: pausedDuration,
+            checkpoint: stage,
+            isPaused: false
           });
         }
         // Give browser 1000ms after restore for rendering pipeline to stabilize
         await new Promise(r => setTimeout(r, 1000));
         break;
       }
+
+      // Heartbeat event every 5 seconds so client UI and Mini Player stay informed of paused duration
+      if (Date.now() - lastHeartbeatTs >= 5000) {
+        lastHeartbeatTs = Date.now();
+        if (sender) {
+          sendEventToSender(sender, 'RESEARCH_PAUSED', {
+            ...payload,
+            reason: 'companion_window_inactive',
+            statusText: 'Paused — Instagram window inactive',
+            checkpoint: stage,
+            isPaused: true,
+            pausedDurationMs: Date.now() - pauseStartTs
+          });
+        }
+      }
+
       if (Date.now() - pauseStartTs > MAX_PAUSE_MS) {
         logBoundedDiag('pause_timeout_exceeded', normalizedUser, { winId: companionWindowId, pauseDurationMs: Date.now() - pauseStartTs });
-        throw new Error('COMPANION_WINDOW_MINIMIZED_TIMEOUT: Instagram research companion window remained minimized for over 35 seconds. Please keep the companion window open during research.');
+        throw new Error(`COMPANION_WINDOW_INACTIVITY_TIMEOUT: Instagram research companion window remained inactive for over ${Math.round(MAX_PAUSE_MS / 60000)} minutes.`);
       }
     }
   }
@@ -1706,6 +1733,9 @@ async function executeProfileResearchOnTab(payload, sender, normalizedUser, star
   const { jobId, influencerCode, username } = payload;
   const targetReelsUrl = `https://www.instagram.com/${normalizedUser}/reels/`;
 
+  // 0. Check companion window state before starting research on profile: pause safely if minimized
+  await handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, 'profile_start');
+
   // 1. Acquire a verified, live Instagram tab (or create one if none exists)
   const selectedTab = await acquireOrCreateInstagramTab(normalizedUser, 'startProfileResearch', forceNewTab);
   let igTabId = selectedTab.id;
@@ -2169,9 +2199,9 @@ async function startProfileResearch(payload, sender) {
       };
     }
 
-    if (err && String(err.message || '').includes('COMPANION_WINDOW_MINIMIZED_TIMEOUT')) {
-      const timeoutReason = 'Instagram research companion window was minimized for over 35 seconds. Please keep the companion window open during batch research.';
-      logBoundedDiag('research_failed_window_minimized_timeout', normalizedUser, { error: timeoutReason });
+    if (err && (String(err.message || '').includes('COMPANION_WINDOW_MINIMIZED_TIMEOUT') || String(err.message || '').includes('COMPANION_WINDOW_INACTIVITY_TIMEOUT'))) {
+      const timeoutReason = 'Instagram research companion window was inactive for an extended period. Please keep the companion window open during batch research.';
+      logBoundedDiag('research_failed_window_inactive_timeout', normalizedUser, { error: timeoutReason });
       return {
         jobId,
         influencerCode,
@@ -2179,7 +2209,7 @@ async function startProfileResearch(payload, sender) {
         verifiedUsername: normalizedUser,
         finalUrl: targetReelsUrl,
         navigationSuccess: false,
-        pageReadiness: 'companion_window_minimized_timeout',
+        pageReadiness: 'companion_window_inactive_timeout',
         reelAnchorsAtStart: 0,
         followerDisplay: null,
         followerCount: 0,
@@ -2192,7 +2222,7 @@ async function startProfileResearch(payload, sender) {
         rawViewCounts: [],
         missingViewCountsCount: 15,
         status: 'failed',
-        failureStage: 'companion_window_minimized_timeout',
+        failureStage: 'companion_window_inactive_timeout',
         failureReason: timeoutReason,
         error: timeoutReason,
         startedAt: startTs,

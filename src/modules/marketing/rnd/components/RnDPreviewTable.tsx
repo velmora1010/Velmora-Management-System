@@ -8,6 +8,7 @@ import {
   XCircle,
   FileSpreadsheet,
   RefreshCw,
+  RotateCcw,
   Play,
   AlertCircle,
   Activity,
@@ -24,6 +25,8 @@ export interface RnDInputFileSummaryProps {
   job: ResearchJob;
   onReplaceFile: () => void;
   onStartResearch: () => void;
+  onRetryFailed?: () => void;
+  failedCount?: number;
   onRunDiagnostic?: () => void;
   isEngineConnected: boolean;
   isDiagnosing?: boolean;
@@ -34,6 +37,8 @@ export const RnDInputFileSummary: React.FC<RnDInputFileSummaryProps> = ({
   job,
   onReplaceFile,
   onStartResearch,
+  onRetryFailed,
+  failedCount,
   onRunDiagnostic,
   isEngineConnected,
   isDiagnosing,
@@ -107,7 +112,24 @@ export const RnDInputFileSummary: React.FC<RnDInputFileSummaryProps> = ({
             </button>
           )}
 
-          {/* Start Research (primary blue action) */}
+                    {/* Retry Failed */}
+          {onRetryFailed && (failedCount ?? 0) > 0 && (
+            <button
+              type="button"
+              onClick={onRetryFailed}
+              disabled={!isEngineConnected || isDiagnosing || isBatchRunning}
+              className={`px-3.5 py-2 rounded-lg font-medium flex items-center gap-2 text-xs transition-colors border ${
+                !isEngineConnected || isDiagnosing || isBatchRunning
+                  ? 'bg-[#111827] text-[#64748B] border-[#293548] cursor-not-allowed opacity-60'
+                  : 'bg-[#EF4444]/15 hover:bg-[#EF4444]/25 text-[#EF4444] border-[#EF4444]/40 hover:border-[#EF4444]/70 active:scale-[0.98]'
+              }`}
+            >
+              <RotateCcw size={14} className={isBatchRunning ? 'animate-spin' : ''} />
+              <span>Retry Failed ({failedCount})</span>
+            </button>
+          )}
+
+{/* Start Research (primary blue action) */}
           <button
             type="button"
             onClick={onStartResearch}
