@@ -187,7 +187,7 @@ export const DeliveryDelaysView: React.FC<DeliveryDelaysViewProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col gap-4 w-full animate-fade-in select-none">
+    <div className="flex flex-col gap-4 w-full animate-fade-in select-none shrink-0">
       
       {/* 1. TOP ALERT & KPI CARDS BANNER */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -392,7 +392,7 @@ export const DeliveryDelaysView: React.FC<DeliveryDelaysViewProps> = ({
       </div>
 
       {/* 3. SHIPMENTS TABLE */}
-      <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl shadow-xl overflow-hidden flex flex-col flex-1 min-h-[380px]">
+      <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl shadow-xl overflow-hidden flex flex-col shrink-0">
         
         {/* Table Header Info */}
         <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between text-xs text-slate-400 bg-slate-900/50">
@@ -410,7 +410,7 @@ export const DeliveryDelaysView: React.FC<DeliveryDelaysViewProps> = ({
         </div>
 
         {/* Responsive Table Scroll Container */}
-        <div className="flex-1 overflow-x-auto">
+        <div className="w-full overflow-x-auto custom-scrollbar">
           <table className="w-full text-left text-xs border-collapse min-w-[1000px]">
             <thead>
               <tr className="border-b border-slate-800 bg-[#0d1627] text-slate-400 text-[11px] font-bold uppercase tracking-wider">

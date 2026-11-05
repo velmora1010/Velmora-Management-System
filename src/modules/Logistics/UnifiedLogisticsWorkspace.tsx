@@ -2899,7 +2899,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
         {/* Main Table / View Area (Reclaiming full width from previous vertical sidebar) */}
 
-        <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden gap-2.5">
+        <div tabIndex={currentStage === 'delivery_delays' ? 0 : undefined} className={`flex-1 min-w-0 flex flex-col h-full gap-2.5 outline-none ${currentStage === 'delivery_delays' ? 'overflow-y-auto overflow-x-hidden custom-scrollbar pr-1 pb-12' : 'overflow-hidden'}`}>
 
           
 
