@@ -4,6 +4,8 @@ import { useAuth } from '../../../context/AuthContext';
 import { Employee } from '../../../types/hrms';
 import { Badge } from '../../common/Badge';
 import { Avatar } from '../../common/Avatar';
+import { BulkAddEmployeesModal } from '../../modals/BulkAddEmployeesModal';
+import { EmployeeFilesSection } from './EmployeeFilesSection';
 import {
   Search,
   Filter,
@@ -15,6 +17,7 @@ import {
   Building,
   Clock,
   Download,
+  Users,
   MoreVertical,
   Edit2,
   Trash2,
@@ -33,7 +36,8 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
   onEditEmployee,
   onDeleteEmployee,
 }) => {
-  const { employees, departments } = useHRMS();
+  const { employees, departments, employeeFiles, uploadEmployeeFile, deleteEmployeeFile } = useHRMS();
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   const { canManageEmployees } = useAuth();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -160,6 +164,18 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
             >
               <Download className="w-3.5 h-3.5 text-slate-500" />
               <span className="hidden sm:inline">Export CSV</span>
+            </button>
+          )}
+
+          {/* Bulk Add Employees Button (authorized) */}
+          {canManageEmployees && (
+            <button
+              onClick={() => setIsBulkModalOpen(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#CBD5E1] bg-[#1E293B] border border-[#334155] rounded-xl hover:bg-[#334155] hover:text-white transition-all shadow-xs cursor-pointer"
+              title="Bulk Add Employees"
+            >
+              <Users className="w-3.5 h-3.5 text-[#60A5FA]" />
+              <span>Bulk Add Employees</span>
             </button>
           )}
 
@@ -318,6 +334,21 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
           </div>
         </div>
       )}
+
+      {/* Upload Employee Files Section */}
+      <EmployeeFilesSection
+        employees={employees}
+        employeeFiles={employeeFiles}
+        onUploadFile={uploadEmployeeFile}
+        onDeleteFile={deleteEmployeeFile}
+        canManage={canManageEmployees}
+      />
+
+      {/* Bulk Add Employees Modal */}
+      <BulkAddEmployeesModal
+        isOpen={isBulkModalOpen}
+        onClose={() => setIsBulkModalOpen(false)}
+      />
     </div>
   );
 };

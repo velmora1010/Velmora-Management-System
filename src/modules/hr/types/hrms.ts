@@ -336,3 +336,24 @@ export interface PayrollPaymentSchedule {
   auditHistory?: ScheduleAuditEntry[];
 }
 
+// ============================================================================
+// Employee Documentation & Files
+// ============================================================================
+export type EmployeeFileCategory = 'ID Proof' | 'Offer Letter' | 'Resume' | 'Contract' | 'Other';
+
+export interface EmployeeFile {
+  id: string;
+  employeeId: string;
+  employeeCode: string;
+  employeeName: string;
+  fileName: string;
+  fileType: string;
+  fileSize: string;
+  fileSizeBytes?: number;
+  storagePath: string;
+  publicUrl?: string;
+  category: EmployeeFileCategory;
+  uploadStatus: 'Uploaded' | 'Verified' | 'Pending';
+  uploadedBy?: string;
+  uploadedAt: string;
+}

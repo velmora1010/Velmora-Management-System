@@ -6,6 +6,7 @@ import {
   FileText,
   Image as ImageIcon,
   Trash2,
+  Plus,
   AlertCircle,
   CheckCircle2,
   Users,
@@ -136,6 +137,39 @@ export const AssignWorkModal: React.FC<AssignWorkModalProps> = ({
     : [];
 
   const recipientNames = recipients.map((r) => r.fullName).join(', ');
+
+  // Add another task row
+  const handleAddAnotherTask = () => {
+    // Validate current rows before adding
+    let hasError = false;
+    const updated = taskRows.map((row) => {
+      const errors: { title?: string; brief?: string } = {};
+      if (!row.title.trim()) {
+        errors.title = 'Task title is required';
+        hasError = true;
+      }
+      if (!row.brief.trim()) {
+        errors.brief = 'Task brief is required';
+        hasError = true;
+      }
+      return { ...row, errors };
+    });
+
+    if (hasError) {
+      setTaskRows(updated);
+      setGeneralError('Please fill in the required Task Title and Task Brief before adding another task.');
+      return;
+    }
+
+    setGeneralError(null);
+    setTaskRows((prev) => [...prev, createInitialRow()]);
+  };
+
+  // Remove task row
+  const handleRemoveTask = (rowId: string) => {
+    if (taskRows.length <= 1) return;
+    setTaskRows((prev) => prev.filter((r) => r.rowId !== rowId));
+  };
 
   // Update specific field in row
   const handleUpdateRow = (rowId: string, field: 'title' | 'brief' | 'description', value: string) => {
@@ -457,7 +491,17 @@ export const AssignWorkModal: React.FC<AssignWorkModalProps> = ({
                       )}
                     </div>
 
-                    
+                    {taskRows.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveTask(row.rowId)}
+                        className="text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/30 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1 font-medium cursor-pointer"
+                        title="Remove this task"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Remove Task</span>
+                      </button>
+                    )}
                   </div>
 
                   {/* 4-Column Form Fields */}
@@ -614,6 +658,18 @@ export const AssignWorkModal: React.FC<AssignWorkModalProps> = ({
               );
             })}
           </div>
+
+          {/* Quick Add Another Task Row Button */}
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={handleAddAnotherTask}
+              className="w-full py-3 border-2 border-dashed border-[#334155] hover:border-[#60A5FA] rounded-xl text-xs font-bold text-[#60A5FA] hover:text-white bg-[#0F172A]/60 hover:bg-[#1E293B] flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Another Task</span>
+            </button>
+          </div>
         </div>
 
         {/* ================= 4. STICKY MODAL FOOTER ================= */}
@@ -656,8 +712,8 @@ export const AssignWorkModal: React.FC<AssignWorkModalProps> = ({
               <h3 className="text-lg font-bold text-white">Confirm Work Assignment</h3>
               <p className="text-xs text-[#94A3B8] mt-2 leading-relaxed">
                 {isAssignToAll
-                  ? `You are assigning 1 task to all ${recipients.length} employees (${recipientNames}). Do you want to continue?`
-                  : `You are assigning 1 task to ${recipientNames}. Do you want to continue?`}
+                  ? `You are assigning ${taskRows.length} ${taskRows.length === 1 ? 'task' : 'tasks'} to all ${recipients.length} employees (${recipientNames}). Do you want to continue?`
+                  : `You are assigning ${taskRows.length} ${taskRows.length === 1 ? 'task' : 'tasks'} to ${recipientNames}. Do you want to continue?`}
               </p>
             </div>
 
