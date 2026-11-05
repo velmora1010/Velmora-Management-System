@@ -33,7 +33,8 @@ import { OptionItem } from './components/MultiSelectDropdown';
 import { AnalyticsSegmentedControl, SegmentOption } from './components/AnalyticsSegmentedControl';
 import { AnalyticsDonutChart } from './components/AnalyticsDonutChart';
 import { CardMatchingOrdersList } from './components/CardMatchingOrdersList';
-import { CustomerRepeatAnalyticsDashboard } from '../../../components/analytics/CustomerRepeatAnalyticsDashboard';
+import { CustomerRepeatAnalyticsDashboard } from '../../../components/analytics/CustomerRepeatAnalyticsDashboard';
+import { TopPerformingProductsCombos } from './components/TopPerformingProductsCombos';
 import { AnalyticsFullPageDataView, CustomerPurchaseProfile, OperationalOrderRecord } from './components/AnalyticsFullPageDataView';
 import { OrderDetailsModal } from './components/OrderDetailsModal';
 import { AnalyticsFilterDrawer } from './components/AnalyticsFilterDrawer';
@@ -118,7 +119,8 @@ const ANALYTICS_VIEW_OPTIONS = [
   { id: 'analytics-state', label: 'State-wise Sales' },
   { id: 'analytics-city', label: 'City-wise Sales' },
   { id: 'analytics-pincode', label: 'Pincode Performance' },
-  { id: 'analytics-product', label: 'Product Performance' },
+  { id: 'analytics-product', label: 'Product Performance' },
+  { id: 'analytics-top-products-combos', label: 'Top Performing Products & Combos' },
   { id: 'analytics-offer', label: 'Offer Performance' },
   { id: 'analytics-order-value', label: 'Order Value Distribution' },
   { id: 'analytics-order-composition', label: 'Order Composition' },
@@ -2029,8 +2031,21 @@ export const WebsiteAnalytics: React.FC = () => {
           </div>
 
 
-          {/* 9. CUSTOMER REPEAT & GEOGRAPHIC ANALYTICS */}
-          <div id="analytics-customer-repeat" className="scroll-mt-6">
+                    {/* 9. TOP PERFORMING PRODUCTS & COMBOS */}
+          <div 
+            id="analytics-top-products-combos" 
+            className={`scroll-mt-6 transition-all duration-300 ${
+              highlightedSectionId === 'analytics-top-products-combos' ? 'ring-2 ring-purple-500 shadow-purple-500/40 rounded-2xl' : ''
+            }`}
+          >
+            <TopPerformingProductsCombos 
+              orders={filteredOrders} 
+              onViewOrders={(title, matchingOrders) => handleOpenOrdersFullPage(title, matchingOrders)} 
+            />
+          </div>
+
+          {/* 10. CUSTOMER REPEAT & GEOGRAPHIC ANALYTICS */}
+          <div id="analytics-customer-repeat"  className="scroll-mt-6">
             <CustomerRepeatAnalyticsDashboard sourceChannel="WEBSITE" department="sales" />
           </div>
         </>
