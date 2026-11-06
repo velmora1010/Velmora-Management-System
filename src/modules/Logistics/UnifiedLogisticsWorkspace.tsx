@@ -1509,7 +1509,10 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
   const handleBulkSyncAll = async () => {
     setIsBulkSyncModalOpen(true);
     if (bulkTrackingSyncService.getState().status !== 'running') {
-      bulkTrackingSyncService.startBulkSync().then(() => {
+      bulkTrackingSyncService.startBulkSync({
+        providedOrders: stageShipments,
+        fallbackCount: trackingMetrics.delhiveryCount || trackingMetrics.totalWithAwb || 1314
+      }).then(() => {
         handleRefresh();
       }).catch(err => {
         console.error('[BULK SYNC ERROR]', err);
@@ -2508,9 +2511,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
                 onClick={handleBulkSyncAll}
 
-                disabled={isBulkSyncing}
-
-                className="h-9 px-3 bg-[#0e1626] hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-xl transition-colors text-xs font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                className="h-9 px-3 bg-[#0e1626] hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-xl transition-colors text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
 
                 title="Sync live tracking status"
 
@@ -2518,7 +2519,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
                 <RefreshCw size={13} className={isBulkSyncing ? 'animate-spin text-purple-400' : ''} />
 
-                <span>Sync</span>
+                <span>{isBulkSyncing ? 'Syncing...' : 'Sync'}</span>
 
               </button>
 
@@ -3780,6 +3781,8 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         isOpen={isBulkSyncModalOpen}
         onClose={() => setIsBulkSyncModalOpen(false)}
         onRefreshView={handleRefresh}
+        providedOrders={stageShipments}
+        expectedCount={trackingMetrics.delhiveryCount || trackingMetrics.totalWithAwb || 1314}
       />
 
       {/* Floating Background Sync Progress Pill */}

@@ -70,11 +70,12 @@ class BulkTrackingSyncService {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        // If it was running when user refreshed, keep as running/paused
-        return {
-          ...parsed,
-          status: parsed.status === 'running' ? 'paused' : parsed.status
-        };
+        if (parsed && typeof parsed.totalCandidates === 'number' && parsed.totalCandidates > 0) {
+          return {
+            ...parsed,
+            status: parsed.status === 'running' ? 'paused' : parsed.status
+          };
+        }
       }
     } catch (e) {
       // ignore parse error
@@ -154,37 +155,53 @@ class BulkTrackingSyncService {
   }
 
   /**
-   * Retrieves all eligible shipments from Supabase across all pages,
-   * merges with Dexie local cache, and identifies records with and without AWBs.
+   * Universal AWB Discovery:
+   * Discovers ALL eligible shipments across Supabase (customer_tracking_shipments),
+   * local Dexie database (logistics_orders), and active workspace stage shipments.
    */
-  public async fetchAllEligibleShipments(): Promise<{
+  public async fetchAllEligibleShipments(providedOrders?: any[]): Promise<{
     eligibleItems: BulkSyncItem[];
     withoutAwbCount: number;
     totalSupabaseShipments: number;
   }> {
-    let allSupabase: any[] = [];
-    let page = 0;
-    const pageSize = 1000;
-    let hasMore = true;
+    const itemsMap = new Map<string, BulkSyncItem>();
+    let withoutAwbCount = 0;
 
-    while (hasMore) {
-      const { data, error } = await supabase
-        .from('customer_tracking_shipments')
-        .select('id, order_id, display_order_id, awb_number, courier, status, raw_status, delivered_date')
-        .neq('status', 'Order Deleted')
-        .neq('raw_status', 'DELETED')
-        .range(page * pageSize, (page + 1) * pageSize - 1);
+    // 1. Ingest any directly provided stage orders from Logistics UI workspace
+    if (Array.isArray(providedOrders) && providedOrders.length > 0) {
+      for (const o of providedOrders) {
+        const rawAwb = (o.awbNumber || o.awb || '').trim();
+        const rawOid = cleanOrderId(o.orderId || o.displayOrderId || o.id || '');
+        const courier = normalizeCourier(o.courier) || 'Delhivery';
 
-      if (error || !data || data.length === 0) break;
-      allSupabase = allSupabase.concat(data);
-      if (data.length < pageSize) hasMore = false;
-      else page++;
+        if (!rawAwb || rawAwb.endsWith('999999')) {
+          withoutAwbCount++;
+          continue;
+        }
+
+        itemsMap.set(rawAwb, {
+          orderId: rawOid || rawAwb,
+          awbNumber: rawAwb,
+          courier: courier,
+          currentStatus: o.status || 'Awaiting Tracking Update',
+          rawStatus: o.rawStatus,
+          deliveredDate: o.deliveredDate,
+          dexieId: o.rawId || o.id
+        });
+      }
     }
 
-    // Also fetch local Dexie orders
-    const dexieOrders = await db.logistics_orders.where('stage').notEqual('trash').toArray();
+    // 2. Fetch all local Dexie orders
+    let dexieOrders: any[] = [];
+    try {
+      dexieOrders = await db.logistics_orders.toArray();
+    } catch (e) {
+      console.warn('[BulkTrackingSyncService] Dexie fetch note:', e);
+    }
+
     const dexieMap = new Map<string, any>();
     for (const o of dexieOrders) {
+      if (o.stage === 'trash') continue;
       const cleanOid = cleanOrderId(o.orderId);
       if (cleanOid) {
         dexieMap.set(cleanOid.toLowerCase(), o);
@@ -194,10 +211,36 @@ class BulkTrackingSyncService {
       }
     }
 
-    let withoutAwbCount = 0;
-    const itemsMap = new Map<string, BulkSyncItem>();
+    // 3. Query canonical Supabase table (customer_tracking_shipments) with full pagination
+    let allSupabase: any[] = [];
+    let page = 0;
+    const pageSize = 1000;
+    let hasMore = true;
 
-    // 1. Process Supabase shipments
+    while (hasMore) {
+      try {
+        const { data, error } = await supabase
+          .from('customer_tracking_shipments')
+          .select('id, order_id, display_order_id, awb_number, courier, status, raw_status, delivered_date')
+          .neq('status', 'Order Deleted')
+          .neq('raw_status', 'DELETED')
+          .range(page * pageSize, (page + 1) * pageSize - 1);
+
+        if (error) {
+          console.warn('[BulkTrackingSyncService] Supabase page query note:', error.message);
+          break;
+        }
+        if (!data || data.length === 0) break;
+        allSupabase = allSupabase.concat(data);
+        if (data.length < pageSize) hasMore = false;
+        else page++;
+      } catch (err) {
+        console.warn('[BulkTrackingSyncService] Supabase query network exception:', err);
+        break;
+      }
+    }
+
+    // 4. Merge Supabase shipments
     for (const s of allSupabase) {
       const rawAwb = (s.awb_number || '').trim();
       const rawOid = cleanOrderId(s.order_id || s.display_order_id || '');
@@ -221,10 +264,12 @@ class BulkTrackingSyncService {
       });
     }
 
-    // 2. Add any Dexie orders that have valid AWBs not yet included in Supabase
+    // 5. Merge any remaining Dexie orders that have valid AWBs
     for (const o of dexieOrders) {
+      if (o.stage === 'trash') continue;
       const rawAwb = (o.awbNumber || '').trim();
       if (!rawAwb || rawAwb.endsWith('999999')) {
+        withoutAwbCount++;
         continue;
       }
       if (!itemsMap.has(rawAwb)) {
@@ -242,16 +287,16 @@ class BulkTrackingSyncService {
       }
     }
 
-    // Prioritize active and pending orders before historical delivered orders
+    // Prioritize active, pending, and in-transit orders before delivered orders
     const getStatusPriority = (status: string) => {
       const s = (status || '').toLowerCase();
-      // Highest priority: Awaiting tracking update or pending manifest
+      // Tier 1: Awaiting tracking update or pending manifest
       if (s.includes('awaiting') || s.includes('pending') || s.includes('manifest')) return 1;
-      // High priority: Out for delivery, In transit, Failed attempt, Ready for pickup
-      if (s.includes('out for delivery') || s.includes('transit') || s.includes('failed') || s.includes('pickup') || s.includes('ready')) return 2;
-      // Medium priority: Exceptions & RTO
-      if (s.includes('exception') || s.includes('rto') || s.includes('return')) return 3;
-      // Lower priority: Terminal states (Delivered, Cancelled)
+      // Tier 2: Ready for pickup, Picked up, In transit, Out for delivery
+      if (s.includes('ready') || s.includes('pickup') || s.includes('transit') || s.includes('out for delivery')) return 2;
+      // Tier 3: Exceptions, SLA delays, RTO
+      if (s.includes('exception') || s.includes('rto') || s.includes('delay') || s.includes('failed')) return 3;
+      // Tier 4: Terminal states (Delivered, Cancelled)
       if (s.includes('delivered') || s.includes('cancel')) return 4;
       return 2;
     };
@@ -259,7 +304,6 @@ class BulkTrackingSyncService {
     const sortedItems = Array.from(itemsMap.values()).sort((a, b) => {
       const prioDiff = getStatusPriority(a.currentStatus) - getStatusPriority(b.currentStatus);
       if (prioDiff !== 0) return prioDiff;
-      // Sort newer order IDs first
       const numA = parseInt(a.orderId.replace(/[^0-9]/g, ''), 10) || 0;
       const numB = parseInt(b.orderId.replace(/[^0-9]/g, ''), 10) || 0;
       return numB - numA;
@@ -277,10 +321,12 @@ class BulkTrackingSyncService {
    */
   public async startBulkSync(options: {
     specificAwbs?: string[];
+    providedOrders?: any[];
+    fallbackCount?: number;
     onProgress?: (state: BulkSyncState) => void;
   } = {}): Promise<BulkSyncState> {
-    if (this.isProcessing) {
-      console.warn('[BulkTrackingSyncService] Bulk sync is already running.');
+    if (this.isProcessing && this.state.status === 'running') {
+      console.warn('[BulkTrackingSyncService] Bulk sync is already actively running.');
       return this.getState();
     }
 
@@ -288,13 +334,43 @@ class BulkTrackingSyncService {
     this.abortController = new AbortController();
     const signal = this.abortController.signal;
 
-    // 1. Discover all eligible items
-    const { eligibleItems, withoutAwbCount } = await this.fetchAllEligibleShipments();
+    // Immediately enter running state with optimistic discovery feedback
+    const initialExpectedTotal = options.fallbackCount || 
+                                (Array.isArray(options.providedOrders) ? options.providedOrders.length : 0) || 
+                                (this.state.totalCandidates > 0 ? this.state.totalCandidates : 1314);
+
+    this.state = {
+      ...this.state,
+      status: 'running',
+      totalCandidates: initialExpectedTotal,
+      processed: 0,
+      updated: 0,
+      alreadyUpToDate: 0,
+      failed: 0,
+      trackingUnavailable: 0,
+      progress: 0,
+      currentCourier: 'Delhivery',
+      currentAwb: 'Discovering all eligible Delhivery & ST Courier AWBs...',
+      currentOrderId: '',
+      startedAt: new Date().toISOString()
+    };
+    this.notify();
+
+    // 1. Discover all eligible items across sources
+    const { eligibleItems, withoutAwbCount } = await this.fetchAllEligibleShipments(options.providedOrders);
 
     let itemsToProcess = eligibleItems;
     if (options.specificAwbs && options.specificAwbs.length > 0) {
       const filterSet = new Set(options.specificAwbs.map(a => a.trim().toLowerCase()));
       itemsToProcess = eligibleItems.filter(i => filterSet.has(i.awbNumber.toLowerCase()));
+    }
+
+    if (itemsToProcess.length === 0) {
+      this.state.status = 'failed';
+      this.state.currentAwb = 'No eligible tracking records discovered in database';
+      this.isProcessing = false;
+      this.notify();
+      return this.getState();
     }
 
     // Initialize courier breakdown
@@ -307,6 +383,7 @@ class BulkTrackingSyncService {
     }
 
     this.state = {
+      ...this.state,
       status: 'running',
       totalCandidates: itemsToProcess.length,
       processed: 0,
@@ -316,10 +393,9 @@ class BulkTrackingSyncService {
       trackingUnavailable: 0,
       withoutAwbCount,
       progress: 0,
-      currentCourier: itemsToProcess[0]?.courier || '',
+      currentCourier: itemsToProcess[0]?.courier || 'Delhivery',
       currentAwb: itemsToProcess[0]?.awbNumber || '',
       currentOrderId: itemsToProcess[0]?.orderId || '',
-      startedAt: new Date().toISOString(),
       failedList: [],
       recentUpdates: [],
       courierBreakdown
@@ -328,20 +404,20 @@ class BulkTrackingSyncService {
 
     console.info(`[BulkTrackingSyncService] Starting bulk tracking sync for ${itemsToProcess.length} eligible AWBs (${withoutAwbCount} without AWB)...`);
 
-    // Group by courier for optimal rate-limiting
+    // Group by courier for rate-limiting
     const delhiveryItems = itemsToProcess.filter(i => i.courier === 'Delhivery');
     const stCourierItems = itemsToProcess.filter(i => i.courier === 'ST Courier');
     const otherItems = itemsToProcess.filter(i => i.courier !== 'Delhivery' && i.courier !== 'ST Courier');
 
     try {
-      // 1. Process Delhivery with concurrency = 4 and 120ms pacing
+      // 1. Process Delhivery with concurrency = 3 and 180ms pacing
       if (delhiveryItems.length > 0 && !signal.aborted) {
-        await this.processCourierGroup(delhiveryItems, 'Delhivery', 4, 120, signal);
+        await this.processCourierGroup(delhiveryItems, 'Delhivery', 3, 180, signal);
       }
 
-      // 2. Process ST Courier with concurrency = 2 and 200ms pacing
+      // 2. Process ST Courier with concurrency = 2 and 220ms pacing
       if (stCourierItems.length > 0 && !signal.aborted) {
-        await this.processCourierGroup(stCourierItems, 'ST Courier', 2, 200, signal);
+        await this.processCourierGroup(stCourierItems, 'ST Courier', 2, 220, signal);
       }
 
       // 3. Process any remaining other couriers
@@ -405,8 +481,8 @@ class BulkTrackingSyncService {
           this.state.courierBreakdown[item.courier].processed++;
         }
 
-        // Notify subscribers every 3 items or at completion
-        if (this.state.processed % 3 === 0 || this.state.processed === this.state.totalCandidates) {
+        // Notify subscribers regularly (every 2 items or on completion)
+        if (this.state.processed % 2 === 0 || this.state.processed === this.state.totalCandidates) {
           this.notify();
         }
 
@@ -433,17 +509,17 @@ class BulkTrackingSyncService {
       try {
         result = await trackingEngine.trackSingle(item.courier, item.awbNumber, 15000);
 
-        // If rate limited, wait and retry
-        if (result && result.error && String(result.error).includes('rate limit')) {
+        // If rate limited, wait with exponential backoff and retry
+        if (result && (result.status === 'Rate Limited' || (result.error && String(result.error).includes('rate limit')))) {
           if (attempt <= maxRetries) {
-            await new Promise(res => setTimeout(res, 1200 * attempt));
+            await new Promise(res => setTimeout(res, 1500 * attempt));
             continue;
           }
         }
         break;
       } catch (e: any) {
         if (attempt <= maxRetries) {
-          await new Promise(res => setTimeout(res, 1000 * attempt));
+          await new Promise(res => setTimeout(res, 1200 * attempt));
           continue;
         }
         result = { success: false, status: 'Unable to fetch', error: e.message || String(e) };
@@ -455,7 +531,7 @@ class BulkTrackingSyncService {
     if (result.success && result.status && result.status !== 'Unknown') {
       let finalStatus = result.status;
 
-      // Status Transition Protection
+      // Status Transition Protection: Delivered and RTO Delivered must never be downgraded
       const curStatus = item.currentStatus || '';
       if ((curStatus === 'Delivered' || curStatus === 'RTO Delivered to Seller') && finalStatus !== curStatus && !finalStatus.includes('RTO')) {
         finalStatus = curStatus;
@@ -472,7 +548,7 @@ class BulkTrackingSyncService {
           rawStatus: result.rawStatus || finalStatus,
           syncedAt: new Date().toISOString(),
           trackingError: undefined,
-          syncState: 'idle'
+          lastUpdated: new Date().toISOString()
         };
         if (result.remarks) patch.remarks = result.remarks;
         if (result.deliveredDate) patch.deliveredDate = result.deliveredDate;
@@ -487,7 +563,7 @@ class BulkTrackingSyncService {
       try {
         await supabase.from('customer_tracking_shipments').upsert({
           order_id: item.orderId,
-          display_order_id: item.orderId.startsWith('#') ? item.orderId : `#${item.orderId}`,
+          display_order_id: `#${item.orderId.replace(/^#/, '')}`,
           awb_number: item.awbNumber,
           courier: normalizeCourier(item.courier) || item.courier || 'Delhivery',
           status: finalStatus,
@@ -496,8 +572,7 @@ class BulkTrackingSyncService {
           delivered_date: result.deliveredDate || item.deliveredDate || null,
           estimated_delivery_date: result.estimatedDeliveryDate || null,
           last_location: result.location || null,
-          last_synced_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          last_synced_at: new Date().toISOString()
         }, { onConflict: 'courier,awb_number' });
 
         if (finalStatus === 'Delivered' && item.orderId) {
@@ -507,7 +582,7 @@ class BulkTrackingSyncService {
           }).eq('order_id', item.orderId);
         }
       } catch (sbErr) {
-        console.warn('[BulkTrackingSyncService] Supabase write note:', sbErr);
+        console.warn('[BulkTrackingSyncService] Supabase patch note:', sbErr);
       }
 
       if (isChanged) {
@@ -544,19 +619,19 @@ class BulkTrackingSyncService {
           awb: item.awbNumber,
           courier: item.courier,
           error: errStr,
-          lastAttempt: new Date().toISOString()
+          lastAttempt: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
         });
       }
     }
   }
 
   /**
-   * Retries only the shipments that failed in the last sync run.
+   * Retries only the items that previously failed.
    */
   public async retryFailed(): Promise<BulkSyncState> {
-    const failedAwbs = this.state.failedList.map(f => f.awb);
-    if (failedAwbs.length === 0) return this.getState();
-    return this.startBulkSync({ specificAwbs: failedAwbs });
+    if (this.state.failedList.length === 0) return this.getState();
+    const awbsToRetry = this.state.failedList.map(f => f.awb);
+    return this.startBulkSync({ specificAwbs: awbsToRetry });
   }
 }
 

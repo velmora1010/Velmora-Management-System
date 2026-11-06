@@ -402,7 +402,7 @@ export default async function handler(req: IncomingMessage & { query?: Record<st
         lastSyncedAt: nowStr
       }));
     } else if (courier === 'Delhivery' || (courier.toLowerCase() === 'delhivery' && !courier.toLowerCase().includes('ithink'))) {
-      const delhiveryToken = (process.env.DELHIVERY_API_TOKEN || '').trim();
+      const delhiveryToken = (process.env.DELHIVERY_API_TOKEN || process.env.VITE_DELHIVERY_API_TOKEN || process.env.DELHIVERY_TOKEN || '').trim();
       let dlvData: any = null;
       let usedEndpoint = '';
 
@@ -458,6 +458,15 @@ export default async function handler(req: IncomingMessage & { query?: Record<st
               if (resJson && resJson.statusCode === 200 && Array.isArray(resJson.data) && resJson.data.length > 0) {
                 uData = resJson;
               }
+            } else if (newRes.status === 429) {
+              res.statusCode = 200;
+              res.end(JSON.stringify({
+                success: false,
+                status: 'Rate Limited',
+                error: 'Delhivery rate limit reached (HTTP 429). Please configure DELHIVERY_API_TOKEN in server environment.',
+                lastSyncedAt: nowStr
+              }));
+              return;
             }
           } catch (newErr) {
             console.warn('[DELHIVERY UNIFIED-NEW] Attempt error:', newErr);
@@ -481,6 +490,15 @@ export default async function handler(req: IncomingMessage & { query?: Record<st
                 if (resJson && resJson.statusCode === 200 && Array.isArray(resJson.data) && resJson.data.length > 0) {
                   uData = resJson;
                 }
+              } else if (unifiedRes.status === 429) {
+                res.statusCode = 200;
+                res.end(JSON.stringify({
+                  success: false,
+                  status: 'Rate Limited',
+                  error: 'Delhivery rate limit reached (HTTP 429). Please configure DELHIVERY_API_TOKEN in server environment.',
+                  lastSyncedAt: nowStr
+                }));
+                return;
               }
             } catch (uFallbackErr) {
               console.warn('[DELHIVERY UNIFIED-LEGACY] Attempt error:', uFallbackErr);

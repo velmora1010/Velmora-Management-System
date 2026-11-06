@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { 
   X, 
   RefreshCw, 
@@ -22,15 +22,20 @@ interface BulkTrackingSyncModalProps {
   isOpen: boolean;
   onClose: () => void;
   onRefreshView: () => void;
+  providedOrders?: any[];
+  expectedCount?: number;
 }
 
 export const BulkTrackingSyncModal: React.FC<BulkTrackingSyncModalProps> = ({
   isOpen,
   onClose,
-  onRefreshView
+  onRefreshView,
+  providedOrders,
+  expectedCount
 }) => {
   const [syncState, setSyncState] = useState<BulkSyncState>(bulkTrackingSyncService.getState());
   const [showFailedDetails, setShowFailedDetails] = useState(false);
+  const hasAutoStartedRef = useRef(false);
 
   useEffect(() => {
     const unsubscribe = bulkTrackingSyncService.subscribe((state) => {
@@ -39,18 +44,40 @@ export const BulkTrackingSyncModal: React.FC<BulkTrackingSyncModalProps> = ({
     return unsubscribe;
   }, []);
 
+  // When modal is opened, if it is idle or was not started, auto-start sync with provided orders
+  useEffect(() => {
+    if (isOpen) {
+      const currentState = bulkTrackingSyncService.getState();
+      if ((currentState.status === 'idle' || currentState.totalCandidates === 0) && !hasAutoStartedRef.current) {
+        hasAutoStartedRef.current = true;
+        bulkTrackingSyncService.startBulkSync({
+          providedOrders,
+          fallbackCount: expectedCount || (providedOrders?.length) || 1314
+        });
+      }
+    } else {
+      hasAutoStartedRef.current = false;
+    }
+  }, [isOpen, providedOrders, expectedCount]);
+
   if (!isOpen) return null;
 
   const isRunning = syncState.status === 'running';
   const isCompleted = syncState.status === 'completed';
   const isPaused = syncState.status === 'paused';
+  const isFailed = syncState.status === 'failed';
+
+  const displayedTotal = syncState.totalCandidates > 0 ? syncState.totalCandidates : (expectedCount || providedOrders?.length || 1314);
 
   const handleStop = () => {
     bulkTrackingSyncService.stopSync();
   };
 
   const handleResumeOrStart = () => {
-    bulkTrackingSyncService.startBulkSync();
+    bulkTrackingSyncService.startBulkSync({
+      providedOrders,
+      fallbackCount: displayedTotal
+    });
   };
 
   const handleRetryFailed = () => {
@@ -75,6 +102,8 @@ export const BulkTrackingSyncModal: React.FC<BulkTrackingSyncModalProps> = ({
             <div className={`p-2.5 rounded-xl border ${
               isRunning ? 'bg-purple-950/60 border-purple-500/50 text-purple-400' :
               isCompleted ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-400' :
+              isPaused ? 'bg-amber-950/60 border-amber-500/50 text-amber-400' :
+              isFailed ? 'bg-rose-950/60 border-rose-500/50 text-rose-400' :
               'bg-slate-800/60 border-slate-700 text-slate-300'
             }`}>
               <RefreshCw size={20} className={isRunning ? 'animate-spin' : ''} />
@@ -86,9 +115,10 @@ export const BulkTrackingSyncModal: React.FC<BulkTrackingSyncModalProps> = ({
                   isRunning ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 animate-pulse' :
                   isCompleted ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' :
                   isPaused ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' :
+                  isFailed ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' :
                   'bg-slate-800 text-slate-400'
                 }`}>
-                  {isRunning ? 'Syncing In Progress' : isCompleted ? 'Completed' : isPaused ? 'Paused' : 'Ready'}
+                  {isRunning ? 'Syncing In Progress' : isCompleted ? 'Completed' : isPaused ? 'Paused' : isFailed ? 'Error' : 'Ready'}
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
@@ -100,7 +130,7 @@ export const BulkTrackingSyncModal: React.FC<BulkTrackingSyncModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors cursor-pointer"
               title="Minimize to background"
             >
               <Minus size={18} />
@@ -108,7 +138,7 @@ export const BulkTrackingSyncModal: React.FC<BulkTrackingSyncModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors cursor-pointer"
               title="Close modal"
             >
               <X size={18} />
@@ -126,7 +156,7 @@ export const BulkTrackingSyncModal: React.FC<BulkTrackingSyncModalProps> = ({
                 Progress: <span className="font-mono text-purple-300 font-bold">{syncState.progress}%</span>
               </span>
               <span className="text-slate-400 font-mono">
-                {syncState.processed.toLocaleString()} / {syncState.totalCandidates.toLocaleString()} AWBs Processed
+                {syncState.processed.toLocaleString()} / {displayedTotal.toLocaleString()} AWBs Processed
               </span>
             </div>
 
@@ -134,17 +164,23 @@ export const BulkTrackingSyncModal: React.FC<BulkTrackingSyncModalProps> = ({
             <div className="w-full h-3 bg-slate-950 rounded-full overflow-hidden p-0.5 border border-slate-800">
               <div 
                 className="h-full bg-gradient-to-r from-purple-500 via-indigo-500 to-cyan-400 rounded-full transition-all duration-300 shadow-sm shadow-purple-500/50"
-                style={{ width: `${Math.min(100, syncState.progress)}%` }}
+                style={{ width: `${Math.min(100, Math.max(isRunning ? 2 : 0, syncState.progress))}%` }}
               />
             </div>
 
             {/* Live active item info */}
-            {isRunning && syncState.currentAwb && (
+            {syncState.currentAwb && (
               <div className="mt-3 flex items-center gap-2 text-xs text-slate-400 font-mono animate-in fade-in">
-                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping shrink-0" />
+                {isRunning && <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping shrink-0" />}
                 <span className="truncate">
-                  Checking {syncState.currentCourier}: <strong className="text-cyan-300">{syncState.currentAwb}</strong> 
-                  {syncState.currentOrderId ? ` (Order #${syncState.currentOrderId})` : ''}
+                  {syncState.currentAwb.startsWith('Discovering') ? (
+                    <span className="text-purple-300">{syncState.currentAwb}</span>
+                  ) : (
+                    <>
+                      Checking {syncState.currentCourier}: <strong className="text-cyan-300">{syncState.currentAwb}</strong> 
+                      {syncState.currentOrderId ? ` (Order #${syncState.currentOrderId})` : ''}
+                    </>
+                  )}
                 </span>
               </div>
             )}
@@ -160,7 +196,7 @@ export const BulkTrackingSyncModal: React.FC<BulkTrackingSyncModalProps> = ({
                 <Package size={14} className="text-purple-400" />
               </div>
               <div className="text-xl font-bold font-mono text-slate-100 mt-1">
-                {syncState.totalCandidates.toLocaleString()}
+                {displayedTotal.toLocaleString()}
               </div>
               <div className="text-[10px] text-slate-500 mt-0.5">Eligible for tracking</div>
             </div>
@@ -224,88 +260,91 @@ export const BulkTrackingSyncModal: React.FC<BulkTrackingSyncModalProps> = ({
               </div>
               <div className="text-[10px] text-slate-500 mt-0.5">Awaiting dispatch</div>
             </div>
+
           </div>
 
-          {/* Courier Breakdown */}
-          {Object.keys(syncState.courierBreakdown).length > 0 && (
-            <div className="p-3.5 bg-slate-900/40 rounded-xl border border-slate-800/80">
-              <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2.5">
-                Courier Performance Breakdown
+          {/* Courier Breakdown Pill Section */}
+          <div className="p-3.5 bg-slate-900/50 rounded-xl border border-slate-800 flex flex-wrap items-center gap-3">
+            <span className="text-xs text-slate-400 font-medium">Courier Breakdown:</span>
+            
+            {/* Delhivery Pill */}
+            <div className="px-3 py-1.5 rounded-lg bg-rose-950/40 border border-rose-800/60 text-xs flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-rose-400 shrink-0" />
+              <span className="font-semibold text-rose-200">Delhivery:</span>
+              <span className="font-mono text-rose-300 font-bold">
+                {syncState.courierBreakdown['Delhivery']?.processed ?? 0} / {syncState.courierBreakdown['Delhivery']?.total ?? displayedTotal}
+              </span>
+              {(syncState.courierBreakdown['Delhivery']?.updated ?? 0) > 0 && (
+                <span className="text-[10px] text-emerald-400 font-mono">
+                  (+{syncState.courierBreakdown['Delhivery'].updated} updated)
+                </span>
+              )}
+            </div>
+
+            {/* ST Courier Pill */}
+            <div className="px-3 py-1.5 rounded-lg bg-purple-950/40 border border-purple-800/60 text-xs flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-purple-400 shrink-0" />
+              <span className="font-semibold text-purple-200">ST Courier:</span>
+              <span className="font-mono text-purple-300 font-bold">
+                {syncState.courierBreakdown['ST Courier']?.processed ?? 0} / {syncState.courierBreakdown['ST Courier']?.total ?? 0}
+              </span>
+              {(syncState.courierBreakdown['ST Courier']?.updated ?? 0) > 0 && (
+                <span className="text-[10px] text-emerald-400 font-mono">
+                  (+{syncState.courierBreakdown['ST Courier'].updated} updated)
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Live Recent Updates Feed */}
+          {syncState.recentUpdates.length > 0 && (
+            <div className="p-4 bg-slate-900/40 rounded-xl border border-slate-800/80">
+              <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <CheckCircle2 size={13} className="text-emerald-400" />
+                <span>Recent Status Transitions ({syncState.recentUpdates.length})</span>
               </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {Object.entries(syncState.courierBreakdown).map(([courier, stats]) => (
-                  <div key={courier} className="p-2.5 bg-slate-950/60 rounded-lg border border-slate-800 flex items-center justify-between">
-                    <div>
-                      <span className="text-xs font-bold text-slate-200">{courier}</span>
-                      <span className="text-[10px] text-slate-400 ml-2 font-mono">
-                        {stats.processed} / {stats.total}
+              <div className="space-y-1.5 max-h-36 overflow-y-auto custom-scrollbar">
+                {syncState.recentUpdates.slice(0, 8).map((up, idx) => (
+                  <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded-lg bg-slate-950/60 border border-slate-800/60">
+                    <div className="flex items-center gap-2 truncate">
+                      <span className="font-bold text-purple-300 font-mono">#{up.orderId}</span>
+                      <span className="text-slate-500 font-mono text-[10px]">{up.awb}</span>
+                      <span className="text-slate-400 text-[11px] truncate">
+                        {up.oldStatus} &rarr; <strong className="text-emerald-300">{up.newStatus}</strong>
                       </span>
                     </div>
-                    <div className="flex items-center gap-2 text-[11px] font-mono">
-                      <span className="text-emerald-400 font-semibold">+{stats.updated} updated</span>
-                      {stats.failed > 0 && (
-                        <span className="text-rose-400 font-semibold">{stats.failed} failed</span>
-                      )}
-                    </div>
+                    <span className="text-[10px] text-slate-500 font-mono shrink-0 ml-2">{up.time}</span>
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Recently Updated Stream */}
-          {syncState.recentUpdates.length > 0 && (
-            <div className="p-3.5 bg-slate-900/40 rounded-xl border border-slate-800/80">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                  Live Update Stream ({syncState.recentUpdates.length})
-                </h3>
-                <span className="text-[10px] text-slate-500 font-mono">Real-time status reconciliation</span>
-              </div>
-              <div className="space-y-1.5 max-h-36 overflow-y-auto custom-scrollbar pr-1">
-                {syncState.recentUpdates.slice(0, 8).map((up, i) => (
-                  <div key={i} className="flex items-center justify-between px-2.5 py-1.5 bg-slate-950/70 rounded-lg border border-slate-800/80 text-xs">
-                    <div className="flex items-center gap-2 truncate">
-                      <span className="font-mono font-bold text-purple-300">#{up.orderId}</span>
-                      <span className="text-slate-400 font-mono text-[11px]">{up.awb}</span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">{up.courier}</span>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-slate-400 text-[11px] line-through">{up.oldStatus}</span>
-                      <span className="text-slate-500">→</span>
-                      <span className="text-emerald-300 font-semibold">{up.newStatus}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Failed Records Details (Collapsible) */}
+          {/* Collapsible Failed Shipments Section */}
           {syncState.failedList.length > 0 && (
-            <div className="border border-rose-900/40 bg-rose-950/10 rounded-xl overflow-hidden">
+            <div className="p-3.5 bg-rose-950/20 rounded-xl border border-rose-900/50">
               <button
                 type="button"
                 onClick={() => setShowFailedDetails(!showFailedDetails)}
-                className="w-full px-4 py-2.5 flex items-center justify-between text-xs font-bold text-rose-300 hover:bg-rose-950/20 transition-colors"
+                className="w-full flex items-center justify-between text-xs font-bold text-rose-300 transition-colors"
               >
-                <div className="flex items-center gap-2">
-                  <AlertCircle size={15} />
-                  <span>Failed Shipments Audit ({syncState.failedList.length})</span>
+                <div className="flex items-center gap-1.5">
+                  <AlertCircle size={14} className="text-rose-400" />
+                  <span>Failed Tracking Requests ({syncState.failedList.length})</span>
                 </div>
-                {showFailedDetails ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                {showFailedDetails ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
               </button>
+
               {showFailedDetails && (
-                <div className="p-3 border-t border-rose-900/30 max-h-44 overflow-y-auto custom-scrollbar space-y-1.5">
-                  {syncState.failedList.map((f, i) => (
-                    <div key={i} className="p-2 bg-slate-950/80 rounded border border-rose-900/30 text-xs flex items-center justify-between">
-                      <div>
-                        <span className="font-mono font-bold text-rose-200">#{f.orderId}</span>
-                        <span className="text-slate-400 font-mono ml-2">{f.awb} ({f.courier})</span>
+                <div className="mt-3 space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar border-t border-rose-900/40 pt-2">
+                  {syncState.failedList.map((fail, idx) => (
+                    <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 rounded bg-rose-950/40 border border-rose-800/40">
+                      <div className="flex items-center gap-2 truncate">
+                        <span className="font-bold text-rose-200">#{fail.orderId}</span>
+                        <span className="font-mono text-slate-400 text-[11px]">{fail.awb} ({fail.courier})</span>
+                        <span className="text-rose-300 text-[11px] truncate">{fail.error}</span>
                       </div>
-                      <span className="text-rose-400 text-[11px] max-w-xs truncate" title={f.error}>
-                        {f.error}
-                      </span>
+                      <span className="text-[10px] text-slate-400 shrink-0 font-mono ml-2">{fail.lastAttempt}</span>
                     </div>
                   ))}
                 </div>
@@ -315,8 +354,8 @@ export const BulkTrackingSyncModal: React.FC<BulkTrackingSyncModalProps> = ({
 
         </div>
 
-        {/* Footer Actions */}
-        <div className="px-6 py-4 border-t border-slate-800/80 bg-slate-900/60 flex items-center justify-between">
+        {/* Modal Footer Controls */}
+        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-800/80 bg-slate-900/70">
           <div>
             {syncState.startedAt && (
               <span className="text-[11px] text-slate-500 font-mono">
@@ -361,7 +400,7 @@ export const BulkTrackingSyncModal: React.FC<BulkTrackingSyncModalProps> = ({
                   Close
                 </button>
               </>
-            ) : (
+            ) : isCompleted ? (
               <>
                 {syncState.failedList.length > 0 && (
                   <button
@@ -380,6 +419,24 @@ export const BulkTrackingSyncModal: React.FC<BulkTrackingSyncModalProps> = ({
                 >
                   <Check size={15} />
                   <span>Done &amp; Refresh Logistics</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={handleResumeOrStart}
+                  className="px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shadow-md shadow-purple-600/30"
+                >
+                  <Play size={14} />
+                  <span>Start Synchronization ({displayedTotal.toLocaleString()} AWBs)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDoneAndRefresh}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl transition-colors cursor-pointer"
+                >
+                  Close
                 </button>
               </>
             )}
