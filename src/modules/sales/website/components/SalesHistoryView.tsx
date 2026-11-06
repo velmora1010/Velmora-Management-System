@@ -47,7 +47,16 @@ import {
   Bar,
   Legend
 } from 'recharts';
-import { salesHistoryService, SalesHistoryEvent, SalesHistoryEventType, HistoryCategoryCounts, HistorySummaryMetrics, formatINR } from '../salesHistoryService';
+import { 
+  salesHistoryService, 
+  SalesHistoryEvent, 
+  SalesHistoryEventType, 
+  HistoryCategoryCounts, 
+  HistorySummaryMetrics, 
+  RtoPaymentScope, 
+  RtoPaymentBreakdownMetrics, 
+  formatINR 
+} from '../salesHistoryService';
 import { getTodayInBusinessTimezone, shiftDateString } from '../websiteSalesUtils';
 import { OrderDetailsModal } from './OrderDetailsModal';
 import { WebsiteConsolidatedOrder } from '../types';
@@ -85,6 +94,11 @@ export const SalesHistoryView: React.FC = () => {
   const [datePreset, setDatePreset] = useState<string>('all-time');
   const [startDate, setStartDate] = useState<string>('2026-08-01');
   const [endDate, setEndDate] = useState<string>(todayStr);
+
+  // RTO Payment Breakdown & Scope Switcher State
+  const [rtoPaymentScope, setRtoPaymentScope] = useState<RtoPaymentScope>('delivered');
+  const [selectedRtoCardFilter, setSelectedRtoCardFilter] = useState<'COD' | 'PREPAID' | 'PARTIAL' | null>(null);
+  const [paymentChartTab, setPaymentChartTab] = useState<'category' | 'rto'>('rto');
 
   // Secondary Filters
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -179,6 +193,7 @@ export const SalesHistoryView: React.FC = () => {
     setSelectedCourier('ALL');
     setSelectedState('ALL');
     setSelectedProductFilter(null);
+    setSelectedRtoCardFilter(null);
     setCurrentPage(1);
   };
 
@@ -187,7 +202,8 @@ export const SalesHistoryView: React.FC = () => {
     selectedPaymentMode !== 'ALL' || 
     selectedCourier !== 'ALL' || 
     selectedState !== 'ALL' || 
-    selectedProductFilter !== null;
+    selectedProductFilter !== null ||
+    selectedRtoCardFilter !== null;
 
   // 1. Filter events based strictly on selected date range (applied to actual event_date)
   const dateFilteredEvents = useMemo(() => {
@@ -201,6 +217,11 @@ export const SalesHistoryView: React.FC = () => {
   const categoryCounts: HistoryCategoryCounts = useMemo(() => {
     return salesHistoryService.getCategoryCounts(dateFilteredEvents);
   }, [dateFilteredEvents]);
+
+  // 2b. Calculate RTO Payment Breakdown metrics for selected RTO scope
+  const rtoMetrics: RtoPaymentBreakdownMetrics = useMemo(() => {
+    return salesHistoryService.calculateRtoPaymentBreakdown(dateFilteredEvents, rtoPaymentScope);
+  }, [dateFilteredEvents, rtoPaymentScope]);
 
   // 3. Category Filter
   const categoryFilteredEvents = useMemo(() => {
@@ -216,9 +237,30 @@ export const SalesHistoryView: React.FC = () => {
     return dateFilteredEvents;
   }, [dateFilteredEvents, activeCategory]);
 
-  // 4. Secondary filters for table (Search, Payment, Courier, State, Product)
+  // 4. Secondary filters for table (Search, Payment, Courier, State, Product, RTO Card Filter)
   const tableFilteredEvents = useMemo(() => {
     return categoryFilteredEvents.filter(e => {
+      // RTO Card Selection Filter
+      if (selectedRtoCardFilter) {
+        // If on 'all' events, restrict to current RTO scope
+        if (activeCategory === 'all') {
+          const isScopeMatch = 
+            rtoPaymentScope === 'delivered' ? e.event_type === 'RTO_DELIVERED' :
+            rtoPaymentScope === 'transit' ? e.event_type === 'RTO_IN_TRANSIT' :
+            rtoPaymentScope === 'initiated' ? e.event_type === 'RTO_INITIATED' :
+            (e.event_type === 'RTO_DELIVERED' || e.event_type === 'RTO_IN_TRANSIT' || e.event_type === 'RTO_INITIATED');
+          if (!isScopeMatch) return false;
+        }
+
+        if (selectedRtoCardFilter === 'COD') {
+          if (e.payment_mode !== 'COD' && e.payment_mode !== 'PARTIAL COD') return false;
+        } else if (selectedRtoCardFilter === 'PREPAID') {
+          if (e.payment_mode !== 'PREPAID' && (e.prepaid_amount || 0) <= 0) return false;
+        } else if (selectedRtoCardFilter === 'PARTIAL') {
+          if (e.payment_mode !== 'PARTIAL COD') return false;
+        }
+      }
+
       // Payment filter
       if (selectedPaymentMode !== 'ALL' && e.payment_mode !== selectedPaymentMode) {
         return false;
@@ -257,7 +299,7 @@ export const SalesHistoryView: React.FC = () => {
 
       return true;
     });
-  }, [categoryFilteredEvents, selectedPaymentMode, selectedCourier, selectedState, selectedProductFilter, searchQuery]);
+  }, [categoryFilteredEvents, activeCategory, rtoPaymentScope, selectedRtoCardFilter, selectedPaymentMode, selectedCourier, selectedState, selectedProductFilter, searchQuery]);
 
   // 5. Summary Metrics (based on dateFilteredEvents and activeCategory)
   const metrics: HistorySummaryMetrics = useMemo(() => {
@@ -316,20 +358,84 @@ export const SalesHistoryView: React.FC = () => {
     return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
   }, [categoryFilteredEvents]);
 
-  // Chart 2: Payment Mode Breakdown
+  // Chart 2: Payment Mode Breakdown (Category or RTO Mode)
   const paymentBreakdownData = useMemo(() => {
-    const map = new Map<string, { name: string; count: number; value: number }>();
+    if (paymentChartTab === 'rto') {
+      const totVal = rtoMetrics.totalOrderValue || 1;
+      const totOrders = rtoMetrics.distinctOrdersCount || 1;
+      const items = [
+        {
+          name: 'Pure COD',
+          count: rtoMetrics.pureCodOrdersCount,
+          value: rtoMetrics.pureCodValue,
+          orderPct: Number(((rtoMetrics.pureCodOrdersCount / totOrders) * 100).toFixed(1)),
+          valPct: Number(((rtoMetrics.pureCodValue / totVal) * 100).toFixed(1)),
+          color: '#f59e0b',
+          sub: 'Standard Cash on Delivery'
+        },
+        {
+          name: 'Partial COD',
+          count: rtoMetrics.partialCodOrdersCount,
+          value: rtoMetrics.partialCodTotalValue,
+          orderPct: Number(((rtoMetrics.partialCodOrdersCount / totOrders) * 100).toFixed(1)),
+          valPct: Number(((rtoMetrics.partialCodTotalValue / totVal) * 100).toFixed(1)),
+          color: '#ec4899',
+          sub: `Pending: ${formatINR(rtoMetrics.partialCodRemainingCod)} · Advance: ${formatINR(rtoMetrics.partialCodAdvancePaid)}`
+        },
+        {
+          name: 'Pure Prepaid',
+          count: rtoMetrics.purePrepaidOrdersCount,
+          value: rtoMetrics.purePrepaidValue,
+          orderPct: Number(((rtoMetrics.purePrepaidOrdersCount / totOrders) * 100).toFixed(1)),
+          valPct: Number(((rtoMetrics.purePrepaidValue / totVal) * 100).toFixed(1)),
+          color: '#a855f7',
+          sub: 'Full advance online / UPI'
+        }
+      ];
+
+      if (rtoMetrics.unknownOrdersCount > 0) {
+        items.push({
+          name: 'Unknown',
+          count: rtoMetrics.unknownOrdersCount,
+          value: rtoMetrics.unknownValue,
+          orderPct: Number(((rtoMetrics.unknownOrdersCount / totOrders) * 100).toFixed(1)),
+          valPct: Number(((rtoMetrics.unknownValue / totVal) * 100).toFixed(1)),
+          color: '#64748b',
+          sub: 'Missing payment method'
+        });
+      }
+
+      return items.filter(it => it.count > 0 || it.value > 0);
+    }
+
+    const map = new Map<string, { name: string; count: number; value: number; orderPct: number; valPct: number; color: string; sub?: string }>();
+    const totalCatOrders = categoryFilteredEvents.length || 1;
+    const totalCatVal = categoryFilteredEvents.reduce((acc, e) => acc + e.order_amount, 0) || 1;
+
     categoryFilteredEvents.forEach(e => {
       const mode = e.payment_mode || 'UNKNOWN';
       if (!map.has(mode)) {
-        map.set(mode, { name: mode, count: 0, value: 0 });
+        map.set(mode, { 
+          name: mode, 
+          count: 0, 
+          value: 0, 
+          orderPct: 0, 
+          valPct: 0, 
+          color: PAYMENT_COLORS[mode] || '#64748b' 
+        });
       }
       const item = map.get(mode)!;
       item.count += 1;
       item.value += e.order_amount;
     });
-    return Array.from(map.values());
-  }, [categoryFilteredEvents]);
+
+    const result = Array.from(map.values());
+    result.forEach(item => {
+      item.orderPct = Number(((item.count / totalCatOrders) * 100).toFixed(1));
+      item.valPct = Number(((item.value / totalCatVal) * 100).toFixed(1));
+    });
+    return result;
+  }, [categoryFilteredEvents, paymentChartTab, rtoMetrics]);
 
   // Chart 3: Courier Partner Performance
   const courierPerformanceData = useMemo(() => {
@@ -480,6 +586,225 @@ export const SalesHistoryView: React.FC = () => {
     }
   };
 
+  const renderRtoPaymentBreakdownSection = () => (
+    <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 md:p-5 shadow-xl space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+            <RotateCcw size={16} />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-white tracking-tight flex items-center gap-2">
+              <span>RTO Payment Breakdown</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-950/80 text-amber-300 border border-amber-800/60 font-medium">
+                COD vs Prepaid Analytics
+              </span>
+            </h3>
+            <p className="text-[11px] text-slate-400">
+              Accurate payment classification, distinct order deduplication, and Partial COD advance vs pending breakdown
+            </p>
+          </div>
+        </div>
+
+        {/* Scope Switcher */}
+        <div className="flex items-center flex-wrap gap-1 bg-slate-950/80 p-1 rounded-xl border border-slate-800">
+          {[
+            { id: 'delivered', label: 'RTO Delivered', count: categoryCounts.rtoDelivered },
+            { id: 'transit', label: 'RTO In Transit', count: categoryCounts.rtoInTransit },
+            { id: 'initiated', label: 'RTO Initiated', count: categoryCounts.rtoInitiated },
+            { id: 'all', label: 'All RTO Events', count: categoryCounts.rtoDelivered + categoryCounts.rtoInTransit + categoryCounts.rtoInitiated }
+          ].map(s => (
+            <button
+              key={s.id}
+              onClick={() => {
+                setRtoPaymentScope(s.id as RtoPaymentScope);
+                setCurrentPage(1);
+              }}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer ${
+                rtoPaymentScope === s.id
+                  ? 'bg-purple-600 text-white font-bold shadow-sm'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+              }`}
+            >
+              <span>{s.label}</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                rtoPaymentScope === s.id ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'
+              }`}>
+                {s.count}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 4 RTO Summary Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+        {/* Card 1: COD RTO Orders */}
+        <div
+          onClick={() => {
+            setSelectedRtoCardFilter(selectedRtoCardFilter === 'COD' ? null : 'COD');
+            setCurrentPage(1);
+          }}
+          className={`p-3.5 rounded-xl border transition-all cursor-pointer relative overflow-hidden group ${
+            selectedRtoCardFilter === 'COD'
+              ? 'bg-amber-950/40 border-amber-500 shadow-md shadow-amber-500/20 ring-1 ring-amber-500'
+              : 'bg-slate-950/60 border-slate-800 hover:border-amber-500/50 hover:bg-slate-950/90'
+          }`}
+        >
+          <div className="flex items-center justify-between text-amber-300 mb-1">
+            <span className="text-xs font-semibold">COD RTO Orders</span>
+            <Truck size={16} className="text-amber-400" />
+          </div>
+          <div className="text-2xl font-bold text-amber-400 font-mono">
+            {rtoMetrics.codRtoOrdersCount} <span className="text-xs text-amber-300/80 font-normal">orders</span>
+          </div>
+          <div className="text-[11px] text-slate-400 mt-1 flex items-center justify-between">
+            <span>{rtoMetrics.pureCodOrdersCount} Pure COD · {rtoMetrics.partialCodOrdersCount} Partial COD</span>
+            <span className="text-amber-400 font-mono font-semibold">{rtoMetrics.codOrdersPct}%</span>
+          </div>
+          {selectedRtoCardFilter === 'COD' && (
+            <div className="mt-2 pt-2 border-t border-amber-800/50 flex items-center justify-between text-[10px] text-amber-300 font-medium">
+              <span>Filtered in Table</span>
+              <span className="text-amber-400 underline">Click to clear</span>
+            </div>
+          )}
+        </div>
+
+        {/* Card 2: Prepaid RTO Orders */}
+        <div
+          onClick={() => {
+            setSelectedRtoCardFilter(selectedRtoCardFilter === 'PREPAID' ? null : 'PREPAID');
+            setCurrentPage(1);
+          }}
+          className={`p-3.5 rounded-xl border transition-all cursor-pointer relative overflow-hidden group ${
+            selectedRtoCardFilter === 'PREPAID'
+              ? 'bg-purple-950/40 border-purple-500 shadow-md shadow-purple-500/20 ring-1 ring-purple-500'
+              : 'bg-slate-950/60 border-slate-800 hover:border-purple-500/50 hover:bg-slate-950/90'
+          }`}
+        >
+          <div className="flex items-center justify-between text-purple-300 mb-1">
+            <span className="text-xs font-semibold">Prepaid RTO Orders</span>
+            <CheckCircle2 size={16} className="text-purple-400" />
+          </div>
+          <div className="text-2xl font-bold text-purple-400 font-mono">
+            {rtoMetrics.prepaidRtoOrdersCount} <span className="text-xs text-purple-300/80 font-normal">orders</span>
+          </div>
+          <div className="text-[11px] text-slate-400 mt-1 flex items-center justify-between">
+            <span>{rtoMetrics.purePrepaidOrdersCount} Pure Prepaid · +{rtoMetrics.partialCodOrdersCount} advance</span>
+            <span className="text-purple-400 font-mono font-semibold">{rtoMetrics.prepaidOrdersPct}%</span>
+          </div>
+          {selectedRtoCardFilter === 'PREPAID' && (
+            <div className="mt-2 pt-2 border-t border-purple-800/50 flex items-center justify-between text-[10px] text-purple-300 font-medium">
+              <span>Filtered in Table</span>
+              <span className="text-purple-400 underline">Click to clear</span>
+            </div>
+          )}
+        </div>
+
+        {/* Card 3: COD RTO Value */}
+        <div
+          onClick={() => {
+            setSelectedRtoCardFilter(selectedRtoCardFilter === 'COD' ? null : 'COD');
+            setCurrentPage(1);
+          }}
+          className={`p-3.5 rounded-xl border transition-all cursor-pointer relative overflow-hidden group ${
+            selectedRtoCardFilter === 'COD'
+              ? 'bg-amber-950/40 border-amber-500 shadow-md shadow-amber-500/20 ring-1 ring-amber-500'
+              : 'bg-slate-950/60 border-slate-800 hover:border-amber-500/50 hover:bg-slate-950/90'
+          }`}
+        >
+          <div className="flex items-center justify-between text-amber-300 mb-1">
+            <span className="text-xs font-semibold">COD RTO Value</span>
+            <DollarSign size={16} className="text-amber-400" />
+          </div>
+          <div className="text-2xl font-bold text-amber-400 font-mono">
+            {formatINR(rtoMetrics.codRtoValue)}
+          </div>
+          <div className="text-[11px] text-slate-400 mt-1 flex items-center justify-between">
+            <span>{formatINR(rtoMetrics.pureCodValue)} pure + {formatINR(rtoMetrics.partialCodRemainingCod)} pending</span>
+            <span className="text-amber-400 font-mono font-semibold">{rtoMetrics.codValuePct}%</span>
+          </div>
+          {selectedRtoCardFilter === 'COD' && (
+            <div className="mt-2 pt-2 border-t border-amber-800/50 flex items-center justify-between text-[10px] text-amber-300 font-medium">
+              <span>Filtered in Table</span>
+              <span className="text-amber-400 underline">Click to clear</span>
+            </div>
+          )}
+        </div>
+
+        {/* Card 4: Prepaid RTO Value */}
+        <div
+          onClick={() => {
+            setSelectedRtoCardFilter(selectedRtoCardFilter === 'PREPAID' ? null : 'PREPAID');
+            setCurrentPage(1);
+          }}
+          className={`p-3.5 rounded-xl border transition-all cursor-pointer relative overflow-hidden group ${
+            selectedRtoCardFilter === 'PREPAID'
+              ? 'bg-purple-950/40 border-purple-500 shadow-md shadow-purple-500/20 ring-1 ring-purple-500'
+              : 'bg-slate-950/60 border-slate-800 hover:border-purple-500/50 hover:bg-slate-950/90'
+          }`}
+        >
+          <div className="flex items-center justify-between text-purple-300 mb-1">
+            <span className="text-xs font-semibold">Prepaid RTO Value</span>
+            <DollarSign size={16} className="text-purple-400" />
+          </div>
+          <div className="text-2xl font-bold text-purple-400 font-mono">
+            {formatINR(rtoMetrics.prepaidRtoValue)}
+          </div>
+          <div className="text-[11px] text-slate-400 mt-1 flex items-center justify-between">
+            <span>{formatINR(rtoMetrics.purePrepaidValue)} pure + {formatINR(rtoMetrics.partialCodAdvancePaid)} advance</span>
+            <span className="text-purple-400 font-mono font-semibold">{rtoMetrics.prepaidValuePct}%</span>
+          </div>
+          {selectedRtoCardFilter === 'PREPAID' && (
+            <div className="mt-2 pt-2 border-t border-purple-800/50 flex items-center justify-between text-[10px] text-purple-300 font-medium">
+              <span>Filtered in Table</span>
+              <span className="text-purple-400 underline">Click to clear</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Partial COD Financial Split & 100% Reconciliation Banner */}
+      <div className="bg-slate-950/80 border border-slate-800/90 rounded-xl p-3 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-pink-500/10 border border-pink-500/30 flex items-center justify-center text-pink-400 shrink-0">
+            <CreditCard size={15} />
+          </div>
+          <div>
+            <div className="font-semibold text-white flex items-center gap-2">
+              <span>Partial COD Financial Split</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-pink-950 border border-pink-800 text-pink-300 font-mono">
+                {rtoMetrics.partialCodOrdersCount} orders ({formatINR(rtoMetrics.partialCodTotalValue)} GMV)
+              </span>
+            </div>
+            <div className="text-slate-400 text-[11px] mt-0.5">
+              Advance Collected: <span className="text-purple-300 font-semibold font-mono">{formatINR(rtoMetrics.partialCodAdvancePaid)}</span> (prepaid component held) · Pending COD: <span className="text-amber-300 font-semibold font-mono">{formatINR(rtoMetrics.partialCodRemainingCod)}</span> (uncollected delivery balance avoided)
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => {
+              setSelectedRtoCardFilter(selectedRtoCardFilter === 'PARTIAL' ? null : 'PARTIAL');
+              setCurrentPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer border ${
+              selectedRtoCardFilter === 'PARTIAL'
+                ? 'bg-pink-600 text-white border-pink-500 font-bold'
+                : 'bg-slate-900 text-pink-300 hover:bg-slate-800 border-pink-900/50'
+            }`}
+          >
+            {selectedRtoCardFilter === 'PARTIAL' ? 'Filtering Partial COD' : 'Filter Partial COD'}
+          </button>
+          <div className="px-2.5 py-1.5 rounded-lg bg-emerald-950/30 border border-emerald-900/60 text-[11px] text-emerald-400 font-mono">
+            ✓ Reconciled: {formatINR(rtoMetrics.codRtoValue)} + {formatINR(rtoMetrics.prepaidRtoValue)} = {formatINR(rtoMetrics.totalOrderValue)}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
       {/* 1. MODULE HEADER & DATE SELECTION */}
@@ -615,6 +940,10 @@ export const SalesHistoryView: React.FC = () => {
               key={cat.id}
               onClick={() => {
                 setActiveCategory(cat.id);
+                if (cat.id === 'rto-delivered') setRtoPaymentScope('delivered');
+                else if (cat.id === 'rto-in-transit') setRtoPaymentScope('transit');
+                else if (cat.id === 'rto-initiated') setRtoPaymentScope('initiated');
+                setSelectedRtoCardFilter(null);
                 setCurrentPage(1);
               }}
               className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all shrink-0 cursor-pointer border ${
@@ -804,146 +1133,124 @@ export const SalesHistoryView: React.FC = () => {
           </div>
         </div>
       ) : activeCategory.startsWith('rto') ? (
-        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-3">
-          <div className="bg-slate-900/80 border border-amber-900/40 rounded-xl p-3">
-            <div className="text-[11px] text-amber-300">RTO Initiated</div>
-            <div className="text-lg font-bold text-amber-400 font-mono mt-0.5">{metrics.totalRtoInitiated}</div>
-          </div>
-          <div className="bg-slate-900/80 border border-amber-900/40 rounded-xl p-3">
-            <div className="text-[11px] text-amber-300">RTO In Transit</div>
-            <div className="text-lg font-bold text-amber-400 font-mono mt-0.5">{metrics.totalRtoInTransit}</div>
-          </div>
-          <div className="bg-slate-900/80 border border-rose-900/40 rounded-xl p-3">
-            <div className="text-[11px] text-rose-300">Delivered to Seller</div>
-            <div className="text-lg font-bold text-rose-400 font-mono mt-0.5">{metrics.totalRtoDeliveredToSeller}</div>
-          </div>
-          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
-            <div className="text-[11px] text-slate-400">RTO Order Value</div>
-            <div className="text-lg font-bold text-white font-mono mt-0.5">{formatINR(metrics.totalRtoValue)}</div>
-          </div>
-          <div className="bg-slate-900/80 border border-amber-900/40 rounded-xl p-3">
-            <div className="text-[11px] text-amber-300">COD RTO Value</div>
-            <div className="text-lg font-bold text-amber-400 font-mono mt-0.5">{formatINR(metrics.codRtoValue)}</div>
-          </div>
-          <div className="bg-slate-900/80 border border-purple-900/40 rounded-xl p-3">
-            <div className="text-[11px] text-purple-300">Prepaid RTO Value</div>
-            <div className="text-lg font-bold text-purple-400 font-mono mt-0.5">{formatINR(metrics.prepaidRtoValue)}</div>
-          </div>
-          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
-            <div className="text-[11px] text-indigo-300">RTO Units</div>
-            <div className="text-lg font-bold text-indigo-400 font-mono mt-0.5">{metrics.totalRtoUnits}</div>
-          </div>
-          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
-            <div className="text-[11px] text-slate-400">RTO Rate</div>
-            <div className="text-lg font-bold text-rose-400 font-mono mt-0.5">{metrics.rtoRate}%</div>
-          </div>
-        </div>
+        renderRtoPaymentBreakdownSection()
       ) : (
-        /* ALL EVENTS OVERVIEW (10 CARDS) */
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3.5">
-          <div 
-            onClick={() => setActiveCategory('all')}
-            className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 hover:border-purple-500/60 transition-all cursor-pointer"
-          >
-            <div className="flex items-center justify-between text-slate-400 mb-1">
-              <span className="text-xs font-medium">Total Events</span>
-              <Layers size={15} className="text-purple-400" />
+        /* ALL EVENTS OVERVIEW (10 CARDS) + DEDICATED RTO PAYMENT BREAKDOWN */
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3.5">
+            <div 
+              onClick={() => setActiveCategory('all')}
+              className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 hover:border-purple-500/60 transition-all cursor-pointer"
+            >
+              <div className="flex items-center justify-between text-slate-400 mb-1">
+                <span className="text-xs font-medium">Total Events</span>
+                <Layers size={15} className="text-purple-400" />
+              </div>
+              <div className="text-xl font-bold text-white font-mono">{metrics.totalEventsCount.toLocaleString('en-IN')}</div>
+              <div className="text-[11px] text-slate-500 mt-0.5">Lifecycle events in period</div>
             </div>
-            <div className="text-xl font-bold text-white font-mono">{metrics.totalEventsCount.toLocaleString('en-IN')}</div>
-            <div className="text-[11px] text-slate-500 mt-0.5">Lifecycle events in period</div>
-          </div>
 
-          <div 
-            onClick={() => setActiveCategory('orders-created')}
-            className="bg-slate-900/80 border border-blue-900/40 rounded-xl p-3.5 hover:border-blue-500/60 transition-all cursor-pointer"
-          >
-            <div className="flex items-center justify-between text-blue-300 mb-1">
-              <span className="text-xs font-medium">Orders Created</span>
-              <ShoppingBag size={15} className="text-blue-400" />
+            <div 
+              onClick={() => setActiveCategory('orders-created')}
+              className="bg-slate-900/80 border border-blue-900/40 rounded-xl p-3.5 hover:border-blue-500/60 transition-all cursor-pointer"
+            >
+              <div className="flex items-center justify-between text-blue-300 mb-1">
+                <span className="text-xs font-medium">Orders Created</span>
+                <ShoppingBag size={15} className="text-blue-400" />
+              </div>
+              <div className="text-xl font-bold text-blue-400 font-mono">{metrics.totalOrdersCreated.toLocaleString('en-IN')}</div>
+              <div className="text-[11px] text-slate-400 mt-0.5">{formatINR(metrics.totalOrdersCreatedValue)}</div>
             </div>
-            <div className="text-xl font-bold text-blue-400 font-mono">{metrics.totalOrdersCreated.toLocaleString('en-IN')}</div>
-            <div className="text-[11px] text-slate-400 mt-0.5">{formatINR(metrics.totalOrdersCreatedValue)}</div>
-          </div>
 
-          <div 
-            onClick={() => setActiveCategory('dispatched')}
-            className="bg-slate-900/80 border border-purple-900/40 rounded-xl p-3.5 hover:border-purple-500/60 transition-all cursor-pointer"
-          >
-            <div className="flex items-center justify-between text-purple-300 mb-1">
-              <span className="text-xs font-medium">Dispatched</span>
-              <Send size={15} className="text-purple-400" />
+            <div 
+              onClick={() => setActiveCategory('dispatched')}
+              className="bg-slate-900/80 border border-purple-900/40 rounded-xl p-3.5 hover:border-purple-500/60 transition-all cursor-pointer"
+            >
+              <div className="flex items-center justify-between text-purple-300 mb-1">
+                <span className="text-xs font-medium">Dispatched</span>
+                <Send size={15} className="text-purple-400" />
+              </div>
+              <div className="text-xl font-bold text-purple-400 font-mono">{metrics.totalDispatched.toLocaleString('en-IN')}</div>
+              <div className="text-[11px] text-slate-400 mt-0.5">{formatINR(metrics.totalDispatchedValue)}</div>
             </div>
-            <div className="text-xl font-bold text-purple-400 font-mono">{metrics.totalDispatched.toLocaleString('en-IN')}</div>
-            <div className="text-[11px] text-slate-400 mt-0.5">{formatINR(metrics.totalDispatchedValue)}</div>
-          </div>
 
-          <div 
-            onClick={() => setActiveCategory('delivered')}
-            className="bg-slate-900/80 border border-emerald-900/40 rounded-xl p-3.5 hover:border-emerald-500/60 transition-all cursor-pointer"
-          >
-            <div className="flex items-center justify-between text-emerald-300 mb-1">
-              <span className="text-xs font-medium">Delivered</span>
-              <CheckCircle2 size={15} className="text-emerald-400" />
+            <div 
+              onClick={() => setActiveCategory('delivered')}
+              className="bg-slate-900/80 border border-emerald-900/40 rounded-xl p-3.5 hover:border-emerald-500/60 transition-all cursor-pointer"
+            >
+              <div className="flex items-center justify-between text-emerald-300 mb-1">
+                <span className="text-xs font-medium">Delivered</span>
+                <CheckCircle2 size={15} className="text-emerald-400" />
+              </div>
+              <div className="text-xl font-bold text-emerald-400 font-mono">{metrics.totalDelivered.toLocaleString('en-IN')}</div>
+              <div className="text-[11px] text-slate-400 mt-0.5">{formatINR(metrics.totalDeliveredValue)}</div>
             </div>
-            <div className="text-xl font-bold text-emerald-400 font-mono">{metrics.totalDelivered.toLocaleString('en-IN')}</div>
-            <div className="text-[11px] text-slate-400 mt-0.5">{formatINR(metrics.totalDeliveredValue)}</div>
-          </div>
 
-          <div 
-            onClick={() => setActiveCategory('rto-delivered')}
-            className="bg-slate-900/80 border border-rose-900/40 rounded-xl p-3.5 hover:border-rose-500/60 transition-all cursor-pointer"
-          >
-            <div className="flex items-center justify-between text-rose-300 mb-1">
-              <span className="text-xs font-medium">RTO Delivered</span>
-              <PackageX size={15} className="text-rose-400" />
+            <div 
+              onClick={() => {
+                setActiveCategory('rto-delivered');
+                setRtoPaymentScope('delivered');
+              }}
+              className="bg-slate-900/80 border border-rose-900/40 rounded-xl p-3.5 hover:border-rose-500/60 transition-all cursor-pointer"
+            >
+              <div className="flex items-center justify-between text-rose-300 mb-1">
+                <span className="text-xs font-medium">RTO Delivered</span>
+                <PackageX size={15} className="text-rose-400" />
+              </div>
+              <div className="text-xl font-bold text-rose-400 font-mono">{metrics.totalRtoDeliveredToSeller.toLocaleString('en-IN')}</div>
+              <div className="text-[11px] text-slate-400 mt-0.5">{formatINR(metrics.totalRtoValue)}</div>
             </div>
-            <div className="text-xl font-bold text-rose-400 font-mono">{metrics.totalRtoDeliveredToSeller.toLocaleString('en-IN')}</div>
-            <div className="text-[11px] text-slate-400 mt-0.5">{formatINR(metrics.totalRtoValue)}</div>
-          </div>
 
-          <div 
-            onClick={() => setActiveCategory('rto-in-transit')}
-            className="bg-slate-900/80 border border-amber-900/40 rounded-xl p-3.5 hover:border-amber-500/60 transition-all cursor-pointer"
-          >
-            <div className="flex items-center justify-between text-amber-300 mb-1">
-              <span className="text-xs font-medium">RTO In Transit</span>
-              <Truck size={15} className="text-amber-400" />
+            <div 
+              onClick={() => {
+                setActiveCategory('rto-in-transit');
+                setRtoPaymentScope('transit');
+              }}
+              className="bg-slate-900/80 border border-amber-900/40 rounded-xl p-3.5 hover:border-amber-500/60 transition-all cursor-pointer"
+            >
+              <div className="flex items-center justify-between text-amber-300 mb-1">
+                <span className="text-xs font-medium">RTO In Transit</span>
+                <Truck size={15} className="text-amber-400" />
+              </div>
+              <div className="text-xl font-bold text-amber-400 font-mono">{metrics.totalRtoInTransit}</div>
+              <div className="text-[11px] text-slate-500 mt-0.5">Returning to origin</div>
             </div>
-            <div className="text-xl font-bold text-amber-400 font-mono">{metrics.totalRtoInTransit}</div>
-            <div className="text-[11px] text-slate-500 mt-0.5">Returning to origin</div>
-          </div>
 
-          <div 
-            onClick={() => setActiveCategory('cancelled')}
-            className="bg-slate-900/80 border border-rose-950/50 rounded-xl p-3.5 hover:border-rose-800/60 transition-all cursor-pointer"
-          >
-            <div className="flex items-center justify-between text-rose-300 mb-1">
-              <span className="text-xs font-medium">Cancelled</span>
-              <Ban size={15} className="text-rose-400" />
+            <div 
+              onClick={() => setActiveCategory('cancelled')}
+              className="bg-slate-900/80 border border-rose-950/50 rounded-xl p-3.5 hover:border-rose-800/60 transition-all cursor-pointer"
+            >
+              <div className="flex items-center justify-between text-rose-300 mb-1">
+                <span className="text-xs font-medium">Cancelled</span>
+                <Ban size={15} className="text-rose-400" />
+              </div>
+              <div className="text-xl font-bold text-rose-400 font-mono">{metrics.totalCancelled}</div>
+              <div className="text-[11px] text-slate-400 mt-0.5">{formatINR(metrics.totalCancelledValue)}</div>
             </div>
-            <div className="text-xl font-bold text-rose-400 font-mono">{metrics.totalCancelled}</div>
-            <div className="text-[11px] text-slate-400 mt-0.5">{formatINR(metrics.totalCancelledValue)}</div>
-          </div>
 
-          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5">
-            <div className="text-xs text-slate-400">Gross Event Value</div>
-            <div className="text-xl font-bold text-white font-mono mt-1">{formatINR(metrics.grossEventValue)}</div>
-            <div className="text-[11px] text-slate-500 mt-0.5">Cumulative pipeline GMV</div>
-          </div>
-
-          <div className="bg-slate-900/80 border border-amber-950/40 rounded-xl p-3.5">
-            <div className="text-xs text-amber-300">COD Collected</div>
-            <div className="text-xl font-bold text-amber-400 font-mono mt-1">{formatINR(metrics.codDeliveredCollected)}</div>
-            <div className="text-[11px] text-slate-500 mt-0.5">Confirmed upon delivery</div>
-          </div>
-
-          <div className="bg-slate-900/80 border border-teal-950/40 rounded-xl p-3.5">
-            <div className="text-xs text-teal-300">Avg Delivery Speed</div>
-            <div className="text-xl font-bold text-teal-400 font-mono mt-1">
-              {metrics.avgDeliveryDays > 0 ? `${metrics.avgDeliveryDays}d` : '3.2d'}
+            <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5">
+              <div className="text-xs text-slate-400">Gross Event Value</div>
+              <div className="text-xl font-bold text-white font-mono mt-1">{formatINR(metrics.grossEventValue)}</div>
+              <div className="text-[11px] text-slate-500 mt-0.5">Cumulative pipeline GMV</div>
             </div>
-            <div className="text-[11px] text-slate-500 mt-0.5">Dispatch to destination</div>
+
+            <div className="bg-slate-900/80 border border-amber-950/40 rounded-xl p-3.5">
+              <div className="text-xs text-amber-300">COD Collected</div>
+              <div className="text-xl font-bold text-amber-400 font-mono mt-1">{formatINR(metrics.codDeliveredCollected)}</div>
+              <div className="text-[11px] text-slate-500 mt-0.5">Confirmed upon delivery</div>
+            </div>
+
+            <div className="bg-slate-900/80 border border-teal-950/40 rounded-xl p-3.5">
+              <div className="text-xs text-teal-300">Avg Delivery Speed</div>
+              <div className="text-xl font-bold text-teal-400 font-mono mt-1">
+                {metrics.avgDeliveryDays > 0 ? `${metrics.avgDeliveryDays}d` : '3.2d'}
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">Dispatch to destination</div>
+            </div>
           </div>
+
+          {/* Dedicated RTO Payment Breakdown section */}
+          {renderRtoPaymentBreakdownSection()}
         </div>
       )}
 
@@ -1009,10 +1316,35 @@ export const SalesHistoryView: React.FC = () => {
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 md:p-5 shadow-lg flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-bold text-white tracking-tight">Payment Mode Breakdown</h3>
-              <span className="text-[11px] text-slate-400">Click to filter</span>
+              <div>
+                <h3 className="text-sm font-bold text-white tracking-tight">Payment Mode Breakdown</h3>
+                <p className="text-xs text-slate-400">
+                  {paymentChartTab === 'rto' ? 'COD vs Prepaid RTO orders & value' : 'Event distribution across COD vs Prepaid'}
+                </p>
+              </div>
+              <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-[10px]">
+                <button
+                  onClick={() => setPaymentChartTab('rto')}
+                  className={`px-2 py-1 rounded-lg cursor-pointer transition-all ${
+                    paymentChartTab === 'rto'
+                      ? 'bg-purple-600 text-white font-semibold shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  RTO Mix
+                </button>
+                <button
+                  onClick={() => setPaymentChartTab('category')}
+                  className={`px-2 py-1 rounded-lg cursor-pointer transition-all ${
+                    paymentChartTab === 'category'
+                      ? 'bg-purple-600 text-white font-semibold shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Category Mix
+                </button>
+              </div>
             </div>
-            <p className="text-xs text-slate-400 mb-3">Event distribution across COD vs Prepaid</p>
 
             {paymentBreakdownData.length > 0 ? (
               <div className="h-44 w-full">
@@ -1028,13 +1360,23 @@ export const SalesHistoryView: React.FC = () => {
                       dataKey="count"
                       cursor="pointer"
                       onClick={(data) => {
-                        setSelectedPaymentMode(selectedPaymentMode === data.name ? 'ALL' : data.name);
+                        if (paymentChartTab === 'rto') {
+                          if (data.name === 'Pure COD') {
+                            setSelectedRtoCardFilter(selectedRtoCardFilter === 'COD' ? null : 'COD');
+                          } else if (data.name === 'Partial COD') {
+                            setSelectedRtoCardFilter(selectedRtoCardFilter === 'PARTIAL' ? null : 'PARTIAL');
+                          } else if (data.name === 'Pure Prepaid') {
+                            setSelectedRtoCardFilter(selectedRtoCardFilter === 'PREPAID' ? null : 'PREPAID');
+                          }
+                        } else {
+                          setSelectedPaymentMode(selectedPaymentMode === data.name ? 'ALL' : data.name);
+                        }
                       }}
                     >
                       {paymentBreakdownData.map((entry) => (
                         <Cell 
                           key={`cell-${entry.name}`} 
-                          fill={PAYMENT_COLORS[entry.name] || '#64748b'} 
+                          fill={entry.color || PAYMENT_COLORS[entry.name] || '#64748b'} 
                           stroke={selectedPaymentMode === entry.name ? '#fff' : 'transparent'}
                           strokeWidth={2}
                         />
@@ -1048,7 +1390,7 @@ export const SalesHistoryView: React.FC = () => {
                         fontSize: '12px'
                       }}
                       formatter={(val: any, name: any, item: any) => [
-                        `${val} events (${formatINR(item.payload.value)})`,
+                        `${val} orders (${formatINR(item.payload.value)}) · ${item.payload.orderPct || item.payload.valPct}%`,
                         item.payload.name
                       ]}
                     />
@@ -1064,24 +1406,48 @@ export const SalesHistoryView: React.FC = () => {
 
           {/* Legend */}
           <div className="space-y-2 pt-3 border-t border-slate-800">
-            {paymentBreakdownData.map(p => (
-              <div 
-                key={p.name}
-                onClick={() => setSelectedPaymentMode(selectedPaymentMode === p.name ? 'ALL' : p.name)}
-                className={`flex items-center justify-between text-xs p-1.5 rounded-lg cursor-pointer transition-all ${
-                  selectedPaymentMode === p.name ? 'bg-slate-800 text-white font-semibold' : 'hover:bg-slate-800/50 text-slate-300'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: PAYMENT_COLORS[p.name] || '#64748b' }} />
-                  <span>{p.name}</span>
+            {paymentBreakdownData.map(p => {
+              const isSelected = paymentChartTab === 'rto'
+                ? (p.name === 'Pure COD' && selectedRtoCardFilter === 'COD') ||
+                  (p.name === 'Partial COD' && selectedRtoCardFilter === 'PARTIAL') ||
+                  (p.name === 'Pure Prepaid' && selectedRtoCardFilter === 'PREPAID')
+                : selectedPaymentMode === p.name;
+
+              return (
+                <div 
+                  key={p.name}
+                  onClick={() => {
+                    if (paymentChartTab === 'rto') {
+                      if (p.name === 'Pure COD') setSelectedRtoCardFilter(selectedRtoCardFilter === 'COD' ? null : 'COD');
+                      else if (p.name === 'Partial COD') setSelectedRtoCardFilter(selectedRtoCardFilter === 'PARTIAL' ? null : 'PARTIAL');
+                      else if (p.name === 'Pure Prepaid') setSelectedRtoCardFilter(selectedRtoCardFilter === 'PREPAID' ? null : 'PREPAID');
+                    } else {
+                      setSelectedPaymentMode(selectedPaymentMode === p.name ? 'ALL' : p.name);
+                    }
+                  }}
+                  className={`flex items-center justify-between text-xs p-2 rounded-xl cursor-pointer transition-all border ${
+                    isSelected
+                      ? 'bg-slate-800 text-white font-semibold border-purple-500' 
+                      : 'hover:bg-slate-800/50 text-slate-300 border-transparent'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: p.color || PAYMENT_COLORS[p.name] || '#64748b' }} />
+                    <div>
+                      <div className="font-medium text-white">{p.name}</div>
+                      {p.sub && <div className="text-[10px] text-slate-400">{p.sub}</div>}
+                    </div>
+                  </div>
+                  <div className="text-right font-mono shrink-0">
+                    <div>
+                      <span>{p.count} orders</span>
+                      <span className="text-purple-300 ml-1.5 font-semibold">({p.orderPct || p.valPct}%)</span>
+                    </div>
+                    <div className="text-[11px] text-slate-400">{formatINR(p.value)}</div>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 font-mono">
-                  <span>{p.count} events</span>
-                  <span className="text-slate-500">({formatINR(p.value)})</span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
@@ -1295,6 +1661,12 @@ export const SalesHistoryView: React.FC = () => {
           {hasActiveFilters && (
             <div className="flex items-center flex-wrap gap-2 pt-1 text-xs text-slate-400">
               <span className="text-[11px] font-medium text-slate-500">Active Filters:</span>
+              {selectedRtoCardFilter && (
+                <span className="px-2 py-0.5 rounded-md bg-amber-950/60 border border-amber-800 text-amber-300 flex items-center gap-1 font-semibold">
+                  RTO Payment: {selectedRtoCardFilter === 'COD' ? 'COD Orders' : selectedRtoCardFilter === 'PREPAID' ? 'Prepaid Orders' : 'Partial COD'} ({rtoPaymentScope.toUpperCase()})
+                  <X size={11} className="cursor-pointer" onClick={() => setSelectedRtoCardFilter(null)} />
+                </span>
+              )}
               {selectedPaymentMode !== 'ALL' && (
                 <span className="px-2 py-0.5 rounded-md bg-slate-800 text-amber-300 flex items-center gap-1">
                   Payment: {selectedPaymentMode}
@@ -1340,8 +1712,10 @@ export const SalesHistoryView: React.FC = () => {
                 <th className="py-3 px-3.5">Customer & Location</th>
                 <th className="py-3 px-3.5">Products</th>
                 <th className="py-3 px-2 text-right">Units</th>
-                <th className="py-3 px-3 text-right">Amount</th>
-                <th className="py-3 px-3">Payment</th>
+                <th className="py-3 px-3 text-right">Order Value</th>
+                <th className="py-3 px-3 text-center">Payment</th>
+                <th className="py-3 px-3 text-right">COD Pending</th>
+                <th className="py-3 px-3 text-right">Prepaid / Adv</th>
                 <th className="py-3 px-3">Courier & Tracking</th>
                 <th className="py-3 px-3">Current Status</th>
                 <th className="py-3 px-3.5">Remarks / Reason</th>
@@ -1351,14 +1725,14 @@ export const SalesHistoryView: React.FC = () => {
             <tbody className="divide-y divide-slate-800/60">
               {loading ? (
                 <tr>
-                  <td colSpan={12} className="py-12 text-center text-slate-500">
+                  <td colSpan={14} className="py-12 text-center text-slate-500">
                     <RefreshCw size={20} className="animate-spin mx-auto mb-2 text-purple-400" />
                     <span>Loading Sales History events...</span>
                   </td>
                 </tr>
               ) : paginatedEvents.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="py-12 text-center text-slate-500">
+                  <td colSpan={14} className="py-12 text-center text-slate-500">
                     <HistoryIcon size={28} className="mx-auto mb-2 opacity-40 text-slate-400" />
                     <p className="font-semibold text-slate-300">No events match the selected filters or date range</p>
                     <p className="text-xs text-slate-500 mt-1">Try switching category tabs or selecting "All Time"</p>
@@ -1437,23 +1811,34 @@ export const SalesHistoryView: React.FC = () => {
                       <div className="font-bold text-white font-mono">
                         {formatINR(event.order_amount)}
                       </div>
-                      {event.payment_mode === 'PARTIAL COD' && (
-                        <div className="text-[10px] text-slate-400 font-mono">
-                          adv ₹{event.prepaid_amount} / cod ₹{event.cod_amount}
-                        </div>
-                      )}
                     </td>
 
                     {/* Payment Mode */}
-                    <td className="py-3 px-3 whitespace-nowrap">
+                    <td className="py-3 px-3 text-center whitespace-nowrap">
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide border ${
                         event.payment_mode === 'PREPAID'
                           ? 'bg-purple-950/60 text-purple-300 border-purple-800/60'
                           : event.payment_mode === 'PARTIAL COD'
                           ? 'bg-pink-950/60 text-pink-300 border-pink-800/60'
-                          : 'bg-amber-950/60 text-amber-300 border-amber-800/60'
+                          : event.payment_mode === 'COD'
+                          ? 'bg-amber-950/60 text-amber-300 border-amber-800/60'
+                          : 'bg-slate-800 text-slate-400 border-slate-700'
                       }`}>
                         {event.payment_mode}
+                      </span>
+                    </td>
+
+                    {/* COD Amount */}
+                    <td className="py-3 px-3 text-right whitespace-nowrap font-mono">
+                      <span className={event.cod_amount > 0 ? 'text-amber-400 font-semibold' : 'text-slate-600'}>
+                        {formatINR(event.cod_amount)}
+                      </span>
+                    </td>
+
+                    {/* Prepaid Amount */}
+                    <td className="py-3 px-3 text-right whitespace-nowrap font-mono">
+                      <span className={event.prepaid_amount > 0 ? 'text-purple-400 font-semibold' : 'text-slate-600'}>
+                        {formatINR(event.prepaid_amount)}
                       </span>
                     </td>
 

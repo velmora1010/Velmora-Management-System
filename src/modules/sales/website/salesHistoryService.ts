@@ -12,6 +12,45 @@ export type SalesHistoryEventType =
   | 'CANCELLED' 
   | 'RETURN';
 
+export type RtoPaymentScope = 'delivered' | 'transit' | 'initiated' | 'all';
+
+export interface RtoPaymentBreakdownMetrics {
+  scope: RtoPaymentScope;
+  scopeLabel: string;
+  totalRtoEvents: number;
+  distinctOrdersCount: number;
+  totalOrderValue: number;
+
+  // 1. COD RTO Orders & Value
+  codRtoOrdersCount: number;       // Distinct orders with COD component (Pure COD + Partial COD)
+  codRtoValue: number;             // Total COD pending/receivable value: Pure COD + Partial COD remaining_cod
+  pureCodOrdersCount: number;      // Pure COD order count
+  pureCodValue: number;            // Pure COD order total value
+
+  // 2. Prepaid RTO Orders & Value
+  prepaidRtoOrdersCount: number;   // Distinct Pure Prepaid orders
+  prepaidRtoValue: number;         // Total Prepaid collected value: Pure Prepaid + Partial COD advance_paid
+  purePrepaidOrdersCount: number;  // Pure Prepaid order count
+  purePrepaidValue: number;        // Pure Prepaid order value
+
+  // 3. Partial COD Detailed breakdown
+  partialCodOrdersCount: number;   // Distinct Partial COD order count
+  partialCodTotalValue: number;    // Gross order total for Partial COD orders
+  partialCodAdvancePaid: number;   // Advance paid (prepaid component)
+  partialCodRemainingCod: number;  // Remaining COD (COD component)
+
+  // 4. Unknown payment orders
+  unknownOrdersCount: number;
+  unknownValue: number;
+
+  // 5. Percentages
+  codOrdersPct: number;
+  prepaidOrdersPct: number;
+  partialCodOrdersPct: number;
+  codValuePct: number;
+  prepaidValuePct: number;
+}
+
 export interface HistoryProductItem {
   name: string;
   quantity: number;
@@ -268,36 +307,122 @@ export class SalesHistoryService {
       const cancelledOrders = cancRes.data || [];
       const createdOrders = createdRes.data || [];
 
+      // Build authoritative Sales Orders lookup map to enrich RTO & shipments with exact payment modes
+      const soMap = new Map<string, any>();
+      createdOrders.forEach(o => {
+        const cleanOid = String(o.order_id || '').replace('#', '').trim().toLowerCase();
+        if (cleanOid) soMap.set(cleanOid, o);
+      });
+
+      // Collect any RTO & return order IDs not yet present in createdOrders
+      const rtoCleanOids = new Set<string>();
+      for (const ship of shipments) {
+        const rawStatus = String(ship.status || ship.raw_status || '').toLowerCase();
+        if (rawStatus.includes('rto') || rawStatus.includes('origin') || rawStatus.includes('return')) {
+          const rawOid = ship.order_id || ship.display_order_id || '';
+          const cleanOid = String(rawOid).replace('#', '').trim().toLowerCase();
+          if (cleanOid && !soMap.has(cleanOid)) {
+            rtoCleanOids.add(cleanOid);
+          }
+        }
+      }
+
+      // Fetch missing RTO orders from sales_orders in parallel chunks
+      const missingOidList = Array.from(rtoCleanOids);
+      if (missingOidList.length > 0) {
+        const chunks: string[][] = [];
+        for (let i = 0; i < missingOidList.length; i += 40) {
+          chunks.push(missingOidList.slice(i, i + 40));
+        }
+
+        const missingOrdersResults = await Promise.all(
+          chunks.map(chunk => {
+            const variants: string[] = [];
+            chunk.forEach(id => {
+              variants.push(id);
+              variants.push(`#${id}`);
+            });
+            return supabase
+              .from('sales_orders')
+              .select('id,order_id,order_date,customer_name,phone,state,city,pincode,order_total,total_quantity,payment_mode,source_payment_method,advance_paid,remaining_cod,order_status,extra_data')
+              .in('order_id', variants);
+          })
+        );
+
+        missingOrdersResults.forEach(res => {
+          if (res.data) {
+            res.data.forEach((so: any) => {
+              const clean = String(so.order_id || '').replace('#', '').trim().toLowerCase();
+              if (clean) soMap.set(clean, so);
+            });
+          }
+        });
+      }
+
       const events: SalesHistoryEvent[] = [];
 
       // 1. SHIPMENTS PROCESSING (Dispatched, Delivered, RTO Delivered, RTO In Transit, Return)
       for (const ship of shipments) {
         const rawOid = ship.order_id || ship.display_order_id || '';
         const cleanOid = String(rawOid).replace('#', '').trim();
-        const customerName = ship.customer_name || 'N/A';
-        const phone = ship.phone_number || '';
-        const state = ship.state || 'Unspecified';
-        const city = ship.city || 'Unspecified';
-        const pincode = ship.pincode || '';
+        const matchedSo = soMap.get(cleanOid.toLowerCase());
+
+        const customerName = (matchedSo?.customer_name) || ship.customer_name || 'N/A';
+        const phone = (matchedSo?.phone) || ship.phone_number || '';
+        const state = (matchedSo?.state) || ship.state || 'Unspecified';
+        const city = (matchedSo?.city) || ship.city || 'Unspecified';
+        const pincode = (matchedSo?.pincode) || ship.pincode || '';
         const courier = ship.courier || 'Delhivery';
         const awbNumber = ship.awb_number || '';
         const trackingUrl = ship.tracking_url || (awbNumber ? `https://www.delhivery.com/track/package/${awbNumber}` : undefined);
-        const orderAmount = Number(ship.amount ?? 0);
-        const originalOrderDate = ship.dispatch_date ? normalizeDateToIso(ship.dispatch_date).display : '—';
+        const orderAmount = Number(matchedSo?.order_total ?? ship.amount ?? 0);
+        const originalOrderDate = ship.dispatch_date ? normalizeDateToIso(ship.dispatch_date).display : (matchedSo?.order_date ? normalizeDateToIso(matchedSo.order_date).display : '—');
 
-        // Payment classification
+        // Authoritative Payment classification
         let paymentMode: 'COD' | 'PREPAID' | 'PARTIAL COD' | 'UNKNOWN' = 'COD';
-        const pModeStr = String(ship.order_type || '').toUpperCase();
-        if (pModeStr.includes('PREPAID') || pModeStr.includes('ONLINE') || pModeStr.includes('UPI')) {
-          paymentMode = 'PREPAID';
+        let codAmount = 0;
+        let prepaidAmount = 0;
+        let sourcePaymentMethod = ship.order_type || '';
+
+        if (matchedSo) {
+          const pModeStr = String(matchedSo.payment_mode || '').toUpperCase();
+          sourcePaymentMethod = matchedSo.source_payment_method || matchedSo.payment_mode || ship.order_type || '';
+          if (pModeStr.includes('PARTIAL')) {
+            paymentMode = 'PARTIAL COD';
+            const adv = Number(matchedSo.advance_paid) || 0;
+            prepaidAmount = adv;
+            codAmount = Number(matchedSo.remaining_cod) || Math.max(0, orderAmount - adv);
+          } else if (pModeStr.includes('PREPAID') || pModeStr.includes('ONLINE') || pModeStr.includes('UPI')) {
+            paymentMode = 'PREPAID';
+            prepaidAmount = orderAmount;
+            codAmount = 0;
+          } else if (pModeStr.includes('COD') || pModeStr.includes('CASH')) {
+            paymentMode = 'COD';
+            codAmount = orderAmount;
+            prepaidAmount = 0;
+          } else {
+            paymentMode = 'UNKNOWN';
+            codAmount = 0;
+            prepaidAmount = 0;
+          }
         } else {
-          paymentMode = 'COD';
+          const pModeStr = String(ship.order_type || '').toUpperCase();
+          if (pModeStr.includes('PREPAID') || pModeStr.includes('ONLINE') || pModeStr.includes('UPI')) {
+            paymentMode = 'PREPAID';
+            prepaidAmount = orderAmount;
+            codAmount = 0;
+          } else if (pModeStr.includes('COD')) {
+            paymentMode = 'COD';
+            codAmount = orderAmount;
+            prepaidAmount = 0;
+          } else {
+            paymentMode = 'UNKNOWN';
+            codAmount = 0;
+            prepaidAmount = 0;
+          }
         }
 
-        const codAmount = paymentMode === 'COD' ? orderAmount : 0;
-        const prepaidAmount = paymentMode === 'PREPAID' ? orderAmount : 0;
-
-        const parsedProd = parseShipmentProductsString(ship.products || '');
+        const parsedProd = parseShipmentProductsString(ship.products || matchedSo?.extra_data?.order_formatted || matchedSo?.extra_data?.product_name || '');
         const rawStatusStr = String(ship.status || ship.raw_status || '').toLowerCase();
 
         // EVENT A: DISPATCHED
@@ -325,13 +450,14 @@ export class SalesHistoryService {
               quantity: parsedProd.totalQty,
               order_amount: orderAmount,
               payment_mode: paymentMode,
-              source_payment_method: ship.order_type || '',
+              source_payment_method: sourcePaymentMethod,
               cod_amount: codAmount,
               prepaid_amount: prepaidAmount,
               courier: courier,
               awb_number: awbNumber,
               tracking_url: trackingUrl,
-              remarks: ship.remarks || 'Manifest created and handed to courier'
+              remarks: ship.remarks || 'Manifest created and handed to courier',
+              raw_sales_order: matchedSo
             });
           }
         }
@@ -371,7 +497,7 @@ export class SalesHistoryService {
               quantity: parsedProd.totalQty,
               order_amount: orderAmount,
               payment_mode: paymentMode,
-              source_payment_method: ship.order_type || '',
+              source_payment_method: sourcePaymentMethod,
               cod_amount: codAmount,
               prepaid_amount: prepaidAmount,
               cod_collected: codAmount,
@@ -379,7 +505,8 @@ export class SalesHistoryService {
               awb_number: awbNumber,
               tracking_url: trackingUrl,
               delivery_days: delivDays,
-              remarks: ship.remarks || 'Shipment delivered to customer'
+              remarks: ship.remarks || 'Shipment delivered to customer',
+              raw_sales_order: matchedSo
             });
           }
         }
@@ -409,14 +536,15 @@ export class SalesHistoryService {
               quantity: parsedProd.totalQty,
               order_amount: orderAmount,
               payment_mode: paymentMode,
-              source_payment_method: ship.order_type || '',
+              source_payment_method: sourcePaymentMethod,
               cod_amount: codAmount,
               prepaid_amount: prepaidAmount,
               courier: courier,
               awb_number: awbNumber,
               tracking_url: trackingUrl,
               remarks: ship.remarks || 'Returned to Origin and received by seller',
-              reason: ship.remarks
+              reason: ship.remarks,
+              raw_sales_order: matchedSo
             });
           }
         }
@@ -447,14 +575,15 @@ export class SalesHistoryService {
               quantity: parsedProd.totalQty,
               order_amount: orderAmount,
               payment_mode: paymentMode,
-              source_payment_method: ship.order_type || '',
+              source_payment_method: sourcePaymentMethod,
               cod_amount: codAmount,
               prepaid_amount: prepaidAmount,
               courier: courier,
               awb_number: awbNumber,
               tracking_url: trackingUrl,
               remarks: ship.remarks || 'Parcel in transit returning back to origin',
-              reason: ship.remarks
+              reason: ship.remarks,
+              raw_sales_order: matchedSo
             });
           }
         }
@@ -485,14 +614,15 @@ export class SalesHistoryService {
               quantity: parsedProd.totalQty,
               order_amount: orderAmount,
               payment_mode: paymentMode,
-              source_payment_method: ship.order_type || '',
+              source_payment_method: sourcePaymentMethod,
               cod_amount: codAmount,
               prepaid_amount: prepaidAmount,
               courier: courier,
               awb_number: awbNumber,
               tracking_url: trackingUrl,
               remarks: ship.remarks || 'Customer return event processed',
-              reason: ship.remarks
+              reason: ship.remarks,
+              raw_sales_order: matchedSo
             });
           }
         }
@@ -878,6 +1008,124 @@ export class SalesHistoryService {
 
       totalEventsCount: events.length,
       grossEventValue
+    };
+  }
+
+  /**
+   * Calculates precise COD vs Prepaid RTO metrics with deduplication and Partial COD split
+   */
+  calculateRtoPaymentBreakdown(events: SalesHistoryEvent[], scope: RtoPaymentScope = 'delivered'): RtoPaymentBreakdownMetrics {
+    // 1. Filter events matching RTO types and current scope
+    const rtoEvents = events.filter(e => {
+      if (scope === 'delivered') return e.event_type === 'RTO_DELIVERED';
+      if (scope === 'transit') return e.event_type === 'RTO_IN_TRANSIT';
+      if (scope === 'initiated') return e.event_type === 'RTO_INITIATED';
+      return e.event_type === 'RTO_DELIVERED' || e.event_type === 'RTO_IN_TRANSIT' || e.event_type === 'RTO_INITIATED';
+    });
+
+    // 2. Deduplicate by distinct order_id (preferring RTO_DELIVERED over RTO_IN_TRANSIT over RTO_INITIATED)
+    const orderMap = new Map<string, SalesHistoryEvent>();
+    const priority: Record<string, number> = {
+      'RTO_DELIVERED': 3,
+      'RTO_IN_TRANSIT': 2,
+      'RTO_INITIATED': 1
+    };
+
+    rtoEvents.forEach(e => {
+      const key = e.order_id.toLowerCase().trim();
+      if (!orderMap.has(key)) {
+        orderMap.set(key, e);
+      } else {
+        const existing = orderMap.get(key)!;
+        const existingPri = priority[existing.event_type] || 0;
+        const currentPri = priority[e.event_type] || 0;
+        if (currentPri > existingPri) {
+          orderMap.set(key, e);
+        }
+      }
+    });
+
+    const distinctOrders = Array.from(orderMap.values());
+    const distinctOrdersCount = distinctOrders.length;
+
+    let totalOrderValue = 0;
+    let pureCodOrdersCount = 0;
+    let pureCodValue = 0;
+    let purePrepaidOrdersCount = 0;
+    let purePrepaidValue = 0;
+    let partialCodOrdersCount = 0;
+    let partialCodTotalValue = 0;
+    let partialCodAdvancePaid = 0;
+    let partialCodRemainingCod = 0;
+    let unknownOrdersCount = 0;
+    let unknownValue = 0;
+
+    distinctOrders.forEach(ord => {
+      totalOrderValue += ord.order_amount;
+      if (ord.payment_mode === 'COD') {
+        pureCodOrdersCount++;
+        pureCodValue += ord.order_amount;
+      } else if (ord.payment_mode === 'PREPAID') {
+        purePrepaidOrdersCount++;
+        purePrepaidValue += ord.order_amount;
+      } else if (ord.payment_mode === 'PARTIAL COD') {
+        partialCodOrdersCount++;
+        partialCodTotalValue += ord.order_amount;
+        partialCodAdvancePaid += ord.prepaid_amount;
+        partialCodRemainingCod += ord.cod_amount;
+      } else {
+        unknownOrdersCount++;
+        unknownValue += ord.order_amount;
+      }
+    });
+
+    // COD component: Pure COD orders + Partial COD orders
+    const codRtoOrdersCount = pureCodOrdersCount + partialCodOrdersCount;
+    const codRtoValue = pureCodValue + partialCodRemainingCod;
+
+    // Prepaid component: Pure Prepaid orders + Partial COD advance payments
+    const prepaidRtoOrdersCount = purePrepaidOrdersCount;
+    const prepaidRtoValue = purePrepaidValue + partialCodAdvancePaid;
+
+    const codOrdersPct = distinctOrdersCount > 0 ? Number(((codRtoOrdersCount / distinctOrdersCount) * 100).toFixed(1)) : 0;
+    const prepaidOrdersPct = distinctOrdersCount > 0 ? Number(((prepaidRtoOrdersCount / distinctOrdersCount) * 100).toFixed(1)) : 0;
+    const partialCodOrdersPct = distinctOrdersCount > 0 ? Number(((partialCodOrdersCount / distinctOrdersCount) * 100).toFixed(1)) : 0;
+
+    const codValuePct = totalOrderValue > 0 ? Number(((codRtoValue / totalOrderValue) * 100).toFixed(1)) : 0;
+    const prepaidValuePct = totalOrderValue > 0 ? Number(((prepaidRtoValue / totalOrderValue) * 100).toFixed(1)) : 0;
+
+    const scopeLabels: Record<RtoPaymentScope, string> = {
+      delivered: 'RTO Delivered to Seller',
+      transit: 'RTO In Transit',
+      initiated: 'RTO Initiated',
+      all: 'All RTO Events'
+    };
+
+    return {
+      scope,
+      scopeLabel: scopeLabels[scope],
+      totalRtoEvents: rtoEvents.length,
+      distinctOrdersCount,
+      totalOrderValue,
+      codRtoOrdersCount,
+      codRtoValue,
+      pureCodOrdersCount,
+      pureCodValue,
+      prepaidRtoOrdersCount,
+      prepaidRtoValue,
+      purePrepaidOrdersCount,
+      purePrepaidValue,
+      partialCodOrdersCount,
+      partialCodTotalValue,
+      partialCodAdvancePaid,
+      partialCodRemainingCod,
+      unknownOrdersCount,
+      unknownValue,
+      codOrdersPct,
+      prepaidOrdersPct,
+      partialCodOrdersPct,
+      codValuePct,
+      prepaidValuePct
     };
   }
 }
