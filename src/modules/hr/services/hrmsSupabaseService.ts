@@ -779,6 +779,17 @@ export async function upsertPayrollRecordInSupabase(record: PayrollRecord): Prom
 // ============================================================================
 
 export function rowToEmployeeFile(row: any): EmployeeFile {
+  const isEmpUploader =
+    row.uploader_role === 'employee' ||
+    row.submission_source === 'employee';
+
+  const uploaderRole: FileUploaderRole = isEmpUploader ? 'employee' : 'hr_admin';
+  const submissionSource: FileSubmissionSource = isEmpUploader ? 'employee' : 'hr';
+
+  const verificationStatus: FileVerificationStatus =
+    row.verification_status ||
+    (row.upload_status === 'Verified' ? 'verified' : isEmpUploader ? 'pending_review' : 'verified');
+
   return {
     id: row.id,
     employeeId: row.employee_id,
@@ -791,8 +802,11 @@ export function rowToEmployeeFile(row: any): EmployeeFile {
     storagePath: row.storage_path || '',
     publicUrl: row.public_url || '',
     category: (row.category as EmployeeFileCategory) || 'Other',
-    uploadStatus: (row.upload_status as any) || 'Uploaded',
-    uploadedBy: row.uploaded_by || 'HR Administrator',
+    uploadStatus: (row.upload_status as any) || (verificationStatus === 'verified' ? 'Verified' : 'Pending'),
+    verificationStatus,
+    uploadedBy: row.uploaded_by || (isEmpUploader ? row.employee_name : 'HR Administrator'),
+    uploaderRole,
+    submissionSource,
     uploadedAt: row.uploaded_at ? new Date(row.uploaded_at).toLocaleString() : '',
   };
 }
@@ -810,7 +824,10 @@ export function employeeFileToRow(file: EmployeeFile): any {
     public_url: file.publicUrl || null,
     category: file.category,
     upload_status: file.uploadStatus,
-    uploaded_by: file.uploadedBy || 'HR Administrator',
+    verification_status: file.verificationStatus || (file.uploadStatus === 'Verified' ? 'verified' : 'pending_review'),
+    uploaded_by: file.uploadedBy || (file.uploaderRole === 'employee' ? file.employeeName : 'HR Administrator'),
+    uploader_role: file.uploaderRole || 'hr_admin',
+    submission_source: file.submissionSource || 'hr',
   };
 }
 

@@ -18,6 +18,9 @@ import {
   ScheduleAuditEntry,
   EmployeeFile,
   EmployeeFileCategory,
+  FileUploaderRole,
+  FileSubmissionSource,
+  FileVerificationStatus,
 } from '../types/hrms';
 import {
   INITIAL_SETTINGS,
@@ -102,7 +105,15 @@ interface HRMSContextType {
 
   // Employee Files / Documents
   employeeFiles: EmployeeFile[];
-  uploadEmployeeFile: (params: { employeeId: string; file: File; category: EmployeeFileCategory }) => Promise<EmployeeFile>;
+  uploadEmployeeFile: (params: {
+    employeeId: string;
+    file: File;
+    category: EmployeeFileCategory;
+    uploaderRole?: FileUploaderRole;
+    submissionSource?: FileSubmissionSource;
+    uploadedBy?: string;
+    verificationStatus?: FileVerificationStatus;
+  }) => Promise<EmployeeFile>;
   deleteEmployeeFile: (fileId: string) => Promise<boolean>;
 
   // Department Operations
@@ -191,7 +202,7 @@ const LOCAL_STORAGE_KEYS = {
 
 export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { showToast } = useToast();
-  const { currentUser, canManageEmployees, canApproveLeave, canApplyLeave, refreshUsers } = useAuth();
+  const { currentUser, canManageEmployees, canApproveLeave, canApplyLeave, refreshUsers, activeHRAccountType } = useAuth();
 
   // 1. Employees State
   const [employees, setEmployees] = useState<Employee[]>(() => {
@@ -379,7 +390,18 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((file: any) => {
+            const isEmp = file.uploaderRole === 'employee' || file.submissionSource === 'employee';
+            return {
+              ...file,
+              uploaderRole: file.uploaderRole || (isEmp ? 'employee' : 'hr_admin'),
+              submissionSource: file.submissionSource || (isEmp ? 'employee' : 'hr'),
+              verificationStatus: file.verificationStatus || (file.uploadStatus === 'Verified' ? 'verified' : isEmp ? 'pending_review' : 'verified'),
+              uploadedBy: file.uploadedBy || (isEmp ? file.employeeName : 'HR Administrator'),
+            };
+          });
+        }
       } catch {}
     }
     return INITIAL_EMPLOYEE_FILES;
@@ -666,10 +688,18 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     employeeId,
     file,
     category,
+    uploaderRole,
+    submissionSource,
+    uploadedBy,
+    verificationStatus,
   }: {
     employeeId: string;
     file: File;
     category: EmployeeFileCategory;
+    uploaderRole?: FileUploaderRole;
+    submissionSource?: FileSubmissionSource;
+    uploadedBy?: string;
+    verificationStatus?: FileVerificationStatus;
   }): Promise<EmployeeFile> => {
     const emp = employees.find((e) => e.id === employeeId || e.employeeCode === employeeId);
     const empCode = emp?.employeeCode || employeeId;
@@ -683,6 +713,24 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         ? `${Math.round(file.size / 1024)} KB`
         : `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
 
+    // Strictly determine uploader role and submission source
+    const isEmployeeUploader =
+      uploaderRole === 'employee' ||
+      submissionSource === 'employee' ||
+      currentUser?.role === 'employee' ||
+      activeHRAccountType === 'employee';
+
+    const effectiveRole: FileUploaderRole = isEmployeeUploader ? 'employee' : 'hr_admin';
+    const effectiveSource: FileSubmissionSource = isEmployeeUploader ? 'employee' : 'hr';
+    const effectiveStatus: 'Uploaded' | 'Verified' | 'Pending' = isEmployeeUploader ? 'Pending' : 'Uploaded';
+    const effectiveVerification: FileVerificationStatus =
+      verificationStatus || (isEmployeeUploader ? 'pending_review' : 'verified');
+    const effectiveUploadedBy =
+      uploadedBy ||
+      (isEmployeeUploader
+        ? currentUser?.name || empName
+        : currentUser?.name || 'HR Administrator');
+
     const newFile: EmployeeFile = {
       id: `doc-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
       employeeId: emp?.id || employeeId,
@@ -695,8 +743,11 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       storagePath,
       publicUrl,
       category,
-      uploadStatus: 'Uploaded',
-      uploadedBy: currentUser?.name || 'HR Administrator',
+      uploadStatus: effectiveStatus,
+      verificationStatus: effectiveVerification,
+      uploadedBy: effectiveUploadedBy,
+      uploaderRole: effectiveRole,
+      submissionSource: effectiveSource,
       uploadedAt: new Date().toLocaleString(),
     };
 
@@ -710,8 +761,19 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.warn('[Supabase HR] Failed to insert file record:', err);
     });
 
-    logActivity('uploaded employee document', `${file.name} for ${empName}`, 'employee', '#3B82F6');
-    showToast(`Document "${file.name}" uploaded successfully!`, 'success', 'File Uploaded');
+    logActivity(
+      effectiveSource === 'employee' ? 'submitted employee document' : 'uploaded employee document',
+      `${file.name} for ${empName}`,
+      'employee',
+      '#3B82F6'
+    );
+    showToast(
+      effectiveSource === 'employee'
+        ? `Document "${file.name}" submitted successfully for HR review!`
+        : `Document "${file.name}" uploaded successfully!`,
+      'success',
+      'File Uploaded'
+    );
     return newFile;
   };
 

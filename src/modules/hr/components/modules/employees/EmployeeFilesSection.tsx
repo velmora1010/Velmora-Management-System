@@ -19,6 +19,8 @@ import {
   Plus,
   X,
   XCircle,
+  UserCheck,
+  User,
 } from 'lucide-react';
 import { Employee, EmployeeFile, EmployeeFileCategory } from '../../../types/hrms';
 import { Avatar } from '../../common/Avatar';
@@ -30,6 +32,9 @@ interface EmployeeFilesSectionProps {
     employeeId: string;
     file: File;
     category: EmployeeFileCategory;
+    uploaderRole?: any;
+    submissionSource?: any;
+    uploadedBy?: string;
   }) => Promise<any>;
   onDeleteFile: (fileId: string) => Promise<any>;
   canManage: boolean;
@@ -103,6 +108,19 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
     });
   };
 
+  // Helper to compute exact document counts separating Employee Submitted vs HR Uploaded
+  const getEmployeeDocStats = (emp: Employee) => {
+    const docs = getEmployeeDocs(emp);
+    const employeeSubmitted = docs.filter(
+      (d) => d.submissionSource === 'employee' || d.uploaderRole === 'employee'
+    ).length;
+    const hrUploaded = docs.filter(
+      (d) => d.submissionSource === 'hr' || d.uploaderRole === 'hr_admin' || (!d.submissionSource && !d.uploaderRole)
+    ).length;
+    const total = docs.length;
+    return { employeeSubmitted, hrUploaded, total, docs };
+  };
+
   // Helper to compute submission status: Verified, Submitted, or Pending
   const getSubmissionStatus = (docs: EmployeeFile[]): 'Pending' | 'Submitted' | 'Verified' => {
     if (docs.length === 0) return 'Pending';
@@ -120,6 +138,12 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
   const activeEmployeeDocs = useMemo(() => {
     if (!activeEmployee) return [];
     return getEmployeeDocs(activeEmployee);
+  }, [activeEmployee, employeeFiles]);
+
+  // Document statistics of active employee
+  const activeEmployeeStats = useMemo(() => {
+    if (!activeEmployee) return { employeeSubmitted: 0, hrUploaded: 0, total: 0, docs: [] };
+    return getEmployeeDocStats(activeEmployee);
   }, [activeEmployee, employeeFiles]);
 
   // Selected employee object for upload
@@ -233,6 +257,9 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
           employeeId: selectedEmployeeId,
           file: item.file,
           category: selectedCategory,
+          uploaderRole: 'hr_admin',
+          submissionSource: 'hr',
+          uploadedBy: 'HR Administrator',
         });
       }
 
@@ -395,10 +422,10 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
                 className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-[#334155] bg-[#0F172A] text-white focus:outline-hidden focus:border-[#3B82F6] transition-colors"
               >
                 {employees.map((emp) => {
-                  const count = getEmployeeDocs(emp).length;
+                  const stats = getEmployeeDocStats(emp);
                   return (
                     <option key={emp.id} value={emp.id}>
-                      {emp.fullName} ({emp.employeeCode}) — {count} {count === 1 ? 'doc' : 'docs'}
+                      {emp.fullName} ({emp.employeeCode}) — Total: {stats.total} (Emp: {stats.employeeSubmitted}, HR: {stats.hrUploaded})
                     </option>
                   );
                 })}
@@ -592,15 +619,48 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <span className="text-xs font-semibold px-3 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                {activeEmployeeDocs.length} Documents Submitted
-              </span>
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* 1. Employee Submitted Indicator */}
+              <div
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-500/10 border border-blue-500/25 text-xs font-semibold text-blue-300"
+                title="Documents personally submitted by this employee"
+              >
+                <UserCheck className="w-3.5 h-3.5 text-blue-400" />
+                <span>Employee Submitted:</span>
+                <span className="font-bold text-white px-1.5 py-0.5 rounded-md bg-blue-500/25 border border-blue-500/30">
+                  {activeEmployeeStats.employeeSubmitted}
+                </span>
+              </div>
+
+              {/* 2. HR Uploaded Indicator */}
+              <div
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-500/10 border border-purple-500/25 text-xs font-semibold text-purple-300"
+                title="Documents uploaded by HR Administrator"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-purple-400" />
+                <span>HR Uploaded:</span>
+                <span className="font-bold text-white px-1.5 py-0.5 rounded-md bg-purple-500/25 border border-purple-500/30">
+                  {activeEmployeeStats.hrUploaded}
+                </span>
+              </div>
+
+              {/* 3. Total Documents Indicator */}
+              <div
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800/80 border border-slate-700 text-xs font-semibold text-slate-300"
+                title="Total documents on file for this employee"
+              >
+                <FolderOpen className="w-3.5 h-3.5 text-slate-400" />
+                <span>Total Documents:</span>
+                <span className="font-bold text-white px-1.5 py-0.5 rounded-md bg-slate-700 border border-slate-600">
+                  {activeEmployeeStats.total}
+                </span>
+              </div>
+
               {canManage && (
                 <button
                   type="button"
                   onClick={() => handleQuickUploadFor(activeEmployee.id)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-xl transition-colors shadow-xs cursor-pointer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-xl transition-colors shadow-xs cursor-pointer ml-1"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Upload For {activeEmployee.firstName || 'Employee'}</span>
@@ -681,15 +741,25 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
                           <span className="font-medium text-xs">{file.fileSize}</span>
                         </td>
 
-                        {/* Upload Date */}
+                        {/* Upload Date & Attribution */}
                         <td className="py-3 px-4 text-[#94A3B8]">
                           <div className="flex items-center gap-1.5 text-xs text-white font-medium">
                             <Clock className="w-3 h-3 text-[#64748B]" />
                             <span>{file.uploadedAt || 'Recent'}</span>
                           </div>
-                          <span className="text-[10px] text-[#64748B] block">
-                            By {file.uploadedBy || 'HR Admin'}
-                          </span>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            {file.submissionSource === 'employee' || file.uploaderRole === 'employee' ? (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                                <UserCheck className="w-2.5 h-2.5 text-blue-400" />
+                                <span>Submitted by {file.uploadedBy || activeEmployee.fullName}</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-500/10 text-purple-300 border border-purple-500/20">
+                                <ShieldCheck className="w-2.5 h-2.5 text-purple-400" />
+                                <span>Uploaded by {file.uploadedBy || 'HR Administrator'}</span>
+                              </span>
+                            )}
+                          </div>
                         </td>
 
                         {/* Verification Status */}
@@ -824,7 +894,9 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
                     <th className="py-3 px-4">Employee ID</th>
                     <th className="py-3 px-4">Department</th>
                     <th className="py-3 px-4">Designation</th>
-                    <th className="py-3 px-4 text-center">Documents Submitted</th>
+                    <th className="py-3 px-4 text-center">Employee Submitted</th>
+                    <th className="py-3 px-4 text-center">HR Uploaded</th>
+                    <th className="py-3 px-4 text-center">Total Documents</th>
                     <th className="py-3 px-4">Document Categories</th>
                     <th className="py-3 px-4">Submission Status</th>
                     <th className="py-3 px-4 text-right">Actions</th>
@@ -832,8 +904,8 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
                 </thead>
                 <tbody className="divide-y divide-[#334155]/60 bg-[#151D2B]">
                   {filteredEmployees.map((emp) => {
-                    const docs = getEmployeeDocs(emp);
-                    const docsCount = docs.length;
+                    const stats = getEmployeeDocStats(emp);
+                    const docs = stats.docs;
                     const status = getSubmissionStatus(docs);
                     const categories = Array.from(new Set(docs.map((d) => d.category)));
 
@@ -875,16 +947,45 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
                           <span className="text-xs">{emp.designation}</span>
                         </td>
 
-                        {/* Documents Submitted */}
+                        {/* Employee Submitted */}
                         <td className="py-3 px-4 text-center">
                           <span
                             className={`inline-flex items-center justify-center font-bold text-xs px-2.5 py-0.5 rounded-full ${
-                              docsCount > 0
+                              stats.employeeSubmitted > 0
                                 ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
-                                : 'bg-slate-700/30 text-slate-400 border border-slate-700'
+                                : 'bg-slate-800/40 text-slate-400 border border-slate-700/60'
                             }`}
+                            title={`${stats.employeeSubmitted} document${stats.employeeSubmitted === 1 ? '' : 's'} personally submitted by employee`}
                           >
-                            {docsCount}
+                            {stats.employeeSubmitted}
+                          </span>
+                        </td>
+
+                        {/* HR Uploaded */}
+                        <td className="py-3 px-4 text-center">
+                          <span
+                            className={`inline-flex items-center justify-center font-bold text-xs px-2.5 py-0.5 rounded-full ${
+                              stats.hrUploaded > 0
+                                ? 'bg-purple-500/15 text-purple-400 border border-purple-500/30'
+                                : 'bg-slate-800/40 text-slate-400 border border-slate-700/60'
+                            }`}
+                            title={`${stats.hrUploaded} document${stats.hrUploaded === 1 ? '' : 's'} uploaded by HR Administrator`}
+                          >
+                            {stats.hrUploaded}
+                          </span>
+                        </td>
+
+                        {/* Total Documents */}
+                        <td className="py-3 px-4 text-center">
+                          <span
+                            className={`inline-flex items-center justify-center font-bold text-xs px-2.5 py-0.5 rounded-full ${
+                              stats.total > 0
+                                ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                                : 'bg-slate-800/40 text-slate-400 border border-slate-700/60'
+                            }`}
+                            title={`${stats.total} total documents on file`}
+                          >
+                            {stats.total}
                           </span>
                         </td>
 

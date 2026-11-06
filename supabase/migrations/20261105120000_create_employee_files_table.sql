@@ -19,10 +19,17 @@ CREATE TABLE IF NOT EXISTS public.employee_files (
   public_url TEXT,
   category TEXT NOT NULL DEFAULT 'Other', -- 'ID Proof', 'Offer Letter', 'Resume', 'Contract', 'Other'
   upload_status TEXT NOT NULL DEFAULT 'Uploaded', -- 'Uploaded', 'Verified', 'Pending'
+  verification_status TEXT NOT NULL DEFAULT 'pending_review', -- 'pending_review', 'verified', 'rejected'
   uploaded_by TEXT DEFAULT 'HR Administrator',
+  uploader_role TEXT NOT NULL DEFAULT 'hr_admin', -- 'hr_admin', 'employee'
+  submission_source TEXT NOT NULL DEFAULT 'hr', -- 'hr', 'employee'
   uploaded_at TIMESTAMPTZ DEFAULT now(),
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Indexes for uploader role & submission source
+CREATE INDEX IF NOT EXISTS idx_employee_files_uploader_role ON public.employee_files(uploader_role);
+CREATE INDEX IF NOT EXISTS idx_employee_files_submission_source ON public.employee_files(submission_source);
 
 -- 2. Indexes for fast lookup
 CREATE INDEX IF NOT EXISTS idx_employee_files_employee_code ON public.employee_files(employee_code);

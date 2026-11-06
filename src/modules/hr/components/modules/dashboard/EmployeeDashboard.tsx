@@ -14,6 +14,7 @@ import {
   Briefcase,
   User,
   Package,
+  FileText,
 } from 'lucide-react';
 import { resolveEmployeeShift, formatTime12Hour } from '../../../utils/attendanceCalculator';
 import { doesAssignmentBelongToEmployee, doesLeaveBelongToEmployee } from '../../../utils/employeeIdentity';
@@ -32,8 +33,9 @@ interface EmployeeDashboardProps {
 export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
   onNavigateTab,
   onOpenCheckIn,
+  onOpenMyProfile,
 }) => {
-  const { employees, attendanceRecords, leaveRequests, selectedDate, shiftTemplates } = useHRMS();
+  const { employees, attendanceRecords, leaveRequests, selectedDate, shiftTemplates, employeeFiles } = useHRMS();
   const { currentUser, linkedEmployee } = useAuth();
   const { taskAssignments, acknowledgeTask, completeTask } = useWorkAssignment();
 
@@ -73,6 +75,24 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
     if (!emp) return [];
     return leaveRequests.filter((l) => doesLeaveBelongToEmployee(l, emp));
   }, [emp, leaveRequests]);
+
+  // Personal Employee Documents & Verification
+  const myDocs = useMemo(() => {
+    if (!emp) return [];
+    return employeeFiles.filter((f) => {
+      const matchId = f.employeeId && (f.employeeId === emp.id || f.employeeId.toLowerCase() === emp.id.toLowerCase());
+      const matchCode = emp.employeeCode && f.employeeCode && f.employeeCode.toLowerCase() === emp.employeeCode.toLowerCase();
+      return Boolean(matchId || matchCode);
+    });
+  }, [emp, employeeFiles]);
+
+  const mySubmittedDocs = useMemo(() => {
+    return myDocs.filter((d) => d.submissionSource === 'employee' || d.uploaderRole === 'employee');
+  }, [myDocs]);
+
+  const myHrUploadedDocs = useMemo(() => {
+    return myDocs.filter((d) => d.submissionSource === 'hr' || d.uploaderRole === 'hr_admin' || (!d.submissionSource && !d.uploaderRole));
+  }, [myDocs]);
 
   const pendingLeaves = useMemo(() => {
     return myLeaves.filter((l) => l.status === 'pending');
@@ -152,7 +172,7 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
       </div>
 
       {/* Personal Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* 1. Today's Punch */}
         <div
           onClick={() => onNavigateTab('attendance')}
@@ -226,6 +246,29 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
             </div>
             <p className="text-[11px] text-muted mt-1 capitalize">
               {welfareSelection ? `Status: ${welfareSelection.selection_status}` : 'Click to select product'}
+            </p>
+          </div>
+        </div>
+
+        {/* 5. My Documents */}
+        <div
+          onClick={() => (onOpenMyProfile ? onOpenMyProfile() : onNavigateTab('my-profile'))}
+          className="bg-card p-5 rounded-2xl border border-border shadow-velmora hover:border-slate-600 transition-all cursor-pointer flex flex-col justify-between"
+          title="Click to view and submit personal employee documents"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-muted uppercase tracking-wider">My Documents</span>
+            <div className="p-2.5 rounded-xl bg-blue-500/15 text-blue-400 border border-blue-500/20">
+              <FileText className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="mt-3">
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-bold text-white">{mySubmittedDocs.length}</span>
+              <span className="text-xs text-muted">Submitted</span>
+            </div>
+            <p className="text-[11px] text-muted mt-1">
+              HR Uploaded: <strong className="text-purple-300">{myHrUploadedDocs.length}</strong> &bull; Total: <strong className="text-white">{myDocs.length}</strong>
             </p>
           </div>
         </div>

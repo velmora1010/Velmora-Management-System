@@ -485,6 +485,7 @@ const HRLayoutContent: React.FC = () => {
             element={
               <HRDashboard
                 onNavigateTab={handleNavigateTab}
+                onOpenMyProfile={handleOpenMyProfile}
                 onSelectEmployee={handleSelectEmployee}
                 onSelectLeave={(leave) => setSelectedLeave(leave)}
                 onOpenCheckIn={() => setIsCheckInOpen(true)}

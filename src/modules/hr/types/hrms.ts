@@ -339,7 +339,18 @@ export interface PayrollPaymentSchedule {
 // ============================================================================
 // Employee Documentation & Files
 // ============================================================================
-export type EmployeeFileCategory = 'ID Proof' | 'Offer Letter' | 'Resume' | 'Contract' | 'Other';
+export type EmployeeFileCategory =
+  | 'ID Proof'
+  | 'Offer Letter'
+  | 'Resume'
+  | 'Contract'
+  | 'Certification'
+  | 'Tax Form'
+  | 'Other';
+
+export type FileUploaderRole = 'employee' | 'hr_admin';
+export type FileSubmissionSource = 'employee' | 'hr';
+export type FileVerificationStatus = 'pending_review' | 'verified' | 'rejected';
 
 export interface EmployeeFile {
   id: string;
@@ -354,6 +365,9 @@ export interface EmployeeFile {
   publicUrl?: string;
   category: EmployeeFileCategory;
   uploadStatus: 'Uploaded' | 'Verified' | 'Pending';
+  verificationStatus?: FileVerificationStatus;
   uploadedBy?: string;
+  uploaderRole?: FileUploaderRole;
+  submissionSource?: FileSubmissionSource;
   uploadedAt: string;
 }

@@ -249,7 +249,10 @@ export const INITIAL_EMPLOYEE_FILES: EmployeeFile[] = [
     publicUrl: '',
     category: 'ID Proof',
     uploadStatus: 'Verified',
+    verificationStatus: 'verified',
     uploadedBy: 'HR Administrator',
+    uploaderRole: 'hr_admin',
+    submissionSource: 'hr',
     uploadedAt: '2026-11-01 10:30 AM',
   },
   {
@@ -265,7 +268,10 @@ export const INITIAL_EMPLOYEE_FILES: EmployeeFile[] = [
     publicUrl: '',
     category: 'Offer Letter',
     uploadStatus: 'Verified',
+    verificationStatus: 'verified',
     uploadedBy: 'HR Administrator',
+    uploaderRole: 'hr_admin',
+    submissionSource: 'hr',
     uploadedAt: '2026-11-01 11:15 AM',
   },
   {
@@ -281,7 +287,10 @@ export const INITIAL_EMPLOYEE_FILES: EmployeeFile[] = [
     publicUrl: '',
     category: 'Resume',
     uploadStatus: 'Uploaded',
+    verificationStatus: 'verified',
     uploadedBy: 'HR Administrator',
+    uploaderRole: 'hr_admin',
+    submissionSource: 'hr',
     uploadedAt: '2026-11-02 02:45 PM',
   },
   {
@@ -297,7 +306,10 @@ export const INITIAL_EMPLOYEE_FILES: EmployeeFile[] = [
     publicUrl: '',
     category: 'Contract',
     uploadStatus: 'Verified',
+    verificationStatus: 'verified',
     uploadedBy: 'HR Administrator',
+    uploaderRole: 'hr_admin',
+    submissionSource: 'hr',
     uploadedAt: '2026-11-03 09:20 AM',
   },
 ];
