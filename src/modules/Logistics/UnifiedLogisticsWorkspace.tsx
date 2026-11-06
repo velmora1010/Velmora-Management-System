@@ -37,6 +37,8 @@ import {
   BarChart3,
 
   PackageCheck,
+  AlertCircle,
+  MapPin,
 
   Archive
 
@@ -1083,87 +1085,155 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
 
 
+  // Tracking KPI Metrics (Section 7)
+  const trackingMetrics = useMemo(() => {
+    let totalWithAwb = 0;
+    let delhiveryCount = 0;
+    let stCourierCount = 0;
+    let inTransit = 0;
+    let outForDelivery = 0;
+    let delivered = 0;
+    let exceptions = 0;
+    let failedAttempts = 0;
+    let rtoShipments = 0;
+    let trackingNotAvailable = 0;
+    let latestSyncTime: string | null = null;
+
+    stageShipments.forEach(s => {
+      const hasAwb = !!(s.awbNumber && s.awbNumber.trim());
+      if (hasAwb) totalWithAwb++;
+
+      const cNorm = normalizeCourier(s.courier);
+      if (cNorm === 'Delhivery') delhiveryCount++;
+      else if (cNorm === 'ST Courier') stCourierCount++;
+
+      const st = (s.status || '').toLowerCase().trim();
+      if (st.includes('delivered') || !!s.deliveredDate) delivered++;
+      else if (st.includes('out for delivery')) outForDelivery++;
+      else if (st.includes('failed') || st.includes('undelivered') || st.includes('attempt')) failedAttempts++;
+      else if (st.includes('rto') || st.includes('return')) {
+        rtoShipments++;
+        exceptions++;
+      } else if (st.includes('exception') || st.includes('delay') || st.includes('sla')) exceptions++;
+      else if (st.includes('transit') || st.includes('picked up') || st.includes('forwarded') || st.includes('shipped')) inTransit++;
+      else if (st === 'awaiting tracking update' || st === 'tracking not found' || st === 'tracking not available' || !st) {
+        trackingNotAvailable++;
+      }
+
+      if (s.syncedAt || s.lastUpdated) {
+        const timeVal = s.syncedAt || s.lastUpdated;
+        if (!latestSyncTime || String(timeVal) > String(latestSyncTime)) {
+          latestSyncTime = String(timeVal);
+        }
+      }
+    });
+
+    return {
+      totalWithAwb,
+      delhiveryCount,
+      stCourierCount,
+      inTransit,
+      outForDelivery,
+      delivered,
+      exceptions,
+      failedAttempts,
+      rtoShipments,
+      trackingNotAvailable,
+      lastSynced: latestSyncTime ? parseAndFormatLogisticsDate(latestSyncTime).displayDate : 'Live'
+    };
+  }, [stageShipments]);
+
+  const handleClearAllFilters = () => {
+    setLogisticsFilters({
+      ...INITIAL_LOGISTICS_FILTER_STATE,
+      activeSection: 'all_shipments'
+    });
+    setSelectedCourier('All');
+    setSelectedStatusTab('All');
+    setSearchTerm('');
+    toast.success('All filters cleared');
+  };
+
   // Filtered orders displayed in the view
-
   const filteredOrders = useMemo(() => {
+    // 1. In tracking stage, reconcile incompatible section filters (such as pending_awb from other stages)
+    const effectiveFilters = (currentStage === 'tracking' && logisticsFilters.activeSection === 'pending_awb')
+      ? { ...logisticsFilters, activeSection: 'all_shipments' as const }
+      : logisticsFilters;
 
-    // Apply comprehensive section and attribute filters on current stage's shipments
-
-    let result = applyLogisticsFilters(stageShipments, logisticsFilters);
-
-
+    let result = applyLogisticsFilters(stageShipments, effectiveFilters);
 
     // 2. Search Query (Top toolbar search bar with searchMode support)
-
     if (searchTerm.trim()) {
-
       const q = searchTerm.toLowerCase().trim();
-
       const mode = logisticsFilters.searchMode;
-
       result = result.filter(order => {
-
         const matchesId = (order.displayOrderId || '').toLowerCase().includes(q) || (order.orderId || '').toLowerCase().includes(q);
-
         const matchesCust = (order.customerName || '').toLowerCase().includes(q);
-
         const matchesPhone = (order.phoneNumber || order.phone || '').includes(q);
-
         const matchesAwb = (order.awbNumber || '').toLowerCase().includes(q);
-
         const matchesCity = (order.city || order.shippingCity || '').toLowerCase().includes(q);
-
         const matchesState = (order.state || order.shippingState || '').toLowerCase().includes(q);
 
-
-
         if (mode === 'awb') return matchesAwb || matchesId;
-
         if (mode === 'order') return matchesId;
-
         if (mode === 'customer') return matchesCust || matchesPhone;
-
         return matchesId || matchesCust || matchesPhone || matchesAwb || matchesCity || matchesState;
-
       });
-
     }
-
-
 
     // 3. Quick Courier Filter (Tracking toolbar pill)
-
     if (selectedCourier !== 'All') {
-
       result = result.filter(order => {
-
         const normalized = normalizeCourier(order.courier);
-
         return normalized === selectedCourier;
-
       });
-
     }
 
-
-
-    // 4. Legacy Contextual Filter Tabs (Prepaid / COD if selected)
-
-    if (selectedStatusTab === 'Prepaid') {
-
-      result = result.filter(order => !(order.orderType || '').toLowerCase().includes('cod'));
-
-    } else if (selectedStatusTab === 'COD') {
-
-      result = result.filter(order => (order.orderType || '').toLowerCase().includes('cod'));
-
+    // 4. Tracking Status Filter (All, Delivered, In Transit, Out for Delivery, Exception, Failed Attempt, Pending, Info Received, Expired)
+    if (currentStage === 'tracking' && selectedStatusTab !== 'All') {
+      result = result.filter(order => {
+        const st = (order.status || '').trim();
+        const stLower = st.toLowerCase();
+        if (selectedStatusTab === 'Delivered') {
+          return stLower === 'delivered' || !!order.deliveredDate;
+        }
+        if (selectedStatusTab === 'In Transit') {
+          return stLower === 'in transit' || stLower === 'in-transit' || stLower === 'picked up' || stLower === 'transit';
+        }
+        if (selectedStatusTab === 'Out for Delivery') {
+          return stLower === 'out for delivery' || stLower === 'out_for_delivery';
+        }
+        if (selectedStatusTab === 'Exception') {
+          return stLower === 'exception' || stLower.includes('rto') || stLower.includes('return') || stLower.includes('delayed') || stLower.includes('sla breached');
+        }
+        if (selectedStatusTab === 'Failed Attempt') {
+          return stLower === 'failed attempt' || stLower.includes('undelivered') || stLower.includes('failed') || stLower.includes('attempt');
+        }
+        if (selectedStatusTab === 'Info Received') {
+          return stLower === 'info received' || st === 'Awaiting Tracking Update' || stLower.includes('manifest') || stLower.includes('booked') || stLower.includes('ready to ship');
+        }
+        if (selectedStatusTab === 'Pending') {
+          return stLower === 'pending' || st === 'Awaiting Tracking Update' || (!st && stLower !== 'unfulfilled');
+        }
+        if (selectedStatusTab === 'Expired') {
+          return stLower === 'expired';
+        }
+        return stLower === selectedStatusTab.toLowerCase();
+      });
     }
 
-
+    // 5. Contextual Filter Tabs for other stages (Prepaid / COD if selected)
+    if (currentStage !== 'tracking') {
+      if (selectedStatusTab === 'Prepaid') {
+        result = result.filter(order => !(order.orderType || '').toLowerCase().includes('cod'));
+      } else if (selectedStatusTab === 'COD') {
+        result = result.filter(order => (order.orderType || '').toLowerCase().includes('cod'));
+      }
+    }
 
     return result;
-
-  }, [stageShipments, logisticsFilters, searchTerm, selectedCourier, selectedStatusTab]);
+  }, [stageShipments, logisticsFilters, searchTerm, selectedCourier, selectedStatusTab, currentStage]);
 
 
 
@@ -1366,143 +1436,141 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
   // Sync tracking status for a single order
 
   const handleSyncOrder = async (order: UnifiedLogisticsOrder) => {
-
     if (!order.rawId || !order.awbNumber) {
-
       toast.error('Cannot sync order without raw ID or AWB number');
-
       return;
-
     }
-
-
 
     setSyncingOrderIds(prev => new Set(prev).add(order.rawId!));
 
     try {
-
-      const courier = order.courier || 'ST Courier';
-
+      const courier = order.courier || 'Delhivery';
       const result = await trackingEngine.trackSingle(courier, order.awbNumber);
 
-
-
-      if (result.status && result.status !== 'Unknown') {
-
+      if (result.success && result.status && result.status !== 'Unknown') {
         await db.logistics_orders.update(order.rawId, {
-
           status: result.status,
-
           currentLocation: result.location || order.shippingCity || '',
-
           remarks: result.remarks || order.remarks || '',
-
+          deliveredDate: result.deliveredDate || order.deliveredDate,
+          estimatedDeliveryDate: result.estimatedDeliveryDate,
           syncedAt: new Date().toISOString()
-
         });
 
+        // Sync to Supabase
+        const cleanOid = cleanOrderId(order.orderId || order.displayOrderId || '');
+        if (cleanOid) {
+          try {
+            await supabase.from('customer_tracking_shipments').upsert({
+              order_id: cleanOid,
+              display_order_id: `#${cleanOid}`,
+              awb_number: order.awbNumber,
+              courier: normalizeCourier(order.courier) || order.courier || 'Delhivery',
+              status: result.status,
+              raw_status: result.rawStatus || result.status,
+              remarks: result.remarks || null,
+              delivered_date: result.deliveredDate || null,
+              estimated_delivery_date: result.estimatedDeliveryDate || null,
+              last_location: result.location || null,
+              last_synced_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'courier,awb_number' });
+          } catch (sbErr) {
+            console.warn('[TRACKING SYNC] Supabase note:', sbErr);
+          }
+        }
+
         toast.success(`Synced #${order.displayOrderId}: ${result.status}`);
-
       } else {
-
-        toast(`No new updates for #${order.displayOrderId}`, { icon: 'ℹ️' });
-
+        toast(`No new updates for #${order.displayOrderId}: ${result.status || result.error || 'Up to date'}`, { icon: 'ℹ️' });
       }
-
     } catch (err: any) {
-
       toast.error(`Sync failed for #${order.displayOrderId}: ${err.message}`);
-
     } finally {
-
       setSyncingOrderIds(prev => {
-
         const next = new Set(prev);
-
         next.delete(order.rawId!);
-
         return next;
-
       });
-
     }
-
   };
 
 
 
-  // Bulk sync all live tracking orders
-
+  // Bulk sync live tracking orders (supporting Delhivery and ST Courier with rate limiting)
   const handleBulkSyncAll = async () => {
+    // Select active non-terminal trackable shipments first
+    const pool = (filteredOrders.length > 0 ? filteredOrders : stageShipments);
+    const nonTerminal = pool.filter(o => {
+      const hasAwb = !!(o.awbNumber && o.awbNumber.trim() && o.rawId);
+      if (!hasAwb) return false;
+      const st = (o.status || '').toLowerCase();
+      const isDelivered = st.includes('delivered') && !st.includes('undelivered');
+      const isRtoDelivered = st.includes('delivered to seller') || st.includes('rto delivered');
+      return !isDelivered && !isRtoDelivered;
+    });
 
-    const trackable = filteredOrders.filter(o => o.awbNumber && o.rawId);
+    const ordersToSync = nonTerminal.length > 0 ? nonTerminal : pool.filter(o => o.awbNumber && o.rawId);
 
-    if (trackable.length === 0) {
-
-      toast.error('No orders with AWB numbers to sync');
-
+    if (ordersToSync.length === 0) {
+      toast.error('No shipments with AWB numbers available to sync');
       return;
-
     }
 
-
-
+    const batchSize = Math.min(ordersToSync.length, 30);
     setIsBulkSyncing(true);
-
-    const toastId = toast.loading(`Syncing live tracking for ${trackable.length} shipments...`);
-
-
+    const toastId = toast.loading(`Syncing live tracking for ${batchSize} shipments...`);
 
     let updatedCount = 0;
-
     try {
-
-      for (const order of trackable.slice(0, 20)) {
-
+      for (const order of ordersToSync.slice(0, batchSize)) {
         try {
-
-          const courier = order.courier || 'ST Courier';
-
+          const courier = order.courier || 'Delhivery';
           const result = await trackingEngine.trackSingle(courier, order.awbNumber!);
-
-          if (result.status && result.status !== 'Unknown') {
-
+          if (result.success && result.status && result.status !== 'Unknown') {
             await db.logistics_orders.update(order.rawId!, {
-
               status: result.status,
-
               currentLocation: result.location || order.shippingCity || '',
-
               remarks: result.remarks || order.remarks || '',
-
+              deliveredDate: result.deliveredDate || order.deliveredDate,
+              estimatedDeliveryDate: result.estimatedDeliveryDate,
               syncedAt: new Date().toISOString()
-
             });
 
+            const cleanOid = cleanOrderId(order.orderId || order.displayOrderId || '');
+            if (cleanOid) {
+              try {
+                await supabase.from('customer_tracking_shipments').upsert({
+                  order_id: cleanOid,
+                  display_order_id: `#${cleanOid}`,
+                  awb_number: order.awbNumber,
+                  courier: normalizeCourier(order.courier) || order.courier || 'Delhivery',
+                  status: result.status,
+                  raw_status: result.rawStatus || result.status,
+                  remarks: result.remarks || null,
+                  delivered_date: result.deliveredDate || null,
+                  estimated_delivery_date: result.estimatedDeliveryDate || null,
+                  last_location: result.location || null,
+                  last_synced_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                }, { onConflict: 'courier,awb_number' });
+              } catch (sbErr) {
+                // ignore supabase background upsert error
+              }
+            }
+
             updatedCount++;
-
           }
-
         } catch (e) {
-
-          // ignore single sync failure in bulk
-
+          // ignore single item failure in batch
         }
-
       }
-
       toast.success(`Sync complete! Updated ${updatedCount} shipments.`, { id: toastId });
-
     } catch (err: any) {
-
       toast.error(`Sync finished with issues: ${err.message}`, { id: toastId });
-
     } finally {
-
       setIsBulkSyncing(false);
-
     }
-
   };
 
 
@@ -1666,17 +1734,20 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         currentStage={currentStage}
 
         onSelectStage={(st) => {
-
           setCurrentStage(st);
-
           setSelectedStatusTab('All');
-
           setIsBulkSelectMode(false);
-
           setSelectedOrderIds(new Set());
-
           setIsMoveReviewPanelOpen(false);
 
+          // Reconcile activeSection if switching to tracking or if previous section is incompatible
+          if (st === 'tracking') {
+            setLogisticsFilters(prev => ({
+              ...prev,
+              activeSection: 'all_shipments',
+              shipmentStatuses: []
+            }));
+          }
         }}
 
         counts={counts}
@@ -2856,25 +2927,11 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
 
           <button
-
             type="button"
-
-            onClick={() => {
-
-              setLogisticsFilters(INITIAL_LOGISTICS_FILTER_STATE);
-
-              setSelectedCourier('All');
-
-              toast.success('All filters cleared');
-
-            }}
-
+            onClick={handleClearAllFilters}
             className="text-[11px] text-rose-400 hover:text-rose-300 underline cursor-pointer ml-auto shrink-0 pl-2 font-medium"
-
           >
-
             Clear All
-
           </button>
 
         </div>
@@ -2895,6 +2952,221 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
           
 
+                    {/* Tracking KPI Metrics Strip (11 Cards) */}
+          {currentStage === 'tracking' && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-11 gap-2 shrink-0">
+              {/* 1. Total with AWB */}
+              <div 
+                onClick={() => { setSelectedStatusTab('All'); setSelectedCourier('All'); }}
+                className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
+                  selectedStatusTab === 'All' && selectedCourier === 'All'
+                    ? 'bg-purple-950/40 border-purple-500/80 shadow-sm'
+                    : 'bg-[#0b1220] border-slate-800/80 hover:border-slate-700'
+                }`}
+              >
+                <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium">
+                  <span>Total AWBs</span>
+                  <Package size={13} className="text-purple-400" />
+                </div>
+                <div className="text-lg font-bold font-mono text-slate-100 mt-0.5">
+                  {trackingMetrics.totalWithAwb.toLocaleString()}
+                </div>
+                <div className="text-[10px] text-slate-500 truncate">Dispatched orders</div>
+              </div>
+
+              {/* 2. Delhivery */}
+              <div 
+                onClick={() => setSelectedCourier(prev => prev === 'Delhivery' ? 'All' : 'Delhivery')}
+                className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
+                  selectedCourier === 'Delhivery'
+                    ? 'bg-rose-950/40 border-rose-500/80 shadow-sm'
+                    : 'bg-[#0b1220] border-slate-800/80 hover:border-slate-700'
+                }`}
+              >
+                <div className="flex items-center justify-between text-[11px] text-rose-300 font-medium">
+                  <span>Delhivery</span>
+                  <Truck size={13} className="text-rose-400" />
+                </div>
+                <div className="text-lg font-bold font-mono text-rose-200 mt-0.5">
+                  {trackingMetrics.delhiveryCount.toLocaleString()}
+                </div>
+                <div className="text-[10px] text-rose-400/60 truncate">API Integrated</div>
+              </div>
+
+              {/* 3. ST Courier */}
+              <div 
+                onClick={() => setSelectedCourier(prev => prev === 'ST Courier' ? 'All' : 'ST Courier')}
+                className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
+                  selectedCourier === 'ST Courier'
+                    ? 'bg-sky-950/40 border-sky-500/80 shadow-sm'
+                    : 'bg-[#0b1220] border-slate-800/80 hover:border-slate-700'
+                }`}
+              >
+                <div className="flex items-center justify-between text-[11px] text-sky-300 font-medium">
+                  <span>ST Courier</span>
+                  <Truck size={13} className="text-sky-400" />
+                </div>
+                <div className="text-lg font-bold font-mono text-sky-200 mt-0.5">
+                  {trackingMetrics.stCourierCount.toLocaleString()}
+                </div>
+                <div className="text-[10px] text-sky-400/60 truncate">Web Tracking</div>
+              </div>
+
+              {/* 4. In Transit */}
+              <div 
+                onClick={() => setSelectedStatusTab(prev => prev === 'In Transit' ? 'All' : 'In Transit')}
+                className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
+                  selectedStatusTab === 'In Transit'
+                    ? 'bg-blue-950/40 border-blue-500/80 shadow-sm'
+                    : 'bg-[#0b1220] border-slate-800/80 hover:border-slate-700'
+                }`}
+              >
+                <div className="flex items-center justify-between text-[11px] text-blue-300 font-medium">
+                  <span>In Transit</span>
+                  <Truck size={13} className="text-blue-400" />
+                </div>
+                <div className="text-lg font-bold font-mono text-blue-200 mt-0.5">
+                  {trackingMetrics.inTransit.toLocaleString()}
+                </div>
+                <div className="text-[10px] text-blue-400/60 truncate">Moving</div>
+              </div>
+
+              {/* 5. Out for Delivery */}
+              <div 
+                onClick={() => setSelectedStatusTab(prev => prev === 'Out for Delivery' ? 'All' : 'Out for Delivery')}
+                className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
+                  selectedStatusTab === 'Out for Delivery'
+                    ? 'bg-cyan-950/40 border-cyan-500/80 shadow-sm'
+                    : 'bg-[#0b1220] border-slate-800/80 hover:border-slate-700'
+                }`}
+              >
+                <div className="flex items-center justify-between text-[11px] text-cyan-300 font-medium">
+                  <span>Out for Del</span>
+                  <MapPin size={13} className="text-cyan-400" />
+                </div>
+                <div className="text-lg font-bold font-mono text-cyan-200 mt-0.5">
+                  {trackingMetrics.outForDelivery.toLocaleString()}
+                </div>
+                <div className="text-[10px] text-cyan-400/60 truncate">Last mile</div>
+              </div>
+
+              {/* 6. Delivered */}
+              <div 
+                onClick={() => setSelectedStatusTab(prev => prev === 'Delivered' ? 'All' : 'Delivered')}
+                className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
+                  selectedStatusTab === 'Delivered'
+                    ? 'bg-emerald-950/40 border-emerald-500/80 shadow-sm'
+                    : 'bg-[#0b1220] border-slate-800/80 hover:border-slate-700'
+                }`}
+              >
+                <div className="flex items-center justify-between text-[11px] text-emerald-300 font-medium">
+                  <span>Delivered</span>
+                  <PackageCheck size={13} className="text-emerald-400" />
+                </div>
+                <div className="text-lg font-bold font-mono text-emerald-300 mt-0.5">
+                  {trackingMetrics.delivered.toLocaleString()}
+                </div>
+                <div className="text-[10px] text-emerald-400/60 truncate">Successful</div>
+              </div>
+
+              {/* 7. Exceptions */}
+              <div 
+                onClick={() => setSelectedStatusTab(prev => prev === 'Exception' ? 'All' : 'Exception')}
+                className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
+                  selectedStatusTab === 'Exception'
+                    ? 'bg-amber-950/40 border-amber-500/80 shadow-sm'
+                    : 'bg-[#0b1220] border-slate-800/80 hover:border-slate-700'
+                }`}
+              >
+                <div className="flex items-center justify-between text-[11px] text-amber-300 font-medium">
+                  <span>Exceptions</span>
+                  <AlertTriangle size={13} className="text-amber-400" />
+                </div>
+                <div className="text-lg font-bold font-mono text-amber-300 mt-0.5">
+                  {trackingMetrics.exceptions.toLocaleString()}
+                </div>
+                <div className="text-[10px] text-amber-400/60 truncate">Action needed</div>
+              </div>
+
+              {/* 8. Failed Attempts */}
+              <div 
+                onClick={() => setSelectedStatusTab(prev => prev === 'Failed Attempt' ? 'All' : 'Failed Attempt')}
+                className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
+                  selectedStatusTab === 'Failed Attempt'
+                    ? 'bg-rose-950/40 border-rose-500/80 shadow-sm'
+                    : 'bg-[#0b1220] border-slate-800/80 hover:border-slate-700'
+                }`}
+              >
+                <div className="flex items-center justify-between text-[11px] text-rose-300 font-medium">
+                  <span>Failed Att</span>
+                  <AlertCircle size={13} className="text-rose-400" />
+                </div>
+                <div className="text-lg font-bold font-mono text-rose-300 mt-0.5">
+                  {trackingMetrics.failedAttempts.toLocaleString()}
+                </div>
+                <div className="text-[10px] text-rose-400/60 truncate">Customer contact</div>
+              </div>
+
+              {/* 9. RTO Shipments */}
+              <div 
+                onClick={() => {
+                  setLogisticsFilters(prev => ({ ...prev, activeSection: 'rto_in_transit' }));
+                }}
+                className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
+                  logisticsFilters.activeSection === 'rto_in_transit'
+                    ? 'bg-orange-950/40 border-orange-500/80 shadow-sm'
+                    : 'bg-[#0b1220] border-slate-800/80 hover:border-slate-700'
+                }`}
+              >
+                <div className="flex items-center justify-between text-[11px] text-orange-300 font-medium">
+                  <span>RTO Return</span>
+                  <RotateCcw size={13} className="text-orange-400" />
+                </div>
+                <div className="text-lg font-bold font-mono text-orange-300 mt-0.5">
+                  {trackingMetrics.rtoShipments.toLocaleString()}
+                </div>
+                <div className="text-[10px] text-orange-400/60 truncate">Returned</div>
+              </div>
+
+              {/* 10. Tracking Not Available */}
+              <div 
+                onClick={() => setSelectedStatusTab(prev => prev === 'Pending' ? 'All' : 'Pending')}
+                className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
+                  selectedStatusTab === 'Pending'
+                    ? 'bg-slate-800/80 border-slate-500 shadow-sm'
+                    : 'bg-[#0b1220] border-slate-800/80 hover:border-slate-700'
+                }`}
+              >
+                <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium">
+                  <span>Not Avail</span>
+                  <Clock size={13} className="text-slate-400" />
+                </div>
+                <div className="text-lg font-bold font-mono text-slate-300 mt-0.5">
+                  {trackingMetrics.trackingNotAvailable.toLocaleString()}
+                </div>
+                <div className="text-[10px] text-slate-500 truncate">Awaiting data</div>
+              </div>
+
+              {/* 11. Last Synced */}
+              <div 
+                onClick={handleBulkSyncAll}
+                title="Click to sync live tracking for active shipments"
+                className="p-2.5 rounded-xl border border-slate-800/80 bg-[#0b1220] hover:border-purple-500/60 transition-all cursor-pointer group"
+              >
+                <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium">
+                  <span>Last Synced</span>
+                  <RefreshCw size={13} className={`text-purple-400 group-hover:rotate-180 transition-transform ${isBulkSyncing ? 'animate-spin' : ''}`} />
+                </div>
+                <div className="text-xs font-bold font-mono text-purple-300 mt-1 truncate">
+                  {trackingMetrics.lastSynced}
+                </div>
+                <div className="text-[10px] text-purple-400/80 flex items-center gap-1">
+                  <span>{isBulkSyncing ? 'Syncing...' : 'Sync Now'}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Horizontal Shipment Status Navigation Row (Orders title + 8 status items) */}
 
           {currentStage !== 'analytics' && currentStage !== 'prepare_dispatch' && (
@@ -2904,11 +3176,13 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
               activeSection={logisticsFilters.activeSection}
 
               onSelectSection={(sec) => {
+                if (sec === 'pending_awb' && currentStage === 'tracking') {
+                  // Pending AWB belongs to the Active unfulfilled workflow
+                  setCurrentStage('active');
+                }
 
                 setLogisticsFilters(prev => ({
-
                   ...prev,
-
                   activeSection: sec,
 
                   shipmentStatuses: [],
@@ -3174,23 +3448,26 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                 </button>
 
               ) : currentStage === 'tracking' ? (
-
-                <button
-
-                  type="button"
-
-                  onClick={() => setIsCourierTrackingModalOpen(true)}
-
-                  className="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-xl shadow-md shadow-cyan-600/30 flex items-center gap-2 transition-colors cursor-pointer"
-
-                >
-
-                  <Truck size={15} />
-
-                  <span>Upload Courier Tracking Report</span>
-
-                </button>
-
+                <div className="flex items-center gap-3">
+                  {(selectedStatusTab !== 'All' || selectedCourier !== 'All' || activeFilterCount > 0 || searchTerm) && (
+                    <button
+                      type="button"
+                      onClick={handleClearAllFilters}
+                      className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl shadow-md shadow-rose-600/30 flex items-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <RotateCcw size={15} />
+                      <span>Clear All Filters</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setIsCourierTrackingModalOpen(true)}
+                    className="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-xl shadow-md shadow-cyan-600/30 flex items-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <Truck size={15} />
+                    <span>Upload Courier Tracking Report</span>
+                  </button>
+                </div>
               ) : null}
 
             </div>
