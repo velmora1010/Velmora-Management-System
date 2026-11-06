@@ -779,6 +779,7 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const deleteEmployeeFile = async (fileId: string): Promise<boolean> => {
+    if (!fileId) return false;
     const targetFile = employeeFiles.find((f) => f.id === fileId);
     setEmployeeFiles((prev) => {
       const updated = prev.filter((f) => f.id !== fileId);
@@ -792,7 +793,7 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
     }
 
-    deleteEmployeeFileFromSupabase(fileId).catch((err) => {
+    deleteEmployeeFileFromSupabase(fileId, targetFile?.storagePath).catch((err) => {
       console.warn('[Supabase HR] Failed to delete file record:', err);
     });
 

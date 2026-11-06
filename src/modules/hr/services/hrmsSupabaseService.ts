@@ -883,11 +883,19 @@ export async function deleteEmployeeFileFromStorage(storagePath: string): Promis
   }
 }
 
-export async function deleteEmployeeFileFromSupabase(fileId: string): Promise<boolean> {
+export async function deleteEmployeeFileFromSupabase(fileId: string, storagePath?: string): Promise<boolean> {
   try {
     const { error } = await supabase.from('employee_files').delete().eq('id', fileId);
     if (error) {
-      console.warn('[Supabase HR] Error deleting employee file:', error.message);
+      console.warn('[Supabase HR] Error deleting employee file by id:', error.message);
+      if (storagePath) {
+        const { error: err2 } = await supabase.from('employee_files').delete().eq('storage_path', storagePath);
+        if (err2) {
+          console.warn('[Supabase HR] Error deleting by storage_path fallback:', err2.message);
+          return false;
+        }
+        return true;
+      }
       return false;
     }
     return true;

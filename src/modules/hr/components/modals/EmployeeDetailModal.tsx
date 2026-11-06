@@ -121,6 +121,7 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
     addNotification,
     employeeFiles,
     uploadEmployeeFile,
+    deleteEmployeeFile,
   } = useHRMS();
   const { showToast } = useToast();
 
@@ -223,7 +224,30 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
   };
 
   const handleConfirmDeleteDoc = async () => {
-    if (!documentToDelete || !employee) return;
+    if (isDeletingDoc || !documentToDelete || !employee) return;
+
+    if (!documentToDelete.id) {
+      showToast('Invalid document ID.', 'error');
+      setDocumentToDelete(null);
+      return;
+    }
+
+    // Verify ownership
+    const matchId =
+      documentToDelete.employeeId &&
+      (documentToDelete.employeeId === employee.id ||
+        documentToDelete.employeeId.toLowerCase() === employee.id.toLowerCase());
+    const matchCode =
+      employee.employeeCode &&
+      documentToDelete.employeeCode &&
+      documentToDelete.employeeCode.toLowerCase() === employee.employeeCode.toLowerCase();
+    const isOwner = Boolean(matchId || matchCode);
+
+    if (!isOwner) {
+      showToast('You can only delete documents belonging to this employee profile.', 'error');
+      setDocumentToDelete(null);
+      return;
+    }
 
     // Security & Ownership check: Only allow deleting employee-submitted documents
     const isEmployeeSubmission =
@@ -238,10 +262,14 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
 
     setIsDeletingDoc(true);
     try {
-      await deleteEmployeeFile(documentToDelete.id);
-      setDocumentToDelete(null);
+      const success = await deleteEmployeeFile(documentToDelete.id);
+      if (success) {
+        setDocumentToDelete(null);
+      } else {
+        showToast('Failed to delete document. Please try again.', 'error');
+      }
     } catch (err: any) {
-      showToast(err.message || 'Failed to delete document.', 'error');
+      showToast(err?.message || 'Failed to delete document.', 'error');
     } finally {
       setIsDeletingDoc(false);
     }
