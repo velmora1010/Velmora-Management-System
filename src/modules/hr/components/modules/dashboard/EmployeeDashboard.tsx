@@ -76,23 +76,17 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
     return leaveRequests.filter((l) => doesLeaveBelongToEmployee(l, emp));
   }, [emp, leaveRequests]);
 
-  // Personal Employee Documents & Verification
-  const myDocs = useMemo(() => {
+  // Personal Employee Documents (only employee-submitted records in employee dashboard)
+  const mySubmittedDocs = useMemo(() => {
     if (!emp) return [];
     return employeeFiles.filter((f) => {
       const matchId = f.employeeId && (f.employeeId === emp.id || f.employeeId.toLowerCase() === emp.id.toLowerCase());
       const matchCode = emp.employeeCode && f.employeeCode && f.employeeCode.toLowerCase() === emp.employeeCode.toLowerCase();
-      return Boolean(matchId || matchCode);
+      const isOwner = Boolean(matchId || matchCode);
+      const isEmployeeSubmission = f.submissionSource === 'employee' || f.uploaderRole === 'employee';
+      return isOwner && isEmployeeSubmission;
     });
   }, [emp, employeeFiles]);
-
-  const mySubmittedDocs = useMemo(() => {
-    return myDocs.filter((d) => d.submissionSource === 'employee' || d.uploaderRole === 'employee');
-  }, [myDocs]);
-
-  const myHrUploadedDocs = useMemo(() => {
-    return myDocs.filter((d) => d.submissionSource === 'hr' || d.uploaderRole === 'hr_admin' || (!d.submissionSource && !d.uploaderRole));
-  }, [myDocs]);
 
   const pendingLeaves = useMemo(() => {
     return myLeaves.filter((l) => l.status === 'pending');
@@ -268,7 +262,7 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
               <span className="text-xs text-muted">Submitted</span>
             </div>
             <p className="text-[11px] text-muted mt-1">
-              HR Uploaded: <strong className="text-purple-300">{myHrUploadedDocs.length}</strong> &bull; Total: <strong className="text-white">{myDocs.length}</strong>
+              Total Documents: <strong className="text-white">{mySubmittedDocs.length}</strong>
             </p>
           </div>
         </div>
