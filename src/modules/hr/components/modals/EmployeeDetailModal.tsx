@@ -39,6 +39,7 @@ import {
   Eye,
   FolderOpen,
   Loader2,
+  X,
 } from 'lucide-react';
 import { EmployeeFile, EmployeeFileCategory } from '../../types/hrms';
 import {
