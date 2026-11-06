@@ -17,7 +17,7 @@ import {
   ChevronRight,
   ShieldCheck,
   Plus,
-  Table as TableIcon,
+  X,
   XCircle,
 } from 'lucide-react';
 import { Employee, EmployeeFile, EmployeeFileCategory } from '../../../types/hrms';
@@ -33,6 +33,11 @@ interface EmployeeFilesSectionProps {
   }) => Promise<any>;
   onDeleteFile: (fileId: string) => Promise<any>;
   canManage: boolean;
+}
+
+interface SelectedUploadFile {
+  id: string;
+  file: File;
 }
 
 const CATEGORIES: EmployeeFileCategory[] = [
@@ -65,11 +70,10 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [filterDepartment, setFilterDepartment] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all'); // 'all' | 'verified' | 'submitted' | 'pending'
-  const [filterCategory, setFilterCategory] = useState<string>('all');
 
-  // Upload state
+  // Selected files queue before submission
+  const [selectedFiles, setSelectedFiles] = useState<SelectedUploadFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
 
@@ -118,6 +122,11 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
     return getEmployeeDocs(activeEmployee);
   }, [activeEmployee, employeeFiles]);
 
+  // Selected employee object for upload
+  const selectedEmployee = useMemo(() => {
+    return employees.find((e) => e.id === selectedEmployeeId);
+  }, [employees, selectedEmployeeId]);
+
   // Unique departments for filter
   const departmentsList = useMemo(() => {
     const set = new Set<string>();
@@ -165,8 +174,8 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
     return null;
   };
 
-  // Direct upload handler
-  const handleDirectUpload = async (fileList: FileList | null) => {
+  // Handle files selected via file picker
+  const handleFileSelect = (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
     if (!selectedEmployeeId) {
       setUploadError('Please select an employee before uploading documentation.');
@@ -177,30 +186,64 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
     setUploadSuccess(null);
 
     const filesArray = Array.from(fileList);
+    const newItems: SelectedUploadFile[] = [];
+
     for (const file of filesArray) {
       const err = validateFile(file);
       if (err) {
         setUploadError(err);
         return;
       }
+      newItems.push({
+        id: `file-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        file,
+      });
     }
 
+    setSelectedFiles((prev) => [...prev, ...newItems]);
+  };
+
+  // Remove a single selected file before upload
+  const handleRemoveFile = (indexToRemove: number) => {
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== indexToRemove));
+  };
+
+  // Clear all selected files
+  const handleClearSelectedFiles = () => {
+    setSelectedFiles([]);
+    setUploadError(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  // Submit all selected files
+  const handleSubmitSelectedFiles = async () => {
+    if (selectedFiles.length === 0) return;
+    if (!selectedEmployeeId) {
+      setUploadError('Please select an employee before uploading documentation.');
+      return;
+    }
+
+    setUploadError(null);
+    setUploadSuccess(null);
     setIsUploading(true);
+
     try {
-      for (const file of filesArray) {
+      for (const item of selectedFiles) {
         await onUploadFile({
           employeeId: selectedEmployeeId,
-          file,
+          file: item.file,
           category: selectedCategory,
         });
       }
 
       const emp = employees.find((e) => e.id === selectedEmployeeId);
       const empName = emp ? emp.fullName : 'the employee';
+      const count = selectedFiles.length;
+
+      handleClearSelectedFiles();
       setUploadSuccess(
-        `Successfully uploaded ${filesArray.length} document${filesArray.length > 1 ? 's' : ''} for ${empName}.`
+        `Successfully uploaded ${count} document${count > 1 ? 's' : ''} for ${empName}.`
       );
-      if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err: any) {
       setUploadError(err.message || 'Failed to upload files.');
     } finally {
@@ -285,7 +328,7 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
   // Quick upload trigger for focused employee
   const handleQuickUploadFor = (empId: string) => {
     setSelectedEmployeeId(empId);
-    uploadSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    fileInputRef.current?.click();
   };
 
   return (
@@ -313,160 +356,206 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
         </div>
       </div>
 
-      {/* UPLOAD PANEL (Unchanged Compact Passport-Size Upload Card) */}
+      {/* UPLOAD PANEL: Button-based Controls (No large drag & drop box) */}
       {canManage && (
         <div
           ref={uploadSectionRef}
-          className="bg-[#151D2B] rounded-xl border border-[#334155] p-4 sm:p-5"
+          className="bg-[#151D2B] rounded-xl border border-[#334155] p-4 sm:p-5 space-y-4"
         >
-          <div className="flex flex-col md:flex-row items-start justify-between gap-6">
-            {/* Form Fields & Instructions */}
-            <div className="space-y-4 flex-1 w-full max-w-xl">
-              <div>
-                <span className="text-xs font-bold text-white tracking-wide uppercase flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-[#60A5FA]" />
-                  <span>Document Submission Portal</span>
-                </span>
-                <p className="text-xs text-[#94A3B8] mt-1">
-                  Select an employee and document category, then drop files into the card to submit documents.
-                </p>
-              </div>
+          {/* Top Info Banner */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#334155]/60 pb-3">
+            <div>
+              <span className="text-xs font-bold text-white tracking-wide uppercase flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-[#60A5FA]" />
+                <span>Document Submission Portal</span>
+              </span>
+              <p className="text-xs text-[#94A3B8] mt-0.5">
+                Select an employee and category, then click Upload Document to submit official records.
+              </p>
+            </div>
+            <span className="text-[11px] text-[#94A3B8] shrink-0 font-medium">
+              Supported: PDF, JPG, PNG, DOC, DOCX (Max 15MB)
+            </span>
+          </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Employee Selector */}
-                <div>
-                  <label className="block text-xs font-semibold text-white uppercase mb-1">
-                    Select Employee *
-                  </label>
-                  <select
-                    value={selectedEmployeeId}
-                    onChange={(e) => {
-                      setSelectedEmployeeId(e.target.value);
-                      setUploadError(null);
-                      setUploadSuccess(null);
-                    }}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-[#334155] bg-[#0F172A] text-white focus:outline-hidden focus:border-[#3B82F6]"
-                  >
-                    {employees.map((emp) => {
-                      const count = getEmployeeDocs(emp).length;
-                      return (
-                        <option key={emp.id} value={emp.id}>
-                          {emp.fullName} ({emp.employeeCode}) — {count} {count === 1 ? 'doc' : 'docs'}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
-
-                {/* Document Category */}
-                <div>
-                  <label className="block text-xs font-semibold text-white uppercase mb-1">
-                    Document Category *
-                  </label>
-                  <select
-                    value={selectedCategory}
-                    onChange={(e) => setSelectedCategory(e.target.value as EmployeeFileCategory)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-[#334155] bg-[#0F172A] text-white focus:outline-hidden focus:border-[#3B82F6]"
-                  >
-                    {CATEGORIES.map((cat) => (
-                      <option key={cat} value={cat}>
-                        {cat}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Upload Feedback */}
-              {uploadError && (
-                <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300 flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                  <span>{uploadError}</span>
-                </div>
-              )}
-
-              {uploadSuccess && (
-                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>{uploadSuccess}</span>
-                </div>
-              )}
-
-              <div className="text-[11px] text-[#94A3B8] flex items-center gap-2 pt-1">
-                <span className="w-2 h-2 rounded-full bg-[#3B82F6] shrink-0"></span>
-                <span>
-                  Supported formats: <strong>PDF, JPG, PNG, DOC, DOCX</strong> up to 15MB. Files are verified immediately upon upload.
-                </span>
-              </div>
+          {/* Controls: Select Employee + Document Category + Upload Document Button */}
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5 items-end">
+            {/* Employee Selector (5 cols) */}
+            <div className="sm:col-span-5">
+              <label className="block text-xs font-semibold text-white uppercase mb-1.5">
+                Select Employee *
+              </label>
+              <select
+                value={selectedEmployeeId}
+                onChange={(e) => {
+                  setSelectedEmployeeId(e.target.value);
+                  setUploadError(null);
+                  setUploadSuccess(null);
+                }}
+                className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-[#334155] bg-[#0F172A] text-white focus:outline-hidden focus:border-[#3B82F6] transition-colors"
+              >
+                {employees.map((emp) => {
+                  const count = getEmployeeDocs(emp).length;
+                  return (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.fullName} ({emp.employeeCode}) — {count} {count === 1 ? 'doc' : 'docs'}
+                    </option>
+                  );
+                })}
+              </select>
             </div>
 
-            {/* Left-Aligned Passport-Size Upload Card */}
-            <div
-              onDragOver={(e) => {
-                e.preventDefault();
-                setIsDragging(true);
-              }}
-              onDragLeave={() => setIsDragging(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setIsDragging(false);
-                handleDirectUpload(e.dataTransfer.files);
-              }}
-              onClick={() => fileInputRef.current?.click()}
-              className={`w-[180px] h-[220px] shrink-0 border-2 border-dashed rounded-2xl p-3 flex flex-col items-center justify-between text-center cursor-pointer transition-all duration-200 select-none ${
-                isDragging
-                  ? 'border-[#3B82F6] bg-blue-500/10 shadow-lg shadow-blue-500/10 scale-[1.02]'
-                  : 'border-[#334155] hover:border-[#60A5FA] bg-[#0F172A]/80 hover:bg-[#0F172A]'
-              }`}
-            >
+            {/* Document Category (4 cols) */}
+            <div className="sm:col-span-4">
+              <label className="block text-xs font-semibold text-white uppercase mb-1.5">
+                Document Category *
+              </label>
+              <select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value as EmployeeFileCategory)}
+                className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-[#334155] bg-[#0F172A] text-white focus:outline-hidden focus:border-[#3B82F6] transition-colors"
+              >
+                {CATEGORIES.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Upload Document Button (3 cols) */}
+            <div className="sm:col-span-3">
               <input
                 type="file"
                 ref={fileInputRef}
                 multiple
                 accept=".pdf, .jpg, .jpeg, .png, .doc, .docx"
                 onChange={(e) => {
-                  handleDirectUpload(e.target.files);
+                  handleFileSelect(e.target.files);
                   if (e.target) e.target.value = '';
                 }}
                 className="hidden"
               />
-
-              {/* Centered Light Upload Icon */}
-              <div className="w-11 h-11 mt-1 rounded-xl bg-[#1E293B] border border-[#334155] text-[#60A5FA] flex items-center justify-center shadow-xs">
-                {isUploading ? (
-                  <Loader2 className="w-5 h-5 animate-spin text-[#60A5FA]" />
-                ) : (
-                  <UploadCloud className="w-5 h-5 text-[#60A5FA]" />
-                )}
-              </div>
-
-              {/* Centered Text Info */}
-              <div className="space-y-1 px-1">
-                <h4 className="text-xs font-bold text-white tracking-wide">
-                  Upload Document
-                </h4>
-                <p className="text-[11px] text-[#94A3B8] leading-tight">
-                  Click or drag file here
-                </p>
-                <p className="text-[10px] text-[#64748B] pt-0.5 font-medium">
-                  PDF, JPG, PNG, DOC, DOCX
-                </p>
-              </div>
-
-              {/* Browse Files Button */}
               <button
                 type="button"
                 disabled={isUploading}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  fileInputRef.current?.click();
-                }}
-                className="mb-1 px-3.5 py-1 text-[11px] font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 rounded-lg transition-colors shadow-xs cursor-pointer"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full h-[40px] px-4 py-2 text-xs font-bold text-white bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 disabled:cursor-not-allowed rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer active:scale-[0.98]"
+                title="Choose files to upload"
               >
-                {isUploading ? 'Uploading...' : 'Browse Files'}
+                {isUploading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Uploading...</span>
+                  </>
+                ) : (
+                  <>
+                    <UploadCloud className="w-4 h-4" />
+                    <span>Upload Document</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
+
+          {/* Selected Files Preview & Confirmation Area */}
+          {selectedFiles.length > 0 && (
+            <div className="p-3.5 bg-[#0F172A] border border-[#334155] rounded-xl space-y-3">
+              <div className="flex items-center justify-between text-xs border-b border-[#334155]/60 pb-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-white">Selected Files</span>
+                  <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/25">
+                    {selectedFiles.length} {selectedFiles.length === 1 ? 'file' : 'files'}
+                  </span>
+                  <span className="text-[11px] text-[#94A3B8] hidden sm:inline">
+                    → Will be linked to <strong className="text-white">{selectedEmployee?.fullName}</strong> under <strong className="text-white">{selectedCategory}</strong>
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleClearSelectedFiles}
+                  disabled={isUploading}
+                  className="text-[11px] text-[#94A3B8] hover:text-rose-400 transition-colors cursor-pointer"
+                >
+                  Clear Selection
+                </button>
+              </div>
+
+              {/* Selected Files Badges / Chips with Remove Button */}
+              <div className="flex flex-wrap gap-2 max-h-[140px] overflow-y-auto pr-1">
+                {selectedFiles.map((item, idx) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#151D2B] border border-[#334155] text-xs text-white"
+                  >
+                    {getFileIcon(item.file.name)}
+                    <div className="min-w-0">
+                      <span className="font-medium truncate max-w-[200px] block" title={item.file.name}>
+                        {item.file.name}
+                      </span>
+                      <span className="text-[10px] text-[#94A3B8]">
+                        {(item.file.size / (1024 * 1024)).toFixed(2)} MB · {selectedCategory}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveFile(idx)}
+                      disabled={isUploading}
+                      className="p-1 rounded hover:bg-rose-500/15 text-[#94A3B8] hover:text-rose-400 transition-colors ml-1 cursor-pointer"
+                      title="Remove file"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Action Buttons: Cancel or Confirm Upload */}
+              <div className="flex items-center justify-end gap-2.5 pt-1 border-t border-[#334155]/60">
+                <button
+                  type="button"
+                  onClick={handleClearSelectedFiles}
+                  disabled={isUploading}
+                  className="px-3.5 py-1.5 text-xs font-semibold text-[#CBD5E1] hover:text-white bg-[#151D2B] hover:bg-[#1E293B] border border-[#334155] rounded-xl transition-all cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSubmitSelectedFiles}
+                  disabled={isUploading || selectedFiles.length === 0}
+                  className="flex items-center gap-2 px-4 py-1.5 text-xs font-bold text-white bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-all shadow-xs cursor-pointer"
+                >
+                  {isUploading ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Uploading...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Confirm &amp; Submit ({selectedFiles.length})</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Feedback alerts */}
+          {uploadError && (
+            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>{uploadError}</span>
+            </div>
+          )}
+
+          {uploadSuccess && (
+            <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>{uploadSuccess}</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -529,7 +618,7 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
                   No documents submitted yet for {activeEmployee.fullName}
                 </p>
                 <p className="text-xs text-[#94A3B8] mt-1 max-w-md mx-auto">
-                  Use the Upload Document card above to upload this employee's ID Proof, Offer Letter, Resume, or Contract.
+                  Click the Upload Document button above to upload this employee's ID Proof, Offer Letter, Resume, or Contract.
                 </p>
               </div>
             </div>

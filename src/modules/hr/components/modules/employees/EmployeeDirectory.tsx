@@ -172,10 +172,10 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({
             <button
               onClick={() => setIsBulkModalOpen(true)}
               className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#CBD5E1] bg-[#1E293B] border border-[#334155] rounded-xl hover:bg-[#334155] hover:text-white transition-all shadow-xs cursor-pointer"
-              title="Bulk Add Employees"
+              title="Upload Employee"
             >
               <Users className="w-3.5 h-3.5 text-[#60A5FA]" />
-              <span>Bulk Add Employees</span>
+              <span>Upload Employee</span>
             </button>
           )}
 
