@@ -1628,39 +1628,27 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
 
   const handleTrackOrder = (order: UnifiedLogisticsOrder) => {
-
+    const cleanOid = cleanOrderId(order.orderId || order.displayOrderId || '');
     const dexieItem: Partial<LogisticsOrder> = {
-
       id: order.rawId,
-
-      orderNumber: order.displayOrderId,
-
+      orderId: cleanOid || order.orderId,
+      orderNumber: order.displayOrderId || (cleanOid ? `#${cleanOid}` : ''),
       customerName: order.customerName,
-
       customerPhone: order.phone,
-
+      phoneNumber: order.phone,
       address: order.shippingAddress,
-
       city: order.city,
-
       state: order.state,
-
       pincode: order.pincode,
-
       awbNumber: order.awbNumber,
-
       courier: order.courier,
-
       status: order.status,
-
       stage: order.stage,
-
+      dispatchDate: order.dispatchDate,
+      orderType: order.paymentMode === 'COD' ? 'COD' : 'PREPAID',
       uploadedAt: order.orderDate || new Date().toISOString()
-
     };
-
     setActiveTrackingOrder(dexieItem as LogisticsOrder);
-
   };
 
 
@@ -3430,6 +3418,11 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
           order={activeTrackingOrder}
 
           onClose={() => setActiveTrackingOrder(null)}
+
+          onSaved={() => {
+            setActiveTrackingOrder(null);
+            handleRefresh();
+          }}
 
         />
 
