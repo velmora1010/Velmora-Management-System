@@ -33,7 +33,9 @@ export type UnifiedTrackingStatus =
   | 'Cancelled'
   | 'RTO'
   | 'Returned'
-  | 'COD Reconciliation';
+  | 'COD Reconciliation'
+  | 'Ready for Pickup'
+  | 'Ready to Ship';
 
 export interface UnifiedLogisticsOrder {
   id: string; // unique string id (e.g. 'dexie_123' or 'shopify_456')

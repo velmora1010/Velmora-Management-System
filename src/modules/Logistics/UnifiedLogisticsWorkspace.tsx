@@ -109,7 +109,8 @@ import { LogisticsReconciliationModal } from './components/LogisticsReconciliati
 import { CancellationHistoryModal } from '../sales/website/components/CancellationHistoryModal';
 
 import { TrackingModal } from './TrackingModal';
-
+import { BulkTrackingSyncModal } from './components/BulkTrackingSyncModal';
+import { bulkTrackingSyncService } from '../../services/tracking/bulkTrackingSyncService';
 import { trackingEngine } from '../../services/tracking/trackingEngine';
 
 import { CONFIGURED_COURIERS, normalizeCourier } from '../../config/courierConfig';
@@ -257,12 +258,19 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
 
   // Live Syncing State for Tracking
-
   const [syncingOrderIds, setSyncingOrderIds] = useState<Set<number>>(new Set());
-
   const [isRefreshing, setIsRefreshing] = useState(false);
-
   const [isBulkSyncing, setIsBulkSyncing] = useState(false);
+  const [isBulkSyncModalOpen, setIsBulkSyncModalOpen] = useState(false);
+  const [bulkSyncState, setBulkSyncState] = useState(bulkTrackingSyncService.getState());
+
+  useEffect(() => {
+    const unsub = bulkTrackingSyncService.subscribe((s) => {
+      setBulkSyncState(s);
+      setIsBulkSyncing(s.status === 'running');
+    });
+    return unsub;
+  }, []);
 
 
 
@@ -1497,79 +1505,15 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
 
 
-  // Bulk sync live tracking orders (supporting Delhivery and ST Courier with rate limiting)
+  // Complete Bulk Tracking Sync for ALL eligible AWBs across Supabase and Dexie
   const handleBulkSyncAll = async () => {
-    // Select active non-terminal trackable shipments first
-    const pool = (filteredOrders.length > 0 ? filteredOrders : stageShipments);
-    const nonTerminal = pool.filter(o => {
-      const hasAwb = !!(o.awbNumber && o.awbNumber.trim() && o.rawId);
-      if (!hasAwb) return false;
-      const st = (o.status || '').toLowerCase();
-      const isDelivered = st.includes('delivered') && !st.includes('undelivered');
-      const isRtoDelivered = st.includes('delivered to seller') || st.includes('rto delivered');
-      return !isDelivered && !isRtoDelivered;
-    });
-
-    const ordersToSync = nonTerminal.length > 0 ? nonTerminal : pool.filter(o => o.awbNumber && o.rawId);
-
-    if (ordersToSync.length === 0) {
-      toast.error('No shipments with AWB numbers available to sync');
-      return;
-    }
-
-    const batchSize = Math.min(ordersToSync.length, 30);
-    setIsBulkSyncing(true);
-    const toastId = toast.loading(`Syncing live tracking for ${batchSize} shipments...`);
-
-    let updatedCount = 0;
-    try {
-      for (const order of ordersToSync.slice(0, batchSize)) {
-        try {
-          const courier = order.courier || 'Delhivery';
-          const result = await trackingEngine.trackSingle(courier, order.awbNumber!);
-          if (result.success && result.status && result.status !== 'Unknown') {
-            await db.logistics_orders.update(order.rawId!, {
-              status: result.status,
-              currentLocation: result.location || order.shippingCity || '',
-              remarks: result.remarks || order.remarks || '',
-              deliveredDate: result.deliveredDate || order.deliveredDate,
-              estimatedDeliveryDate: result.estimatedDeliveryDate,
-              syncedAt: new Date().toISOString()
-            });
-
-            const cleanOid = cleanOrderId(order.orderId || order.displayOrderId || '');
-            if (cleanOid) {
-              try {
-                await supabase.from('customer_tracking_shipments').upsert({
-                  order_id: cleanOid,
-                  display_order_id: `#${cleanOid}`,
-                  awb_number: order.awbNumber,
-                  courier: normalizeCourier(order.courier) || order.courier || 'Delhivery',
-                  status: result.status,
-                  raw_status: result.rawStatus || result.status,
-                  remarks: result.remarks || null,
-                  delivered_date: result.deliveredDate || null,
-                  estimated_delivery_date: result.estimatedDeliveryDate || null,
-                  last_location: result.location || null,
-                  last_synced_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString()
-                }, { onConflict: 'courier,awb_number' });
-              } catch (sbErr) {
-                // ignore supabase background upsert error
-              }
-            }
-
-            updatedCount++;
-          }
-        } catch (e) {
-          // ignore single item failure in batch
-        }
-      }
-      toast.success(`Sync complete! Updated ${updatedCount} shipments.`, { id: toastId });
-    } catch (err: any) {
-      toast.error(`Sync finished with issues: ${err.message}`, { id: toastId });
-    } finally {
-      setIsBulkSyncing(false);
+    setIsBulkSyncModalOpen(true);
+    if (bulkTrackingSyncService.getState().status !== 'running') {
+      bulkTrackingSyncService.startBulkSync().then(() => {
+        handleRefresh();
+      }).catch(err => {
+        console.error('[BULK SYNC ERROR]', err);
+      });
     }
   };
 
@@ -3831,7 +3775,24 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
       />
 
+      {/* Complete Bulk Tracking Synchronization Modal */}
+      <BulkTrackingSyncModal
+        isOpen={isBulkSyncModalOpen}
+        onClose={() => setIsBulkSyncModalOpen(false)}
+        onRefreshView={handleRefresh}
+      />
 
+      {/* Floating Background Sync Progress Pill */}
+      {bulkSyncState.status === 'running' && !isBulkSyncModalOpen && (
+        <button
+          type="button"
+          onClick={() => setIsBulkSyncModalOpen(true)}
+          className="fixed bottom-6 right-6 z-40 px-4 py-2.5 bg-purple-950/95 hover:bg-purple-900 text-white rounded-full border border-purple-500/60 shadow-2xl shadow-purple-950/80 flex items-center gap-2.5 text-xs font-bold transition-all hover:scale-105 cursor-pointer backdrop-blur-md"
+        >
+          <RefreshCw size={14} className="animate-spin text-purple-400" />
+          <span>Syncing AWBs: {bulkSyncState.progress}% ({bulkSyncState.processed}/{bulkSyncState.totalCandidates})</span>
+        </button>
+      )}
 
     </div>
 

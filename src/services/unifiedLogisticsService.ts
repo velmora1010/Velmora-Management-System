@@ -212,10 +212,16 @@ export const resolveTrackingStatus = (s: string, hasAwb: boolean): UnifiedTracki
   if (s.includes('cancelled') || s.includes('canceled')) {
     return 'Cancelled';
   }
+  if (s.includes('ready for pickup') || s.includes('pickup scheduled') || s.includes('waiting_pickup') || s.includes('waiting pickup')) {
+    return 'Ready for Pickup';
+  }
+  if (s.includes('ready to ship') || s.includes('booked') || s.includes('manifest')) {
+    return 'Ready to Ship';
+  }
   if (s.includes('awaiting') || s.includes('awaiting tracking update')) {
     return 'Awaiting Tracking Update';
   }
-  if (s.includes('booked') || s.includes('info received') || s.includes('manifest')) {
+  if (s.includes('info received')) {
     return 'Info Received';
   }
   return hasAwb ? 'Awaiting Tracking Update' : 'Not Tracked';

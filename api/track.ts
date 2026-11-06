@@ -73,7 +73,7 @@ const normalizeStatus = (rawStatus: string): string => {
   }
 
   // 9. Ready for Pickup / Ready to Ship / Pending AWB
-  if (s.includes('ready for pickup') || s.includes('pickup scheduled')) return 'Ready for Pickup';
+  if (s.includes('ready for pickup') || s.includes('pickup scheduled') || s.includes('waiting_pickup') || s.includes('waiting pickup')) return 'Ready for Pickup';
   if (s.includes('ready to ship') || s.includes('manifested') || s.includes('booked') || s.includes('info received') || s.includes('data received')) {
     return 'Ready to Ship';
   }
@@ -209,6 +209,8 @@ export default async function handler(req: IncomingMessage & { query?: Record<st
 
   try {
     if (courier === 'ST Courier') {
+      // Tolerate expired SSL cert on stcourier.com web portal
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
       // Step 1: POST to doCheck to initiate tracking state and session
       const postRes = await fetch('https://stcourier.com/track/doCheck', {
         method: 'POST',
