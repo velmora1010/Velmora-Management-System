@@ -93,8 +93,85 @@ export const LogisticsPage: React.FC = () => {
               });
               console.log('[LOGISTICS MIGRATION] Order #12089 corrected to Delhivery AWB 57251410043422');
             }
+
+            // Data Integrity Reconciliation: Heal verified Delivered shipments
+            const deliveredHealMap: Record<string, { deliveredDate: string; remarks: string; location?: string }> = {
+              '11350': { deliveredDate: '28 Oct 2026, Evening', remarks: 'Delivered to consignee - Code Verified delivery', location: 'Bangalore_DommasandraCircle_D (Karnataka)' },
+              '11333': { deliveredDate: '28 Oct 2026, Evening', remarks: 'Delivered to consignee - Code Verified delivery', location: 'Kerala Zone' },
+              '11308': { deliveredDate: '29 Oct 2026, Morning', remarks: 'Delivered to consignee - Code Verified delivery', location: 'Kerala Zone' },
+              '11289': { deliveredDate: '28 Oct 2026, Night', remarks: 'Delivered to consignee', location: 'Tamil Nadu Zone' },
+              '11257': { deliveredDate: '28 Oct 2026, Evening', remarks: 'Delivered to consignee - Code Verified delivery', location: 'Zone S4 (Kerala)' },
+              '10986': { deliveredDate: '28 Oct 2026, Evening', remarks: 'Delivered to consignee - Code Verified delivery', location: 'Kerala Zone' },
+              '11355': { deliveredDate: '01 Nov 2026, Evening', remarks: 'Delivered to consignee', location: 'Destination City' },
+              '10781': { deliveredDate: '28 Oct 2026, Evening', remarks: 'Delivered to consignee - Code Verified delivery', location: 'Destination City' }
+            };
+
+            if (deliveredHealMap[cid]) {
+              const meta = deliveredHealMap[cid];
+              await db.logistics_orders.update(order.id!, {
+                status: 'Delivered',
+                rawStatus: 'DELIVERED',
+                stage: 'fulfilled',
+                fulfillmentStatus: 'Fulfilled',
+                sourceFulfillmentStatus: 'Fulfilled',
+                deliveredDate: meta.deliveredDate,
+                remarks: meta.remarks,
+                ...(meta.location ? { currentLocation: meta.location } : {})
+              });
+            }
+
+            // Data Integrity Reconciliation: Heal RTO and in-transit shipments
+            if (cid === '11188') {
+              await db.logistics_orders.update(order.id!, {
+                status: 'RTO Delivered to Seller',
+                rawStatus: 'RETURNED_TO_ORIGIN',
+                stage: 'tracking',
+                remarks: 'RETURN Accepted'
+              });
+            } else if (cid === '10983' || cid === '11249') {
+              await db.logistics_orders.update(order.id!, {
+                status: 'RTO - In Transit',
+                rawStatus: 'RETURNING_TO_ORIGIN',
+                stage: 'tracking',
+                remarks: cid === '10983' ? 'Bag Received at Facility' : 'Bag Added To Trip'
+              });
+            } else if (cid === '11377' || cid === '11298' || cid === '11213') {
+              await db.logistics_orders.update(order.id!, {
+                status: 'In Transit',
+                rawStatus: 'IN_TRANSIT',
+                stage: 'tracking',
+                remarks: cid === '11377' ? 'Shipment Received at Facility' : (cid === '11298' ? 'Package found in Audit' : 'Finance hold cleared')
+              });
+            } else if (cid === '11025') {
+              await db.logistics_orders.update(order.id!, {
+                status: 'Failed Attempt',
+                rawStatus: 'FAILED_ATTEMPT',
+                stage: 'tracking',
+                remarks: 'Consignee Unavailable'
+              });
+            }
           }
         });
+
+        // Deduplication: Prune duplicate order rows keeping the newest canonical record
+        const freshOrders = await db.logistics_orders.toArray();
+        const seenOrderIds = new Set<string>();
+        const duplicateIdsToDelete: number[] = [];
+        const sortedOrders = [...freshOrders].sort((a, b) => (b.id || 0) - (a.id || 0));
+        for (const o of sortedOrders) {
+          if (!o.id || !o.orderId || o.stage === 'trash') continue;
+          const cleanKey = o.orderId.trim().toLowerCase();
+          if (seenOrderIds.has(cleanKey)) {
+            duplicateIdsToDelete.push(o.id);
+          } else {
+            seenOrderIds.add(cleanKey);
+          }
+        }
+        if (duplicateIdsToDelete.length > 0) {
+          await db.logistics_orders.bulkDelete(duplicateIdsToDelete);
+          console.log(`[LOGISTICS MIGRATION] Pruned ${duplicateIdsToDelete.length} duplicate cached order rows.`);
+        }
+
         console.log('[LOGISTICS MIGRATION] Cleaned up temporary progress status strings.');
       } catch (err) {
         console.error('[LOGISTICS MIGRATION] Failed to clean temporary status strings:', err);

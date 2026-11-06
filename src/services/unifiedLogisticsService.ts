@@ -258,8 +258,17 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
     (order.pincode || order.city || order.address)
   );
 
+  // Transition Protection: If an order has been marked Delivered or has verified delivery,
+  // never let a stale scan or rawStatus downgrade it to Out for Delivery or In Transit.
+  const isDeliveredRecord = order.status === 'Delivered' || 
+                            (!!order.deliveredDate && !order.status?.toLowerCase().includes('rto') && !String((order as any).rawStatus || '').toLowerCase().includes('rto'));
+
+  const effectiveStatusInput = isDeliveredRecord 
+    ? 'DELIVERED' 
+    : ((order as any).rawStatus || order.status);
+
   const { status, workflowStage } = mapToUnifiedWorkflowStage(
-    (order as any).rawStatus || order.status,
+    effectiveStatusInput,
     order.stage,
     order.awbNumber,
     hasRequiredInfo,
@@ -1014,10 +1023,12 @@ export const syncSalesUploadToLogistics = async (
       } else if (isIncomingDelivered) {
         patch.stage = 'fulfilled';
         patch.status = 'Delivered';
-        patch.rawStatus = order.rawStatus || (order as any).raw_status || 'DELIVERED';
+        patch.rawStatus = 'DELIVERED';
         if (order.awb_number) patch.awbNumber = order.awb_number;
         if (order.courier) patch.courier = normalizeCourier(order.courier);
         if (order.dispatch_date) patch.dispatchDate = order.dispatch_date;
+        if (order.delivered_date) patch.deliveredDate = order.delivered_date;
+        if (order.remarks) patch.remarks = order.remarks;
         patch.fulfillmentStatus = 'Fulfilled';
         patch.sourceFulfillmentStatus = 'Fulfilled';
       } else if (inWorkflow) {
@@ -1029,7 +1040,12 @@ export const syncSalesUploadToLogistics = async (
           patch.courier = normalizeCourier(order.courier);
         }
         if (order.status && order.status !== 'Unfulfilled') {
-          patch.status = order.status;
+          const curStatus = existing.status || '';
+          if ((curStatus === 'Delivered' || curStatus === 'RTO Delivered to Seller') && order.status !== curStatus && !order.status.includes('RTO')) {
+            console.warn(`[WORKFLOW SYNC PROTECTION] Preserving ${curStatus} for order #${existing.orderId}, ignoring ${order.status}`);
+          } else {
+            patch.status = order.status;
+          }
         }
         if (order.lastLocation || order.last_location) {
           (patch as any).lastLocation = order.lastLocation || order.last_location;

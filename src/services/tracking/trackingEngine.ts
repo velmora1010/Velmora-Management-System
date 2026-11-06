@@ -154,7 +154,15 @@ export const trackingEngine = {
     }
 
     if (result && result.success) {
-      const finalStatus = result.status || 'In Transit';
+      let finalStatus = result.status || 'In Transit';
+
+      // Status Transition Protection: Never downgrade Delivered or RTO Delivered
+      const curStatus = order.status || '';
+      if ((curStatus === 'Delivered' || curStatus === 'RTO Delivered to Seller') && finalStatus !== curStatus && !finalStatus.includes('RTO')) {
+        console.warn(`[TRANSITION PROTECTION] Preserving ${curStatus} for order #${order.orderId}, rejecting incoming status: ${finalStatus}`);
+        finalStatus = curStatus;
+      }
+
       const updatePayload: Partial<LogisticsOrder> = {
         status: finalStatus,
         syncedAt: new Date().toLocaleString(),

@@ -94,8 +94,15 @@ class ScheduledTrackingBot {
           const result = await trackingEngine.trackSingle(courier, order.awbNumber!);
 
           if (result.success && result.status && result.status !== 'Unknown') {
+            let nextStatus = result.status;
+            const curStatus = order.status || '';
+            if ((curStatus === 'Delivered' || curStatus === 'RTO Delivered to Seller') && nextStatus !== curStatus && !nextStatus.includes('RTO')) {
+              console.warn(`[BOT TRANSITION PROTECTION] Preserving ${curStatus} for order #${order.orderId}, ignoring ${nextStatus}`);
+              nextStatus = curStatus;
+            }
+
             await db.logistics_orders.update(order.id!, {
-              status: result.status,
+              status: nextStatus,
               currentLocation: result.location || order.shippingCity || '',
               remarks: result.remarks || order.remarks || '',
               deliveredDate: result.deliveredDate || order.deliveredDate,
@@ -112,8 +119,8 @@ class ScheduledTrackingBot {
                   display_order_id: `#${cleanOid}`,
                   awb_number: order.awbNumber,
                   courier: courier,
-                  status: result.status,
-                  raw_status: result.rawStatus || result.status,
+                  status: nextStatus,
+                  raw_status: result.rawStatus || nextStatus,
                   remarks: result.remarks || null,
                   delivered_date: result.deliveredDate || null,
                   estimated_delivery_date: result.estimatedDeliveryDate || null,
@@ -121,6 +128,13 @@ class ScheduledTrackingBot {
                   last_synced_at: new Date().toISOString(),
                   updated_at: new Date().toISOString()
                 }, { onConflict: 'courier,awb_number' });
+
+                if (nextStatus === 'Delivered') {
+                  await supabase.from('sales_orders').update({
+                    dispatch_status: 'DELIVERED',
+                    updated_at: new Date().toISOString()
+                  }).eq('order_id', cleanOid);
+                }
               } catch (sbErr) {
                 // Ignore silent supabase sync note
               }

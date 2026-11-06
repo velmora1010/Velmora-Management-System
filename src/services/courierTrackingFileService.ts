@@ -416,14 +416,21 @@ export const commitCourierTrackingUpdates = async (
         const ord = await db.logistics_orders.get(item.matchedRawId);
         if (!ord) continue;
 
-        const isDelivered = item.newStatus === 'Delivered';
-        const isRto = item.newStatus.includes('RTO') || item.newStatus.includes('Return');
+        let finalStatus = item.newStatus;
+        const curStatus = ord.status || '';
+        if ((curStatus === 'Delivered' || curStatus === 'RTO Delivered to Seller') && finalStatus !== curStatus && !finalStatus.includes('RTO')) {
+          console.warn(`[FILE IMPORT PROTECTION] Preserving ${curStatus} for order #${ord.orderId}, ignoring file status: ${finalStatus}`);
+          finalStatus = curStatus;
+        }
+
+        const isDelivered = finalStatus === 'Delivered';
+        const isRto = finalStatus.includes('RTO') || finalStatus.includes('Return');
 
         const updatePayload: Partial<LogisticsOrder> = {
           awbNumber: item.awbNumber,
           courier: item.courier,
-          status: item.newStatus,
-          stage: isDelivered ? 'fulfilled' : (isRto ? 'tracking' : 'tracking'),
+          status: finalStatus,
+          stage: isDelivered ? 'fulfilled' : 'tracking',
           syncedAt: nowLocale
         };
 
