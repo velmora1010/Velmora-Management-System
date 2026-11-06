@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   History as HistoryIcon,
   RotateCcw,
@@ -94,6 +94,10 @@ export const SalesHistoryView: React.FC = () => {
   const [datePreset, setDatePreset] = useState<string>('all-time');
   const [startDate, setStartDate] = useState<string>('2026-08-01');
   const [endDate, setEndDate] = useState<string>(todayStr);
+
+  // Date input refs for opening calendar picker
+  const startDateInputRef = useRef<HTMLInputElement>(null);
+  const endDateInputRef = useRef<HTMLInputElement>(null);
 
   // RTO Payment Breakdown & Scope Switcher State
   const [rtoPaymentScope, setRtoPaymentScope] = useState<RtoPaymentScope>('delivered');
@@ -866,27 +870,91 @@ export const SalesHistoryView: React.FC = () => {
               <ChevronLeft size={16} />
             </button>
 
-            <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-700/80 text-xs">
-              <Calendar size={14} className="text-purple-400 shrink-0" />
-              <span className="text-slate-400">From:</span>
+            {/* Scoped CSS for high-contrast visible calendar icons */}
+            <style>{`
+              .sales-history-date-input {
+                color-scheme: dark;
+              }
+              .sales-history-date-input::-webkit-calendar-picker-indicator {
+                cursor: pointer;
+                border-radius: 4px;
+                padding: 3px;
+                margin-left: 6px;
+                width: 16px;
+                height: 16px;
+                opacity: 0.95;
+                /* High-contrast purple icon matching theme */
+                filter: invert(70%) sepia(85%) saturate(700%) hue-rotate(230deg) brightness(1.35);
+                transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+              }
+              .sales-history-date-input::-webkit-calendar-picker-indicator:hover {
+                opacity: 1;
+                filter: invert(90%) sepia(90%) saturate(900%) hue-rotate(230deg) brightness(1.6);
+                background-color: rgba(168, 85, 247, 0.25);
+                transform: scale(1.15);
+              }
+              .sales-history-date-input:focus::-webkit-calendar-picker-indicator {
+                opacity: 1;
+                filter: invert(95%) sepia(95%) saturate(1000%) hue-rotate(230deg) brightness(1.7);
+                outline: 2px solid rgba(168, 85, 247, 0.5);
+                outline-offset: 1px;
+              }
+              .sales-history-date-input:disabled::-webkit-calendar-picker-indicator {
+                opacity: 0.35;
+                cursor: not-allowed;
+                filter: grayscale(100%) opacity(0.35);
+              }
+            `}</style>
+
+            <div className="flex items-center flex-wrap sm:flex-nowrap gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-700/80 text-xs shadow-inner focus-within:border-purple-500/80 focus-within:ring-1 focus-within:ring-purple-500/30 transition-all">
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    startDateInputRef.current?.showPicker?.();
+                  } catch {
+                    startDateInputRef.current?.focus();
+                  }
+                }}
+                className="p-1 rounded-md text-purple-400 hover:text-purple-300 hover:bg-purple-950/60 transition-colors cursor-pointer shrink-0"
+                title="Click to open calendar picker"
+                aria-label="Click to open calendar picker"
+              >
+                <Calendar size={16} className="text-purple-400 shrink-0" />
+              </button>
+              <span className="text-slate-400 font-medium select-none">From:</span>
               <input
+                ref={startDateInputRef}
                 type="date"
                 value={startDate}
                 onChange={e => {
                   setStartDate(e.target.value);
                   setDatePreset('custom');
                 }}
-                className="bg-transparent text-white focus:outline-none cursor-pointer font-mono"
+                onClick={e => {
+                  try {
+                    (e.target as any).showPicker?.();
+                  } catch {}
+                }}
+                className="sales-history-date-input bg-transparent text-white focus:outline-none cursor-pointer font-mono text-xs w-[130px]"
+                title="Select start date"
               />
-              <span className="text-slate-500">to</span>
+              <span className="text-slate-500 font-medium select-none px-0.5">to</span>
               <input
+                ref={endDateInputRef}
                 type="date"
                 value={endDate}
                 onChange={e => {
                   setEndDate(e.target.value);
                   setDatePreset('custom');
                 }}
-                className="bg-transparent text-white focus:outline-none cursor-pointer font-mono"
+                onClick={e => {
+                  try {
+                    (e.target as any).showPicker?.();
+                  } catch {}
+                }}
+                className="sales-history-date-input bg-transparent text-white focus:outline-none cursor-pointer font-mono text-xs w-[130px]"
+                title="Select end date"
               />
             </div>
 
