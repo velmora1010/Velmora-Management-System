@@ -33,12 +33,12 @@ export const TrackingModal: React.FC<TrackingModalProps> = ({ order, onClose, on
   // Auto detect courier when AWB changes
   useEffect(() => {
     if (awb.trim()) {
-      const detected = detectCourier(awb);
+      const detected = detectCourier(awb, order.courier);
       setCourier(detected);
     } else {
       setCourier('Unknown');
     }
-  }, [awb]);
+  }, [awb, order.courier]);
 
   // Clean hidden characters & trim spaces
   const cleanString = (val: string): string => {
@@ -57,7 +57,11 @@ export const TrackingModal: React.FC<TrackingModalProps> = ({ order, onClose, on
         return;
       }
 
-      const normalizedCourier = normalizeCourier(targetCourier) || targetCourier || 'ST Courier';
+      const detected = detectCourier(cleanAwb, targetCourier);
+      const normalizedCourier = normalizeCourier(targetCourier) || 
+                                (detected !== 'Unknown' ? detected : '') || 
+                                normalizeCourier(order.courier) || 
+                                'Delhivery';
       const cleanOid = cleanOrderId(order.orderId || order.orderNumber || '');
 
       // 1. Duplicate AWB Protection across other active orders
@@ -102,6 +106,17 @@ export const TrackingModal: React.FC<TrackingModalProps> = ({ order, onClose, on
       // 4. Persist to Supabase customer_tracking_shipments & sales_orders
       if (cleanOid) {
         try {
+          // Clean up any stale or previous obsolete tracking records for this order ID in Supabase
+          try {
+            await supabase
+              .from('customer_tracking_shipments')
+              .delete()
+              .eq('order_id', cleanOid)
+              .neq('awb_number', cleanAwb);
+          } catch (delErr) {
+            console.warn('Obsolete shipment cleanup note:', delErr);
+          }
+
           const { error: sbError } = await supabase.from('customer_tracking_shipments').upsert({
             order_id: cleanOid,
             display_order_id: `#${cleanOid}`,
@@ -133,7 +148,12 @@ export const TrackingModal: React.FC<TrackingModalProps> = ({ order, onClose, on
           await supabase.from('sales_orders').update({
             dispatch_status: 'DISPATCHED',
             dispatch_date: order.dispatchDate || nowIso.slice(0, 10),
-            updated_at: nowIso
+            updated_at: nowIso,
+            extra_data: {
+              ...(order as any).extra_data,
+              awb_number: cleanAwb,
+              courier: normalizedCourier
+            }
           }).eq('order_id', cleanOid);
         } catch (soErr) {
           console.warn('Supabase sales_orders update note:', soErr);

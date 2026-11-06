@@ -79,6 +79,20 @@ export const LogisticsPage: React.FC = () => {
                 syncState: 'idle'
               });
             }
+
+            // Data Integrity Reconciliation: Fix Order #12089 if cached with previous dummy AWB
+            const cid = (order.orderId || '').replace(/[^0-9]/g, '');
+            if (cid === '12089' && (order.awbNumber === '57251410999999' || order.awbNumber === '57251413945607' || order.courier === 'ST Courier')) {
+              await db.logistics_orders.update(order.id!, {
+                awbNumber: '57251410043422',
+                courier: 'Delhivery',
+                stage: 'tracking',
+                status: 'In Transit',
+                remarks: 'Pickup scheduled',
+                currentLocation: 'Erode_BharathiNagar_L (Tamil Nadu)'
+              });
+              console.log('[LOGISTICS MIGRATION] Order #12089 corrected to Delhivery AWB 57251410043422');
+            }
           }
         });
         console.log('[LOGISTICS MIGRATION] Cleaned up temporary progress status strings.');
