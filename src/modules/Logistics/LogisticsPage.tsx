@@ -117,7 +117,7 @@ export const LogisticsPage: React.FC = () => {
 
 
   return (
-    <div className="flex flex-col gap-3.5 w-full px-4 sm:px-6 lg:px-8 mx-auto h-[calc(100vh-75px)] animate-in fade-in duration-200 overflow-hidden">
+    <div className="flex flex-col gap-3.5 w-full px-4 sm:px-6 lg:px-8 mx-auto min-h-full animate-in fade-in duration-200 pb-12">
       
       {/* Title Header with live DateTime matching Image 1 */}
       <div className="flex justify-between items-center shrink-0 pt-1">
@@ -134,7 +134,7 @@ export const LogisticsPage: React.FC = () => {
       </div>
 
       {/* Main Unified Workspace */}
-      <div className="flex-1 min-h-0 bg-transparent flex flex-col overflow-hidden">
+      <div className="w-full bg-transparent flex flex-col">
         <UnifiedLogisticsWorkspace />
       </div>
     </div>

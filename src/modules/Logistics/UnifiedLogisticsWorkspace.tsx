@@ -1723,7 +1723,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
   return (
 
-    <div className="flex flex-col gap-3.5 w-full h-full overflow-hidden">
+    <div className="flex flex-col gap-3.5 w-full">
 
       
 
@@ -2942,13 +2942,13 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
       {/* 3. MAIN WORKSPACE CONTENT: Reclaimed Full Width Table View + Horizontal Status Navigation */}
 
-      <div className="flex-1 flex gap-3.5 min-h-0 overflow-hidden pb-1">
+      <div className="w-full flex gap-3.5 pb-1">
 
 
 
         {/* Main Table / View Area (Reclaiming full width from previous vertical sidebar) */}
 
-        <div tabIndex={currentStage === 'delivery_delays' ? 0 : undefined} className={`flex-1 min-w-0 flex flex-col h-full gap-2.5 outline-none ${currentStage === 'delivery_delays' ? 'overflow-y-auto overflow-x-hidden custom-scrollbar pr-1 pb-12' : 'overflow-hidden'}`}>
+        <div tabIndex={currentStage === 'delivery_delays' ? 0 : undefined} className="flex-1 min-w-0 flex flex-col gap-2.5 outline-none">
 
           
 
@@ -3474,7 +3474,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
           ) : (
 
-            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            <div className="w-full flex flex-col">
 
               <OrderTableView
 
