@@ -1,35 +1,32 @@
 import React, { useState, useMemo } from 'react';
 import { 
-  AlertTriangle, 
-  Search, 
-  Download, 
-  Copy, 
-  Check, 
-  ExternalLink, 
-  Truck, 
-  Calendar, 
-  Clock, 
-  ChevronLeft, 
-  ChevronRight, 
-  ChevronsLeft, 
-  ChevronsRight, 
-  ArrowUpDown,
-  RefreshCw,
-  Phone,
-  ShieldAlert,
-  Flame,
+  AlertTriangle,
+  Clock,
   AlertCircle,
+  Flame,
   HelpCircle,
+  ShieldAlert,
+  Search,
+  Download,
+  RotateCcw,
+  ExternalLink,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Truck,
+  Copy,
+  Check,
   CheckCircle2,
   X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import type { UnifiedLogisticsOrder } from '../../../types/unifiedLogistics';
 import { 
-  getDeliveryDelayInfo, 
-  getDelayedShipments, 
-  calculateDeliveryDelaySummary,
-  DelaySeverity 
+  calculateDeliveryDelaySummary, 
+  getDelayedShipments,
+  type DelaySeverity,
+  type DeliveryDelayInfo 
 } from '../utils/deliveryDelayUtils';
 import { getCanonicalStatus, STATUS_METADATA_MAP, formatINR } from '../utils/logisticsAnalyticsUtils';
 import { normalizeCourier } from '../../../config/courierConfig';
@@ -55,7 +52,7 @@ export const DeliveryDelaysView: React.FC<DeliveryDelaysViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCourier, setSelectedCourier] = useState('All');
   const [selectedStatus, setSelectedStatus] = useState('All');
-  const [selectedSeverity, setSelectedSeverity] = useState<'all' | 'moderate' | 'severe' | 'critical' | 'missing_eta'>('all');
+  const [selectedSeverity, setSelectedSeverity] = useState<'all' | 'moderate' | 'severe' | 'critical' | 'missing_eta' | 'invalid_eta'>('all');
   const [copiedText, setCopiedText] = useState<string | null>(null);
 
   // Pagination State
@@ -141,8 +138,11 @@ export const DeliveryDelaysView: React.FC<DeliveryDelaysViewProps> = ({
       'Courier',
       'AWB Number',
       'Expected Delivery Date',
+      'ETA Source',
       'Days Overdue',
       'Shipment Status',
+      'Delay Severity',
+      'Validation Status',
       'Order Amount',
       'Dispatch Date',
       'Last Tracking Event'
@@ -158,8 +158,11 @@ export const DeliveryDelaysView: React.FC<DeliveryDelaysViewProps> = ({
       `"${normalizeCourier(order.courier) || 'Unassigned'}"`,
       `"${order.awbNumber || ''}"`,
       `"${delayInfo.eddIsoDate || 'Missing'}"`,
+      `"${delayInfo.etaSource || 'Courier Tracking'}"`,
       delayInfo.overdueDays,
       `"${getCanonicalStatus(order)}"`,
+      `"${delayInfo.severity}"`,
+      `"${delayInfo.isValidEdd ? 'Valid' : (delayInfo.severity === 'invalid_eta' ? 'ETA Earlier Than Dispatch' : 'Missing ETA')}"`,
       parseOrderAmount(order.amount ?? order.totalAmount) || 0,
       `"${order.dispatchDate || ''}"`,
       `"${(order.lastEvent || order.remarks || '').replace(/"/g, '""')}"`
@@ -170,11 +173,11 @@ export const DeliveryDelaysView: React.FC<DeliveryDelaysViewProps> = ({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `Delivery_Delays_10Plus_Days_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `Delivery_Delays_${selectedSeverity}_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    toast.success(`Exported ${delayedItems.length} delayed shipments to CSV`);
+    toast.success(`Exported ${delayedItems.length} shipments to CSV`);
   };
 
   const toggleSort = (field: typeof sortField) => {
@@ -190,7 +193,7 @@ export const DeliveryDelaysView: React.FC<DeliveryDelaysViewProps> = ({
     <div className="flex flex-col gap-4 w-full animate-fade-in select-none shrink-0">
       
       {/* 1. TOP ALERT & KPI CARDS BANNER */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         
         {/* Card 1: Total Overdue (10+ Days) */}
         <div 
@@ -282,7 +285,7 @@ export const DeliveryDelaysView: React.FC<DeliveryDelaysViewProps> = ({
         {/* Card 5: Missing ETA / Un-dated */}
         <div 
           onClick={() => { setSelectedSeverity('missing_eta'); setCurrentPage(1); }}
-          className={`p-4 rounded-xl border transition-all cursor-pointer col-span-2 md:col-span-1 ${
+          className={`p-4 rounded-xl border transition-all cursor-pointer ${
             selectedSeverity === 'missing_eta'
               ? 'bg-slate-800/90 border-slate-500 shadow-lg ring-1 ring-slate-400/50'
               : 'bg-[#0b1220] border-slate-800 hover:border-slate-700'
@@ -300,7 +303,47 @@ export const DeliveryDelaysView: React.FC<DeliveryDelaysViewProps> = ({
           </div>
         </div>
 
+        {/* Card 6: Invalid ETA / Data Issue */}
+        <div 
+          onClick={() => { setSelectedSeverity('invalid_eta'); setCurrentPage(1); }}
+          className={`p-4 rounded-xl border transition-all cursor-pointer ${
+            selectedSeverity === 'invalid_eta'
+              ? 'bg-amber-950/70 border-amber-500/90 shadow-lg shadow-amber-950/40 ring-1 ring-amber-500/60'
+              : 'bg-[#0b1220] border-slate-800 hover:border-slate-700'
+          }`}
+        >
+          <div className="flex items-center justify-between text-slate-400 mb-1">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400">Invalid ETA</span>
+            <ShieldAlert size={15} className="text-amber-400" />
+          </div>
+          <div className="text-2xl font-black font-mono text-amber-400">
+            {summary.invalidEtaCount.toLocaleString('en-IN')}
+          </div>
+          <div className="text-[10px] text-slate-400 mt-1 truncate" title="Shipments where ETA is earlier than dispatch date or invalid">
+            <span>Data Issue: ETA &lt; Dispatch</span>
+          </div>
+        </div>
+
       </div>
+
+      {/* ETA DATA ISSUE ALERT BANNER (If any invalid ETA shipments detected) */}
+      {summary.invalidEtaCount > 0 && (
+        <div className="bg-amber-950/40 border border-amber-600/50 rounded-xl px-4 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-amber-200">
+          <div className="flex items-center gap-2">
+            <ShieldAlert size={16} className="text-amber-400 shrink-0" />
+            <span>
+              <strong>ETA Data Issue Detected:</strong> {summary.invalidEtaCount} shipment(s) have expected delivery dates earlier than their dispatch date. These records are isolated and excluded from valid overdue delay counts.
+            </span>
+          </div>
+          <button 
+            type="button" 
+            onClick={() => { setSelectedSeverity('invalid_eta'); setCurrentPage(1); }}
+            className="px-2.5 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold underline transition-colors cursor-pointer shrink-0 self-start sm:self-auto"
+          >
+            Review {summary.invalidEtaCount} Data Issue(s)
+          </button>
+        </div>
+      )}
 
       {/* 2. FILTER & ACTION TOOLBAR */}
       <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl p-3 sm:p-4 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shadow-sm">
@@ -355,34 +398,48 @@ export const DeliveryDelaysView: React.FC<DeliveryDelaysViewProps> = ({
               <option value="All">All Statuses</option>
               <option value="In Transit">In Transit</option>
               <option value="Out for Delivery">Out for Delivery</option>
-              <option value="Delivery Attempt Failed">Delivery Attempt Failed</option>
-              <option value="Delayed / SLA Breached">Delayed / SLA Breached</option>
-              <option value="Pending Tracking Update">Pending Tracking Update</option>
-              <option value="RTO Initiated">RTO Initiated</option>
+              <option value="Pending">Pending AWB / Manifest</option>
+              <option value="RTO - In Transit">RTO - In Transit</option>
             </select>
           </div>
 
+          {/* Severity View Tag */}
+          {selectedSeverity !== 'all' && (
+            <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-950/70 border border-rose-500/40 text-xs text-rose-300 font-medium">
+              <span>View: <strong>{selectedSeverity.replace('_', ' ').toUpperCase()}</strong></span>
+              <button
+                type="button"
+                onClick={() => setSelectedSeverity('all')}
+                className="hover:text-white ml-1 p-0.5"
+                title="Reset severity filter"
+              >
+                <X size={11} />
+              </button>
+            </div>
+          )}
+
         </div>
 
-        {/* Right Side: Refresh & Export Actions */}
-        <div className="flex items-center gap-2 shrink-0 self-end md:self-auto">
+        {/* Right Side: Refresh & Export */}
+        <div className="flex items-center gap-2 shrink-0">
           {onRefresh && (
             <button
               type="button"
               onClick={onRefresh}
               disabled={isRefreshing}
-              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 border border-slate-700 transition-colors cursor-pointer disabled:opacity-50"
-              title="Refresh tracking data from Supabase"
+              className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+              title="Refresh Delay Records"
             >
-              <RefreshCw size={13} className={isRefreshing ? 'animate-spin' : ''} />
-              <span className="hidden sm:inline">Refresh</span>
+              <RotateCcw size={13} className={isRefreshing ? 'animate-spin text-rose-400' : ''} />
+              <span>Refresh</span>
             </button>
           )}
 
           <button
             type="button"
             onClick={handleExportCSV}
-            className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-rose-950 transition-all cursor-pointer"
+            className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-rose-950/60 transition-all cursor-pointer active:scale-95"
+            title="Export Delayed Shipments CSV"
           >
             <Download size={13} />
             <span>Export CSV</span>
@@ -391,62 +448,75 @@ export const DeliveryDelaysView: React.FC<DeliveryDelaysViewProps> = ({
 
       </div>
 
-      {/* 3. SHIPMENTS TABLE */}
-      <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl shadow-xl overflow-hidden flex flex-col shrink-0">
+      {/* 3. DELAYED SHIPMENTS TABLE */}
+      <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl overflow-hidden shadow-xl flex flex-col">
         
-        {/* Table Header Info */}
-        <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between text-xs text-slate-400 bg-slate-900/50">
-          <div>
-            Showing <strong className="text-white font-mono">{delayedItems.length}</strong> {selectedSeverity === 'missing_eta' ? 'shipments missing ETA' : 'overdue shipments (>= 10 days)'}
-            {selectedSeverity !== 'all' && (
-              <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-rose-300 border border-slate-700">
-                Filter: {selectedSeverity.toUpperCase()}
-              </span>
-            )}
+        {/* Table Header Bar */}
+        <div className="px-4 py-3 bg-[#0d1627] border-b border-slate-800 flex items-center justify-between text-xs text-slate-400">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-slate-200">
+              {selectedSeverity === 'missing_eta' 
+                ? `Showing ${delayedItems.length} undated shipments (Missing ETA)`
+                : selectedSeverity === 'invalid_eta'
+                ? `Showing ${delayedItems.length} shipments with ETA data issues`
+                : `Showing ${delayedItems.length} overdue shipments (>= 10 days)`}
+            </span>
           </div>
-          <div className="text-[11px] text-slate-500">
-            Ordered by: <strong className="text-rose-400 font-medium">Most Overdue First</strong>
+          <div className="text-[11px] text-slate-500 font-mono">
+            Ordered by: <span className="text-rose-400 font-semibold">{sortField === 'overdueDays' ? 'Most Overdue First' : sortField}</span>
           </div>
         </div>
 
-        {/* Responsive Table Scroll Container */}
-        <div className="w-full overflow-x-auto custom-scrollbar">
-          <table className="w-full text-left text-xs border-collapse min-w-[1000px]">
-            <thead>
-              <tr className="border-b border-slate-800 bg-[#0d1627] text-slate-400 text-[11px] font-bold uppercase tracking-wider">
-                <th className="px-4 py-3.5">
-                  <button type="button" onClick={() => toggleSort('orderDate')} className="flex items-center gap-1 hover:text-white cursor-pointer">
+        {/* Table Content */}
+        <div className="overflow-x-auto w-full custom-scrollbar">
+          <table className="w-full text-left text-xs text-slate-300 border-collapse min-w-[1000px]">
+            <thead className="bg-[#080d18] text-slate-400 text-[11px] font-bold uppercase tracking-wider border-b border-slate-800 sticky top-0 z-10">
+              <tr>
+                <th 
+                  onClick={() => toggleSort('orderDate')}
+                  className="px-4 py-3 cursor-pointer hover:text-white transition-colors whitespace-nowrap"
+                >
+                  <div className="flex items-center gap-1">
                     <span>Order ID</span>
-                    <ArrowUpDown size={11} />
-                  </button>
+                    <span className="text-[10px] text-slate-600">⇅</span>
+                  </div>
                 </th>
-                <th className="px-4 py-3.5">Customer & Location</th>
-                <th className="px-4 py-3.5">Phone Number</th>
-                <th className="px-4 py-3.5">Courier & AWB</th>
-                <th className="px-4 py-3.5">
-                  <button type="button" onClick={() => toggleSort('edd')} className="flex items-center gap-1 hover:text-white cursor-pointer">
+                <th className="px-4 py-3">Customer & Location</th>
+                <th className="px-4 py-3">Phone Number</th>
+                <th className="px-4 py-3">Courier & AWB</th>
+                <th 
+                  onClick={() => toggleSort('edd')}
+                  className="px-4 py-3 cursor-pointer hover:text-white transition-colors whitespace-nowrap"
+                >
+                  <div className="flex items-center gap-1">
                     <span>Expected Delivery (ETA)</span>
-                    <ArrowUpDown size={11} />
-                  </button>
+                    <span className="text-[10px] text-slate-600">⇅</span>
+                  </div>
                 </th>
-                <th className="px-4 py-3.5">Shipment Status</th>
-                <th className="px-4 py-3.5">
-                  <button type="button" onClick={() => toggleSort('overdueDays')} className="flex items-center gap-1 hover:text-white cursor-pointer text-rose-300">
+                <th className="px-4 py-3">Shipment Status</th>
+                <th 
+                  onClick={() => toggleSort('overdueDays')}
+                  className="px-4 py-3 cursor-pointer hover:text-white transition-colors whitespace-nowrap"
+                >
+                  <div className="flex items-center gap-1 text-rose-300">
                     <span>Days Overdue</span>
-                    <ArrowUpDown size={11} />
-                  </button>
+                    <span className="text-[10px]">⇅</span>
+                  </div>
                 </th>
-                <th className="px-4 py-3.5">
-                  <button type="button" onClick={() => toggleSort('amount')} className="flex items-center gap-1 hover:text-white cursor-pointer">
+                <th 
+                  onClick={() => toggleSort('amount')}
+                  className="px-4 py-3 cursor-pointer hover:text-white transition-colors whitespace-nowrap"
+                >
+                  <div className="flex items-center gap-1">
                     <span>Amount</span>
-                    <ArrowUpDown size={11} />
-                  </button>
+                    <span className="text-[10px] text-slate-600">⇅</span>
+                  </div>
                 </th>
-                <th className="px-4 py-3.5">Last Tracking Event</th>
-                <th className="px-4 py-3.5 text-right">Actions</th>
+                <th className="px-4 py-3">Last Tracking Event</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/80">
+            <tbody className="divide-y divide-slate-800/80 font-normal">
               {paginatedItems.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="py-16 text-center text-slate-400">
@@ -484,6 +554,9 @@ export const DeliveryDelaysView: React.FC<DeliveryDelaysViewProps> = ({
                   } else if (delayInfo.severity === 'severe') {
                     alertBadgeClass = 'bg-orange-950/80 border-orange-500/70 text-orange-200';
                     alertDotClass = 'bg-orange-400 animate-pulse';
+                  } else if (delayInfo.severity === 'invalid_eta') {
+                    alertBadgeClass = 'bg-amber-950/80 border-amber-500/80 text-amber-300';
+                    alertDotClass = 'bg-amber-400';
                   } else if (delayInfo.severity === 'missing_eta') {
                     alertBadgeClass = 'bg-slate-800/80 border-slate-600 text-slate-400';
                     alertDotClass = 'bg-slate-500';
@@ -585,15 +658,25 @@ export const DeliveryDelaysView: React.FC<DeliveryDelaysViewProps> = ({
                         </div>
                       </td>
 
-                      {/* 5. Expected Delivery Date */}
+                      {/* 5. Expected Delivery Date & Authoritative Source */}
                       <td className="px-4 py-3.5 whitespace-nowrap">
-                        {delayInfo.hasEdd ? (
+                        {delayInfo.severity === 'invalid_eta' ? (
+                          <div className="flex flex-col" title={delayInfo.validationIssue}>
+                            <div className="flex items-center gap-1 text-amber-400 font-bold font-mono text-xs">
+                              <ShieldAlert size={12} className="shrink-0" />
+                              <span>{delayInfo.eddDisplayDate}</span>
+                            </div>
+                            <span className="text-[10px] text-amber-500 font-semibold mt-0.5">
+                              ETA &lt; Dispatch Date
+                            </span>
+                          </div>
+                        ) : delayInfo.hasEdd ? (
                           <div className="flex flex-col">
                             <span className="font-bold text-slate-200 font-mono">
                               {delayInfo.eddDisplayDate}
                             </span>
-                            <span className="text-[10px] text-slate-500 font-mono">
-                              ETA Promised
+                            <span className="text-[10px] text-slate-500 font-mono truncate max-w-[140px]" title={delayInfo.etaSource || 'Courier ETA'}>
+                              {delayInfo.etaSource || 'ETA Promised'}
                             </span>
                           </div>
                         ) : (
@@ -612,10 +695,22 @@ export const DeliveryDelaysView: React.FC<DeliveryDelaysViewProps> = ({
 
                       {/* 7. Days Overdue (Alert Highlight) */}
                       <td className="px-4 py-3.5 whitespace-nowrap">
-                        <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl border font-bold text-xs font-mono ${alertBadgeClass}`}>
-                          <span className={`w-2 h-2 rounded-full shrink-0 ${alertDotClass}`} />
-                          <span>{delayInfo.alertLabel}</span>
-                        </div>
+                        {delayInfo.severity === 'invalid_eta' ? (
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl border font-bold text-xs font-mono bg-amber-950/80 border-amber-600/60 text-amber-300" title={delayInfo.validationIssue}>
+                            <ShieldAlert size={12} className="text-amber-400 shrink-0" />
+                            <span>ETA Data Issue</span>
+                          </div>
+                        ) : delayInfo.severity === 'missing_eta' ? (
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl border font-bold text-xs font-mono bg-slate-900 border-slate-700 text-slate-400">
+                            <Clock size={12} className="text-slate-500 shrink-0" />
+                            <span>Unscheduled</span>
+                          </div>
+                        ) : (
+                          <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl border font-bold text-xs font-mono ${alertBadgeClass}`}>
+                            <span className={`w-2 h-2 rounded-full shrink-0 ${alertDotClass}`} />
+                            <span>{delayInfo.alertLabel}</span>
+                          </div>
+                        )}
                       </td>
 
                       {/* 8. Order Amount */}
@@ -631,7 +726,7 @@ export const DeliveryDelaysView: React.FC<DeliveryDelaysViewProps> = ({
                           </span>
                           {order.dispatchDate && (
                             <span className="text-[10px] text-slate-500 font-mono mt-0.5">
-                              Dispatched: {order.dispatchDate.slice(0, 10)}
+                              Dispatched: {parseAndFormatLogisticsDate(order.dispatchDate).displayDate || order.dispatchDate.slice(0, 10)}
                             </span>
                           )}
                         </div>
@@ -743,4 +838,3 @@ export const DeliveryDelaysView: React.FC<DeliveryDelaysViewProps> = ({
 };
 
 export default DeliveryDelaysView;
-

@@ -712,7 +712,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         try {
           const { data: sTrackData } = await supabase
             .from('customer_tracking_shipments')
-            .select('order_id, awb_number, estimated_delivery_date, delivered_date')
+            .select('order_id, awb_number, estimated_delivery_date, delivered_date, status_source, source_type')
             .not('estimated_delivery_date', 'is', null)
             .limit(2000);
 
@@ -735,11 +735,15 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
               if (matched) {
                 const patch: Partial<LogisticsOrder> = {};
-                if (!rec.estimatedDeliveryDate && matched.estimated_delivery_date) {
+                // Always sync latest courier EDD if present and different
+                if (matched.estimated_delivery_date && rec.estimatedDeliveryDate !== matched.estimated_delivery_date) {
                   patch.estimatedDeliveryDate = matched.estimated_delivery_date;
                 }
                 if (!rec.deliveredDate && matched.delivered_date) {
                   patch.deliveredDate = matched.delivered_date;
+                }
+                if (matched.status_source || matched.source_type) {
+                  patch.statusSource = matched.status_source || matched.source_type;
                 }
                 if (Object.keys(patch).length > 0) {
                   queuePatch(rec.id, patch);

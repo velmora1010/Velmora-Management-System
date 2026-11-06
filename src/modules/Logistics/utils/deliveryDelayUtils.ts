@@ -4,28 +4,33 @@ import { parseAndFormatLogisticsDate } from '../../../utils/logisticsDateUtils';
 import { parseOrderAmount } from '../../../utils/logisticsOrderUtils';
 import { formatLocalYMD } from '../types/logisticsFilters';
 
-export type DelaySeverity = 'none' | 'moderate' | 'severe' | 'critical' | 'missing_eta';
+export type DelaySeverity = 'none' | 'moderate' | 'severe' | 'critical' | 'missing_eta' | 'invalid_eta';
 
 export interface DeliveryDelayInfo {
-  isDelayed: boolean;         // true strictly if overdueDays >= 10, undelivered, and not cancelled
+  isDelayed: boolean;         // true strictly if overdueDays >= 10, undelivered, not cancelled, and valid ETA
   overdueDays: number;        // calendar days overdue relative to expected delivery date (>= 0)
-  hasEdd: boolean;            // true if valid expected delivery date exists
+  hasEdd: boolean;            // true if expected delivery date exists
+  isValidEdd: boolean;        // true if EDD is valid and mathematically consistent (>= dispatch date)
   eddIsoDate: string;         // YYYY-MM-DD
-  eddDisplayDate: string;     // e.g. "25 Oct 2026"
+  eddDisplayDate: string;     // e.g. "1 Nov 2026"
+  dispatchIsoDate?: string;   // YYYY-MM-DD
   isDelivered: boolean;       // confirmed delivered
   isCancelled: boolean;       // confirmed cancelled
   severity: DelaySeverity;
   alertLabel: string;
+  validationIssue?: string;   // Detailed reason if invalid_eta
+  etaSource?: string;         // Authoritative courier/tracking source (e.g. "Delhivery Tracking", "Courier ETA")
 }
 
 export interface DeliveryDelaySummary {
-  totalDelayed: number;
+  totalDelayed: number;       // Only valid overdue shipments (>= 10 days)
   totalDelayedValue: number;
   avgDelayedValue: number;
   moderateCount: number;      // 10 - 14 days
   severeCount: number;        // 15 - 20 days
   criticalCount: number;      // 21+ days
   missingEtaCount: number;    // In-transit / active shipments without EDD
+  invalidEtaCount: number;    // Shipments with invalid EDD (e.g. ETA < dispatch)
   oldestOverdueDays: number;
   courierBreakdown: Array<{
     courier: string;
@@ -36,21 +41,25 @@ export interface DeliveryDelaySummary {
 
 /**
  * Universal delay evaluator for logistics shipments.
- * Primary reference: Expected Delivery Date (EDD).
+ * Primary reference: Authoritative Courier-Provided Expected Delivery Date (EDD).
  *
  * Rules:
- * 1. Overdue when reference date (default: today) is >= 10 calendar days after expected delivery date.
- * 2. Only includes shipments that are NOT delivered.
- * 3. Excludes cancelled shipments.
- * 4. Does NOT guess or classify shipments as 10+ days delayed if expected delivery date is missing.
+ * 1. Overdue when reference date (default: current local date) is >= 10 calendar days after expected delivery date.
+ * 2. Only includes shipments that are NOT delivered and NOT cancelled.
+ * 3. Does NOT guess or classify shipments as 10+ days delayed if expected delivery date is missing.
+ * 4. Strictly validates relationship: Expected Delivery Date MUST be >= Dispatch Date.
+ *    If ETA is earlier than dispatch date, it is classified as 'invalid_eta' (ETA Data Issue)
+ *    and NEVER contributes to the overdue days calculation or delayed counts.
  */
 export function getDeliveryDelayInfo(order: any, referenceDate?: string | Date): DeliveryDelayInfo {
   const emptyInfo: DeliveryDelayInfo = {
     isDelayed: false,
     overdueDays: 0,
     hasEdd: false,
+    isValidEdd: false,
     eddIsoDate: '',
     eddDisplayDate: '',
+    dispatchIsoDate: '',
     isDelivered: false,
     isCancelled: false,
     severity: 'none',
@@ -94,6 +103,7 @@ export function getDeliveryDelayInfo(order: any, referenceDate?: string | Date):
     return {
       ...emptyInfo,
       hasEdd: false,
+      isValidEdd: false,
       severity: 'missing_eta',
       alertLabel: 'Missing ETA'
     };
@@ -104,12 +114,47 @@ export function getDeliveryDelayInfo(order: any, referenceDate?: string | Date):
     return {
       ...emptyInfo,
       hasEdd: false,
+      isValidEdd: false,
       severity: 'missing_eta',
       alertLabel: 'Missing ETA'
     };
   }
 
-  // 4. Overdue days computation based on calendar days
+  // 4. Dispatch Date check & Date Relationship Validation
+  const rawDispatch = order.dispatchDate || order.dispatchedAt || order.manifestDate || order.manifested_at;
+  const parsedDispatch = rawDispatch ? parseAndFormatLogisticsDate(rawDispatch) : null;
+  const dispatchIsoDate = parsedDispatch?.isoDate || '';
+
+  // Extract authoritative ETA source
+  const rawSource = order.statusSource || order.sourceType || order.status_source || order.source_type;
+  let etaSource = 'Courier Tracking';
+  if (rawSource) {
+    if (String(rawSource).includes('DELHIVERY')) etaSource = 'Delhivery Tracking';
+    else etaSource = String(rawSource).replace(/_/g, ' ');
+  } else if (order.courier) {
+    etaSource = `${order.courier} Tracking`;
+  }
+
+  // VALIDATION: If expected delivery date is earlier than dispatch date, flag as invalid_eta
+  if (dispatchIsoDate && parsedEdd.isoDate < dispatchIsoDate) {
+    return {
+      isDelayed: false,
+      overdueDays: 0,
+      hasEdd: true,
+      isValidEdd: false,
+      eddIsoDate: parsedEdd.isoDate,
+      eddDisplayDate: parsedEdd.displayDate || parsedEdd.isoDate,
+      dispatchIsoDate,
+      isDelivered: false,
+      isCancelled: false,
+      severity: 'invalid_eta',
+      alertLabel: 'ETA Data Issue',
+      validationIssue: `ETA (${parsedEdd.displayDate || parsedEdd.isoDate}) is earlier than dispatch date (${parsedDispatch?.displayDate || dispatchIsoDate})`,
+      etaSource
+    };
+  }
+
+  // 5. Overdue days computation based on calendar days relative to reference date (default: today)
   const todayIso = referenceDate 
     ? (typeof referenceDate === 'string' ? referenceDate.slice(0, 10) : formatLocalYMD(referenceDate))
     : formatLocalYMD(new Date());
@@ -125,12 +170,15 @@ export function getDeliveryDelayInfo(order: any, referenceDate?: string | Date):
       isDelayed: false,
       overdueDays: Math.max(0, diffDays),
       hasEdd: true,
+      isValidEdd: true,
       eddIsoDate: parsedEdd.isoDate,
       eddDisplayDate: parsedEdd.displayDate || parsedEdd.isoDate,
+      dispatchIsoDate,
       isDelivered: false,
       isCancelled: false,
       severity: 'none',
-      alertLabel: diffDays <= 0 ? 'On Track' : `${diffDays}d past ETA`
+      alertLabel: diffDays <= 0 ? 'On Track' : `${diffDays}d past ETA`,
+      etaSource
     };
   }
 
@@ -150,12 +198,15 @@ export function getDeliveryDelayInfo(order: any, referenceDate?: string | Date):
     isDelayed: true,
     overdueDays: diffDays,
     hasEdd: true,
+    isValidEdd: true,
     eddIsoDate: parsedEdd.isoDate,
     eddDisplayDate: parsedEdd.displayDate || parsedEdd.isoDate,
+    dispatchIsoDate,
     isDelivered: false,
     isCancelled: false,
     severity,
-    alertLabel
+    alertLabel,
+    etaSource
   };
 }
 
@@ -166,7 +217,7 @@ export function getDeliveryDelayInfo(order: any, referenceDate?: string | Date):
 export function getDelayedShipments(
   orders: UnifiedLogisticsOrder[], 
   options?: {
-    filterSeverity?: 'all' | 'moderate' | 'severe' | 'critical' | 'missing_eta';
+    filterSeverity?: 'all' | 'moderate' | 'severe' | 'critical' | 'missing_eta' | 'invalid_eta';
     courier?: string;
     search?: string;
     status?: string;
@@ -191,7 +242,10 @@ export function getDelayedShipments(
     const mode = options?.filterSeverity || 'all';
     if (mode === 'missing_eta') {
       if (delayInfo.severity !== 'missing_eta') continue;
+    } else if (mode === 'invalid_eta') {
+      if (delayInfo.severity !== 'invalid_eta') continue;
     } else if (mode === 'all') {
+      // 'all' strictly includes confirmed delayed shipments with valid ETA (>= 10 days)
       if (!delayInfo.isDelayed) continue;
     } else if (delayInfo.severity !== mode) {
       continue;
@@ -238,8 +292,13 @@ export function getDelayedShipments(
     result.push({ order: o, delayInfo });
   }
 
-  // Sort by most overdue first
-  result.sort((a, b) => b.delayInfo.overdueDays - a.delayInfo.overdueDays);
+  // Sort by most overdue first (for invalid_eta or missing_eta, secondary sort by orderDate)
+  result.sort((a, b) => {
+    if (b.delayInfo.overdueDays !== a.delayInfo.overdueDays) {
+      return b.delayInfo.overdueDays - a.delayInfo.overdueDays;
+    }
+    return (b.order.orderDate || '').localeCompare(a.order.orderDate || '');
+  });
 
   return result;
 }
@@ -254,6 +313,7 @@ export function calculateDeliveryDelaySummary(orders: UnifiedLogisticsOrder[]): 
   let severeCount = 0;
   let criticalCount = 0;
   let missingEtaCount = 0;
+  let invalidEtaCount = 0;
   let oldestOverdueDays = 0;
 
   const courierMap = new Map<string, { count: number; value: number }>();
@@ -275,7 +335,12 @@ export function calculateDeliveryDelaySummary(orders: UnifiedLogisticsOrder[]): 
       continue;
     }
 
-    if (delayInfo.isDelayed) {
+    if (delayInfo.severity === 'invalid_eta') {
+      invalidEtaCount++;
+      continue;
+    }
+
+    if (delayInfo.isDelayed && delayInfo.isValidEdd) {
       totalDelayed++;
       totalDelayedValue += amt;
       if (delayInfo.overdueDays > oldestOverdueDays) {
@@ -306,6 +371,7 @@ export function calculateDeliveryDelaySummary(orders: UnifiedLogisticsOrder[]): 
     severeCount,
     criticalCount,
     missingEtaCount,
+    invalidEtaCount,
     oldestOverdueDays,
     courierBreakdown
   };
