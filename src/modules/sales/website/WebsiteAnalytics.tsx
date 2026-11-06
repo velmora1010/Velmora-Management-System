@@ -34,11 +34,19 @@ import { AnalyticsSegmentedControl, SegmentOption } from './components/Analytics
 import { AnalyticsDonutChart } from './components/AnalyticsDonutChart';
 import { CardMatchingOrdersList } from './components/CardMatchingOrdersList';
 import { CustomerRepeatAnalyticsDashboard } from '../../../components/analytics/CustomerRepeatAnalyticsDashboard';
+import { TopPerformingProductsCombos } from './components/TopPerformingProductsCombos';
 import { AnalyticsFullPageDataView, CustomerPurchaseProfile, OperationalOrderRecord } from './components/AnalyticsFullPageDataView';
 import { OrderDetailsModal } from './components/OrderDetailsModal';
 import { AnalyticsFilterDrawer } from './components/AnalyticsFilterDrawer';
 import { DateRangePickerModal } from './components/DateRangePickerModal';
 import { useWebsiteSalesDateRange } from './context/WebsiteSalesDateRangeContext';
+import { 
+  calculateCanonicalRtoMetrics, 
+  isRtoOrder, 
+  isCodOrder, 
+  isPrepaidOrder, 
+  formatINR 
+} from '../../Logistics/utils/logisticsAnalyticsUtils';
 import { 
   getTodayInBusinessTimezone, 
   formatSalesDateDisplay, 
@@ -53,7 +61,8 @@ import {
   normalizeOrderId,
   matchesOrderIdExact,
   matchesCustomerNamePartial,
-  matchesPhoneDigitsPartial
+  matchesPhoneDigitsPartial,
+  resolveCanonicalProductName
 } from './websiteSalesUtils';
 import toast from 'react-hot-toast';
 
@@ -112,6 +121,7 @@ const ANALYTICS_VIEW_OPTIONS = [
   { id: 'analytics-city', label: 'City-wise Sales' },
   { id: 'analytics-pincode', label: 'Pincode Performance' },
   { id: 'analytics-product', label: 'Product Performance' },
+  { id: 'analytics-top-products-combos', label: 'Top Performing Products & Combos' },
   { id: 'analytics-offer', label: 'Offer Performance' },
   { id: 'analytics-order-value', label: 'Order Value Distribution' },
   { id: 'analytics-order-composition', label: 'Order Composition' },
@@ -444,6 +454,11 @@ export const WebsiteAnalytics: React.FC = () => {
   const partialCodAdvance = useMemo(() => partialCodOrders.reduce((sum, o) => sum + (Number(o.advance_paid) || 0), 0), [partialCodOrders]);
   const fullCodReceivable = fullCodPending;
 
+  // CANONICAL RTO METRICS (Shared logic with Logistics)
+  const rtoMetrics = useMemo(() => {
+    return calculateCanonicalRtoMetrics(filteredOrders);
+  }, [filteredOrders]);
+
   // Reset Revenue Mix card slice when grouping changes
   useEffect(() => {
     setRevenueMixCardSlice(null);
@@ -461,9 +476,10 @@ export const WebsiteAnalytics: React.FC = () => {
       if (revenueMixGroup === 'Payment Mode') return o.payment_mode === revenueMixCardSlice;
       if (revenueMixGroup === 'State') return (o.state || 'Unspecified') === revenueMixCardSlice;
       if (revenueMixGroup === 'Product') {
-        return o.items 
-          ? o.items.some(i => i.product_name === revenueMixCardSlice) 
-          : (o.product_name || '').includes(revenueMixCardSlice);
+        if (o.items && o.items.length > 0) {
+          return o.items.some(i => resolveCanonicalProductName(i.product_name, i.product_code) === revenueMixCardSlice);
+        }
+        return resolveCanonicalProductName(o.product_name) === revenueMixCardSlice;
       }
       if (revenueMixGroup === 'Offer') {
         const off = o.offer && o.offer !== '-' ? o.offer : 'No Offer';
@@ -490,8 +506,10 @@ export const WebsiteAnalytics: React.FC = () => {
   const productMatchingOrders = useMemo(() => {
     if (!productCardSlice) return filteredOrders;
     return filteredOrders.filter(o => {
-      if (o.items) return o.items.some(i => i.product_name === productCardSlice);
-      return (o.product_name || '').includes(productCardSlice);
+      if (o.items && o.items.length > 0) {
+        return o.items.some(i => resolveCanonicalProductName(i.product_name, i.product_code) === productCardSlice);
+      }
+      return resolveCanonicalProductName(o.product_name) === productCardSlice;
     });
   }, [filteredOrders, productCardSlice]);
 
@@ -574,12 +592,12 @@ export const WebsiteAnalytics: React.FC = () => {
       filteredOrders.forEach(o => {
         if (o.items && o.items.length > 0) {
           o.items.forEach(it => {
-            const p = it.product_name.trim();
+            const p = resolveCanonicalProductName(it.product_name, it.product_code);
             const rev = it.line_total != null ? it.line_total : ((Number(o.price) || 0) / (o.total_quantity || 1)) * (it.quantity || 1);
             map.set(p, (map.get(p) || 0) + rev);
           });
         } else {
-          const p = (o.product_name || 'Unspecified').trim();
+          const p = resolveCanonicalProductName(o.product_name);
           map.set(p, (map.get(p) || 0) + (Number(o.price) || 0));
         }
       });
@@ -802,22 +820,23 @@ export const WebsiteAnalytics: React.FC = () => {
 
   // 6. PRODUCT PERFORMANCE DONUT DATA
   const productDonutData = useMemo(() => {
-    const map = new Map<string, { orders: number; revenue: number; units: number }>();
+    const map = new Map<string, { ordersSet: Set<string>; revenue: number; units: number }>();
     filteredOrders.forEach(o => {
+      const orderKey = o.order_id || o.id || 'unknown';
       if (o.items && o.items.length > 0) {
         o.items.forEach(it => {
-          const p = (it.product_name || 'Unspecified').trim();
-          const curr = map.get(p) || { orders: 0, revenue: 0, units: 0 };
+          const p = resolveCanonicalProductName(it.product_name, it.product_code);
+          const curr = map.get(p) || { ordersSet: new Set(), revenue: 0, units: 0 };
           curr.units += it.quantity || 1;
           const rev = it.line_total != null ? it.line_total : ((Number(o.price) || 0) / (o.total_quantity || 1)) * (it.quantity || 1);
           curr.revenue += rev;
-          curr.orders += 1;
+          curr.ordersSet.add(orderKey);
           map.set(p, curr);
         });
       } else {
-        const p = (o.product_name || 'Unspecified').trim();
-        const curr = map.get(p) || { orders: 0, revenue: 0, units: 0 };
-        curr.orders += 1;
+        const p = resolveCanonicalProductName(o.product_name);
+        const curr = map.get(p) || { ordersSet: new Set(), revenue: 0, units: 0 };
+        curr.ordersSet.add(orderKey);
         curr.revenue += Number(o.price) || 0;
         curr.units += Number(o.total_quantity) || 1;
         map.set(p, curr);
@@ -825,24 +844,30 @@ export const WebsiteAnalytics: React.FC = () => {
     });
 
     const sorted = Array.from(map.entries())
-      .sort((a, b) => b[1][productMetric] - a[1][productMetric]);
+      .map(([name, data]) => ({
+        name,
+        orders: data.ordersSet.size,
+        revenue: data.revenue,
+        units: data.units
+      }))
+      .sort((a, b) => b[productMetric] - a[productMetric]);
 
     const top5 = sorted.slice(0, 5);
     const others = sorted.slice(5);
     const othersTotals = others.reduce((acc, curr) => ({
-      orders: acc.orders + curr[1].orders,
-      revenue: acc.revenue + curr[1].revenue,
-      units: acc.units + curr[1].units
+      orders: acc.orders + curr.orders,
+      revenue: acc.revenue + curr.revenue,
+      units: acc.units + curr.units
     }), { orders: 0, revenue: 0, units: 0 });
 
     const colors = ['#10b981', '#06b6d4', '#8b5cf6', '#ec4899', '#f59e0b', '#64748b'];
-    const result = top5.map(([name, data], idx) => ({
-      name,
-      product: name,
-      value: data[productMetric],
-      orders: data.orders,
-      revenue: Math.round(data.revenue),
-      units: data.units,
+    const result = top5.map((item, idx) => ({
+      name: item.name,
+      product: item.name,
+      value: item[productMetric],
+      orders: item.orders,
+      revenue: Math.round(item.revenue),
+      units: item.units,
       color: colors[idx % colors.length]
     }));
 
@@ -1376,6 +1401,101 @@ export const WebsiteAnalytics: React.FC = () => {
               ₹{Math.round(totalCodReceivable).toLocaleString('en-IN')}
             </div>
             <div className="text-[10px] text-slate-500">Partial + Full COD pending</div>
+          </div>
+        </div>
+
+        {/* Row 3: Return & RTO Metrics */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* Card 1: Total RTO Orders */}
+          <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-rose-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
+            <div className="flex items-center justify-between text-slate-400">
+              <span className="text-[11px] font-bold uppercase tracking-wider">Total RTO Orders</span>
+              <div className="w-7 h-7 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center">
+                <RotateCcw size={14} />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-rose-400 font-mono mt-2">
+              {rtoMetrics.totalRtoOrders.toLocaleString('en-IN')}
+            </div>
+            <div className="flex items-center justify-between text-[10px] text-slate-500">
+              <span>Rate: <strong className="text-rose-300 font-mono">{rtoMetrics.rtoRate}%</strong></span>
+              <button
+                type="button"
+                onClick={() => handleOpenOrdersFullPage('All RTO Orders', rtoMetrics.rtoOrders)}
+                className="text-rose-400 hover:text-rose-300 font-bold hover:underline cursor-pointer"
+              >
+                View All →
+              </button>
+            </div>
+          </div>
+
+          {/* Card 2: RTO Avg Value */}
+          <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-amber-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
+            <div className="flex items-center justify-between text-slate-400">
+              <span className="text-[11px] font-bold uppercase tracking-wider">RTO Avg Value</span>
+              <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center">
+                <BarChart3 size={14} />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-amber-400 font-mono mt-2">
+              {formatINR(rtoMetrics.rtoAvgValue)}
+            </div>
+            <div className="flex items-center justify-between text-[10px] text-slate-500">
+              <span>Avg ticket returned</span>
+              <button
+                type="button"
+                onClick={() => handleOpenOrdersFullPage('RTO Average Order Value (AOV)', rtoMetrics.rtoOrders)}
+                className="text-amber-400 hover:text-amber-300 font-bold hover:underline cursor-pointer"
+              >
+                View All →
+              </button>
+            </div>
+          </div>
+
+          {/* Card 3: RTO COD Value */}
+          <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-rose-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
+            <div className="flex items-center justify-between text-slate-400">
+              <span className="text-[11px] font-bold uppercase tracking-wider">RTO COD Value</span>
+              <div className="w-7 h-7 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center">
+                <CreditCard size={14} />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-white font-mono mt-2">
+              {formatINR(rtoMetrics.rtoCodValue)}
+            </div>
+            <div className="flex items-center justify-between text-[10px] text-slate-500">
+              <span><strong className="text-rose-300 font-mono">{rtoMetrics.rtoCodOrders}</strong> Pure COD</span>
+              <button
+                type="button"
+                onClick={() => handleOpenOrdersFullPage('RTO COD Orders', rtoMetrics.rtoOrders.filter(o => isCodOrder(o)))}
+                className="text-rose-400 hover:text-rose-300 font-bold hover:underline cursor-pointer"
+              >
+                View All →
+              </button>
+            </div>
+          </div>
+
+          {/* Card 4: RTO Prepaid Value */}
+          <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-purple-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
+            <div className="flex items-center justify-between text-slate-400">
+              <span className="text-[11px] font-bold uppercase tracking-wider">RTO Prepaid Value</span>
+              <div className="w-7 h-7 rounded-lg bg-purple-500/10 text-purple-400 flex items-center justify-center">
+                <CreditCard size={14} />
+              </div>
+            </div>
+            <div className="text-2xl font-bold text-white font-mono mt-2">
+              {formatINR(rtoMetrics.rtoPrepaidValue)}
+            </div>
+            <div className="flex items-center justify-between text-[10px] text-slate-500">
+              <span><strong className="text-purple-300 font-mono">{rtoMetrics.rtoPrepaidOrders}</strong> Prepaid ({rtoMetrics.rtoPurePrepaidOrders} Full · {rtoMetrics.rtoPartialCodOrders} Partial)</span>
+              <button
+                type="button"
+                onClick={() => handleOpenOrdersFullPage('RTO Prepaid Orders', rtoMetrics.rtoOrders.filter(o => isPrepaidOrder(o)))}
+                className="text-purple-400 hover:text-purple-300 font-bold hover:underline cursor-pointer"
+              >
+                View All →
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1922,8 +2042,21 @@ export const WebsiteAnalytics: React.FC = () => {
           </div>
 
 
-          {/* 9. CUSTOMER REPEAT & GEOGRAPHIC ANALYTICS */}
-          <div id="analytics-customer-repeat" className="scroll-mt-6">
+                    {/* 9. TOP PERFORMING PRODUCTS & COMBOS */}
+          <div 
+            id="analytics-top-products-combos" 
+            className={`scroll-mt-6 transition-all duration-300 ${
+              highlightedSectionId === 'analytics-top-products-combos' ? 'ring-2 ring-purple-500 shadow-purple-500/40 rounded-2xl' : ''
+            }`}
+          >
+            <TopPerformingProductsCombos 
+              orders={filteredOrders} 
+              onViewOrders={(title, matchingOrders) => handleOpenOrdersFullPage(title, matchingOrders)} 
+            />
+          </div>
+
+          {/* 10. CUSTOMER REPEAT & GEOGRAPHIC ANALYTICS */}
+          <div id="analytics-customer-repeat"  className="scroll-mt-6">
             <CustomerRepeatAnalyticsDashboard sourceChannel="WEBSITE" department="sales" />
           </div>
         </>

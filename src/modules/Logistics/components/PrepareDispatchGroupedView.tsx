@@ -242,7 +242,7 @@ export const PrepareDispatchGroupedView: React.FC<PrepareDispatchGroupedViewProp
   }
 
   return (
-    <div className="flex flex-col gap-4 w-full h-full overflow-y-auto custom-scrollbar pb-10">
+    <div className="flex flex-col gap-4 w-full pb-10">
       {/* Top Batch Management Action Bar */}
       <div className="bg-[#0b1220] border border-slate-800/90 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-md shrink-0">
         <div className="flex items-center gap-3">

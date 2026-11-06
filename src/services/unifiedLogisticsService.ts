@@ -10,6 +10,7 @@ import type {
 } from '../types/unifiedLogistics';
 
 import { parseAndFormatLogisticsDate } from '../utils/logisticsDateUtils';
+import { getDeliveryDelayInfo } from '../modules/Logistics/utils/deliveryDelayUtils';
 import {
   extractCustomerOrderBaseId,
   getCustomerOrderIdentifierVariants,
@@ -211,10 +212,16 @@ export const resolveTrackingStatus = (s: string, hasAwb: boolean): UnifiedTracki
   if (s.includes('cancelled') || s.includes('canceled')) {
     return 'Cancelled';
   }
+  if (s.includes('ready for pickup') || s.includes('pickup scheduled') || s.includes('waiting_pickup') || s.includes('waiting pickup')) {
+    return 'Ready for Pickup';
+  }
+  if (s.includes('ready to ship') || s.includes('booked') || s.includes('manifest')) {
+    return 'Ready to Ship';
+  }
   if (s.includes('awaiting') || s.includes('awaiting tracking update')) {
     return 'Awaiting Tracking Update';
   }
-  if (s.includes('booked') || s.includes('info received') || s.includes('manifest')) {
+  if (s.includes('info received')) {
     return 'Info Received';
   }
   return hasAwb ? 'Awaiting Tracking Update' : 'Not Tracked';
@@ -257,8 +264,17 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
     (order.pincode || order.city || order.address)
   );
 
+  // Transition Protection: If an order has been marked Delivered or has verified delivery,
+  // never let a stale scan or rawStatus downgrade it to Out for Delivery or In Transit.
+  const isDeliveredRecord = order.status === 'Delivered' || 
+                            (!!order.deliveredDate && !order.status?.toLowerCase().includes('rto') && !String((order as any).rawStatus || '').toLowerCase().includes('rto'));
+
+  const effectiveStatusInput = isDeliveredRecord 
+    ? 'DELIVERED' 
+    : ((order as any).rawStatus || order.status);
+
   const { status, workflowStage } = mapToUnifiedWorkflowStage(
-    (order as any).rawStatus || order.status,
+    effectiveStatusInput,
     order.stage,
     order.awbNumber,
     hasRequiredInfo,
@@ -476,9 +492,14 @@ export const calculateWorkflowCounts = (
   let prepareDispatch = 0;
   let dispatched = 0;
   let tracking = 0;
+  let deliveryDelays = 0;
   let archived = 0;
 
   for (const o of orders) {
+    const delayInfo = getDeliveryDelayInfo(o);
+    if (delayInfo.isDelayed) {
+      deliveryDelays++;
+    }
     if (o.stage === 'trash') continue;
     if (o.stage === 'archived_legacy') {
       archived++;
@@ -511,6 +532,7 @@ export const calculateWorkflowCounts = (
     prepareDispatch,
     dispatched,
     tracking,
+    deliveryDelays,
     archived,
     totalOrders: operationalCount,
     totalCustomers: customers.length,
@@ -910,6 +932,8 @@ export const syncSalesUploadToLogistics = async (
         awbNumber: order.awb_number || undefined,
         courier: order.courier ? normalizeCourier(order.courier) : undefined,
         dispatchDate: order.dispatch_date,
+        estimatedDeliveryDate: order.estimated_delivery_date || (order as any).estimatedDeliveryDate,
+        deliveredDate: order.delivered_date || (order as any).deliveredDate,
         stage,
         status,
         rawStatus: (order as any).rawStatus || (order as any).raw_status || status,
@@ -1005,14 +1029,36 @@ export const syncSalesUploadToLogistics = async (
       } else if (isIncomingDelivered) {
         patch.stage = 'fulfilled';
         patch.status = 'Delivered';
-        patch.rawStatus = order.rawStatus || (order as any).raw_status || 'DELIVERED';
+        patch.rawStatus = 'DELIVERED';
         if (order.awb_number) patch.awbNumber = order.awb_number;
         if (order.courier) patch.courier = normalizeCourier(order.courier);
         if (order.dispatch_date) patch.dispatchDate = order.dispatch_date;
+        if (order.delivered_date) patch.deliveredDate = order.delivered_date;
+        if (order.remarks) patch.remarks = order.remarks;
         patch.fulfillmentStatus = 'Fulfilled';
         patch.sourceFulfillmentStatus = 'Fulfilled';
       } else if (inWorkflow) {
-        // STRICT RULE: Preserve dispatch preparation and tracking stages!
+        // Synchronize canonical AWB and courier from authoritative cloud shipments
+        if (order.awb_number) {
+          patch.awbNumber = order.awb_number;
+        }
+        if (order.courier) {
+          patch.courier = normalizeCourier(order.courier);
+        }
+        if (order.status && order.status !== 'Unfulfilled') {
+          const curStatus = existing.status || '';
+          if ((curStatus === 'Delivered' || curStatus === 'RTO Delivered to Seller') && order.status !== curStatus && !order.status.includes('RTO')) {
+            console.warn(`[WORKFLOW SYNC PROTECTION] Preserving ${curStatus} for order #${existing.orderId}, ignoring ${order.status}`);
+          } else {
+            patch.status = order.status;
+          }
+        }
+        if (order.lastLocation || order.last_location) {
+          (patch as any).lastLocation = order.lastLocation || order.last_location;
+        }
+        if (order.remarks) {
+          patch.remarks = order.remarks;
+        }
         preservedWorkflowCount++;
         if (isFulfilled) {
           patch.fulfillmentStatus = 'Fulfilled';
@@ -1029,9 +1075,11 @@ export const syncSalesUploadToLogistics = async (
       } else if (order.stage === 'tracking' || order.awb_number) {
         patch.stage = 'tracking';
         patch.status = order.status || existing.status || 'Awaiting Tracking Update';
-        if (order.awb_number && !existing.awbNumber) patch.awbNumber = order.awb_number;
-        if (order.courier && !existing.courier) patch.courier = normalizeCourier(order.courier);
-        if (order.dispatch_date && !existing.dispatchDate) patch.dispatchDate = order.dispatch_date;
+        if (order.awb_number) patch.awbNumber = order.awb_number;
+        if (order.courier) patch.courier = normalizeCourier(order.courier);
+        if (order.dispatch_date) patch.dispatchDate = order.dispatch_date;
+        if (order.estimated_delivery_date) patch.estimatedDeliveryDate = order.estimated_delivery_date;
+        if (order.delivered_date) patch.deliveredDate = order.delivered_date;
       } else if (existing.stage === 'fulfilled') {
         patch.stage = 'fulfilled';
         patch.status = 'Fulfilled';
@@ -1187,7 +1235,7 @@ export const syncSalesOrdersFromSupabase = async (options?: { force?: boolean })
     while (sHasMore) {
       const { data: sData, error: sErr } = await supabase
         .from('customer_tracking_shipments')
-        .select('order_id, display_order_id, status, raw_status, remarks, last_location, tracking_date_time, address, awb_number, courier, dispatch_date')
+        .select('order_id, display_order_id, status, raw_status, remarks, last_location, tracking_date_time, address, awb_number, courier, dispatch_date, estimated_delivery_date, delivered_date')
         .neq('status', 'Order Deleted')
         .neq('raw_status', 'DELETED')
         .range(sPage * sPageSize, (sPage + 1) * sPageSize - 1);
@@ -1314,8 +1362,29 @@ export const syncSalesOrdersFromSupabase = async (options?: { force?: boolean })
     }
     
     // Build tracking enrichment lookup map from customer_tracking_shipments
+    // Prioritize authoritative sources, valid format AWBs, and newest records
+    const sortedShipments = [...(shipmentsData || [])].sort((a, b) => {
+      const sourceScore = (s: any) => {
+        const src = (s.status_source || '').toUpperCase();
+        if (src.includes('DELHIVERY') || src.includes('COURIER_REPORT')) return 100;
+        if (src.includes('DISPATCH_WORKFLOW')) return 80;
+        if (src.includes('TRACK_ORDER_MODAL')) return 50;
+        return 10;
+      };
+      const scoreDiff = sourceScore(a) - sourceScore(b);
+      if (scoreDiff !== 0) return scoreDiff;
+
+      const isDummyAwb = (s: any) => String(s.awb_number || '').endsWith('999999');
+      if (isDummyAwb(a) && !isDummyAwb(b)) return -1;
+      if (!isDummyAwb(a) && isDummyAwb(b)) return 1;
+
+      const timeA = new Date(a.updated_at || a.created_at || 0).getTime();
+      const timeB = new Date(b.updated_at || b.created_at || 0).getTime();
+      return timeA - timeB;
+    });
+
     const shipmentMap = new Map<string, any>();
-    (shipmentsData || []).forEach(s => {
+    sortedShipments.forEach(s => {
       const rawId = s.order_id || s.display_order_id;
       if (!rawId) return;
       const cId = cleanOrderId(rawId).toLowerCase();
@@ -1428,6 +1497,8 @@ export const syncSalesOrdersFromSupabase = async (options?: { force?: boolean })
         lastLocation: existingShipment?.last_location,
         last_location: existingShipment?.last_location,
         dispatch_date: existingShipment?.dispatch_date || (isDispatched ? so.dispatch_date : undefined),
+        estimated_delivery_date: existingShipment?.estimated_delivery_date || extra.estimated_delivery_date,
+        delivered_date: existingShipment?.delivered_date || extra.delivered_date,
         fulfilled_date: extra.fulfilled_date || (isSourceFulfilled ? so.order_date : undefined),
         batchId: so.upload_id,
         cancellationStatus,

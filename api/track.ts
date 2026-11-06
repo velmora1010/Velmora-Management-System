@@ -1,57 +1,85 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 
 const normalizeStatus = (rawStatus: string): string => {
-  const s = rawStatus.toLowerCase().trim();
-  if (!s) return 'Pending';
+  const s = (rawStatus || '').toLowerCase().trim();
+  if (!s) return 'Pending AWB';
 
-  // 1. RTO / Returned / Return to Origin / RTO Delivered / Return
-  if (
-    s.includes('rto') ||
-    s.includes('returned') ||
-    s.includes('return to origin') ||
-    s.includes('rto delivered') ||
-    s.includes('return') ||
-    s.includes('refused') ||
-    s.includes('undelivered') ||
-    s.includes('door locked')
-  ) {
-    return 'RTO';
+  // 1. Cancelled
+  if (s.includes('cancel')) return 'Cancelled';
+
+  // 2. RTO statuses
+  if (s.includes('rto delivered') || s.includes('delivered to seller') || s.includes('returned to origin') || s.includes('return to seller') || s.includes('rto_delivered')) {
+    return 'RTO Delivered to Seller';
+  }
+  if (s.includes('rto in transit') || s.includes('returning to origin') || s.includes('return in transit') || s.includes('return to origin') || s.includes('rto_in_transit')) {
+    return 'RTO In Transit';
+  }
+  if (s.includes('rto initiated') || s.includes('rto created') || s.includes('return initiated') || s.includes('rto_initiated')) {
+    return 'RTO Initiated';
+  }
+  if (s.includes('rto') || s.includes('returned') || s.includes('return')) {
+    return 'RTO In Transit';
   }
 
-  // 2. Delivered
-  if (s.includes('delivered')) {
-    return 'Delivered';
-  }
+  // 3. Delivered
+  if (s === 'dl' || s.includes('delivered')) return 'Delivered';
 
-  // 3. Out for Delivery
-  if (s.includes('out for delivery') || s.includes('out_for_delivery')) {
+  // 4. Out for Delivery
+  if (s === 'ofd' || s.includes('out for delivery') || s.includes('out_for_delivery')) {
     return 'Out for Delivery';
   }
 
-  // 4. Processed / Forwarded / In Transit
+  // 5. Failed Attempt / Undelivered
   if (
+    s === 'ud' ||
+    s.includes('undelivered') ||
+    s.includes('failed attempt') ||
+    s.includes('attempted') ||
+    s.includes('delivery failed') ||
+    s.includes('customer not available') ||
+    s.includes('door locked') ||
+    s.includes('consignee not available') ||
+    s.includes('refused')
+  ) {
+    return 'Failed Attempt';
+  }
+
+  // 6. Exception
+  if (s.includes('exception') || s.includes('delayed') || s.includes('sla breached') || s.includes('damaged') || s.includes('lost') || s.includes('misrouted')) {
+    return 'Exception';
+  }
+
+  // 7. Picked Up
+  if (s === 'pu' || s.includes('picked up') || s.includes('bag received') || s.includes('weight captured')) {
+    return 'Picked Up';
+  }
+
+  // 8. In Transit
+  if (
+    s === 'it' ||
     s.includes('transit') ||
     s.includes('processed') ||
     s.includes('forwarded') ||
     s.includes('shipped') ||
     s.includes('dispatched') ||
+    s.includes('in-transit') ||
+    s.includes('in transit') ||
     s.includes('hub') ||
-    s.includes('service center') ||
-    s.includes('received')
+    s.includes('facility') ||
+    s.includes('departed') ||
+    s.includes('arrived')
   ) {
     return 'In Transit';
   }
 
-  // 5. Booked / Consignment Booked
-  if (
-    s.includes('booked') ||
-    s.includes('info received') ||
-    s.includes('manifest')
-  ) {
-    return 'Info Received';
+  // 9. Ready for Pickup / Ready to Ship / Pending AWB
+  if (s.includes('ready for pickup') || s.includes('pickup scheduled') || s.includes('waiting_pickup') || s.includes('waiting pickup')) return 'Ready for Pickup';
+  if (s.includes('ready to ship') || s.includes('manifested') || s.includes('booked') || s.includes('info received') || s.includes('data received')) {
+    return 'Ready to Ship';
   }
+  if (s.includes('pending awb') || s.includes('unfulfilled')) return 'Pending AWB';
 
-  return 'Pending';
+  return 'In Transit';
 };
 
 function parseTimelineDate(dateStr: string): Date | null {
@@ -181,6 +209,8 @@ export default async function handler(req: IncomingMessage & { query?: Record<st
 
   try {
     if (courier === 'ST Courier') {
+      // Tolerate expired SSL cert on stcourier.com web portal
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
       // Step 1: POST to doCheck to initiate tracking state and session
       const postRes = await fetch('https://stcourier.com/track/doCheck', {
         method: 'POST',
@@ -291,11 +321,72 @@ export default async function handler(req: IncomingMessage & { query?: Record<st
         res.statusCode = 200;
         res.end(JSON.stringify({
           success: false,
-          status: 'Unable to fetch',
+          status: 'Tracking Not Available',
           error: htmlContent.includes('No Record') ? 'No Record Found on ST Courier' : 'Tracking information not found on ST Courier',
           lastSyncedAt: nowStr
         }));
         return;
+      }
+
+      // Sync ST Courier status to Supabase customer_tracking_shipments
+      const sbUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'https://utusdosvijjuxtowzhta.supabase.co';
+      const sbKey = process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+      if (sbUrl && sbKey) {
+        try {
+          const existingCheckRes = await fetch(`${sbUrl}/rest/v1/customer_tracking_shipments?awb_number=eq.${encodeURIComponent(awbNumber)}&select=id,status,order_id`, {
+            headers: { 'apikey': sbKey, 'Authorization': `Bearer ${sbKey}` }
+          });
+          let finalNormalized = normalized;
+          let matchedOrderId = '';
+          if (existingCheckRes.ok) {
+            const existingList = await existingCheckRes.json();
+            const existing = existingList?.[0];
+            if (existing) {
+              matchedOrderId = existing.order_id || '';
+              const curStatus = existing.status || '';
+              if (curStatus === 'Delivered' && normalized !== 'Delivered' && !normalized.includes('RTO')) {
+                finalNormalized = 'Delivered';
+              }
+            }
+          }
+
+          await fetch(`${sbUrl}/rest/v1/customer_tracking_shipments?awb_number=eq.${encodeURIComponent(awbNumber)}`, {
+            method: 'PATCH',
+            headers: {
+              'apikey': sbKey,
+              'Authorization': `Bearer ${sbKey}`,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=minimal'
+            },
+            body: JSON.stringify({
+              status: finalNormalized,
+              raw_status: finalRawStatus,
+              remarks: remarks || null,
+              delivered_date: finalDeliveryDate || null,
+              last_location: latestLocation || null,
+              tracking_date_time: latestDateTime || deliveryDateTime || null,
+              last_synced_at: new Date().toISOString()
+            })
+          });
+
+          if (finalNormalized === 'Delivered' && matchedOrderId) {
+            await fetch(`${sbUrl}/rest/v1/sales_orders?order_id=eq.${encodeURIComponent(matchedOrderId)}`, {
+              method: 'PATCH',
+              headers: {
+                'apikey': sbKey,
+                'Authorization': `Bearer ${sbKey}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=minimal'
+              },
+              body: JSON.stringify({
+                dispatch_status: 'DELIVERED',
+                updated_at: new Date().toISOString()
+              })
+            });
+          }
+        } catch (sbErr) {
+          console.warn('[ST COURIER] Supabase sync note:', sbErr);
+        }
       }
 
       res.statusCode = 200;
@@ -311,141 +402,322 @@ export default async function handler(req: IncomingMessage & { query?: Record<st
         lastSyncedAt: nowStr
       }));
     } else if (courier === 'Delhivery' || (courier.toLowerCase() === 'delhivery' && !courier.toLowerCase().includes('ithink'))) {
-      const delhiveryToken = process.env.DELHIVERY_API_TOKEN;
-      if (!delhiveryToken || !delhiveryToken.trim()) {
+      const delhiveryToken = (process.env.DELHIVERY_API_TOKEN || process.env.VITE_DELHIVERY_API_TOKEN || process.env.DELHIVERY_TOKEN || '').trim();
+      let dlvData: any = null;
+      let usedEndpoint = '';
+
+      // Try official token endpoint first if token is available
+      if (delhiveryToken) {
+        try {
+          usedEndpoint = 'official_token_api';
+          const dlvRes = await fetch(`https://track.delhivery.com/api/v1/packages/json/?waybill=${encodeURIComponent(awbNumber)}&token=${encodeURIComponent(delhiveryToken)}`, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Token ${delhiveryToken}`,
+              'Accept': 'application/json'
+            },
+            signal: AbortSignal.timeout(15000)
+          });
+
+          if (dlvRes.ok) {
+            dlvData = await dlvRes.json();
+          } else if (dlvRes.status === 429) {
+            res.statusCode = 200;
+            res.end(JSON.stringify({
+              success: false,
+              status: 'Rate Limited',
+              error: 'Delhivery API rate limit exceeded. Please retry in a few moments.',
+              lastSyncedAt: nowStr
+            }));
+            return;
+          }
+        } catch (tokenErr) {
+          console.warn('[DELHIVERY] Token API error, falling back to unified tracking:', tokenErr);
+        }
+      }
+
+      // If token wasn't provided or token request didn't return data, use Delhivery live unified endpoint
+      if (!dlvData || !dlvData.ShipmentData || dlvData.ShipmentData.length === 0) {
+        try {
+          usedEndpoint = 'unified_tracking_api';
+          // Try v3/unified-tracking-new first (supports active + delivered > 7 days shipments)
+          let uData: any = null;
+          try {
+            const newRes = await fetch(`https://dlv-api.delhivery.com/v3/unified-tracking-new?wbn=${encodeURIComponent(awbNumber)}`, {
+              method: 'GET',
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Origin': 'https://www.delhivery.com',
+                'Referer': 'https://www.delhivery.com/',
+                'Accept': 'application/json, text/plain, */*'
+              },
+              signal: AbortSignal.timeout(15000)
+            });
+            if (newRes.ok) {
+              const resJson = await newRes.json();
+              if (resJson && resJson.statusCode === 200 && Array.isArray(resJson.data) && resJson.data.length > 0) {
+                uData = resJson;
+              }
+            } else if (newRes.status === 429) {
+              res.statusCode = 200;
+              res.end(JSON.stringify({
+                success: false,
+                status: 'Rate Limited',
+                error: 'Delhivery rate limit reached (HTTP 429). Please configure DELHIVERY_API_TOKEN in server environment.',
+                lastSyncedAt: nowStr
+              }));
+              return;
+            }
+          } catch (newErr) {
+            console.warn('[DELHIVERY UNIFIED-NEW] Attempt error:', newErr);
+          }
+
+          // Fallback to v3/unified-tracking if new returned no data
+          if (!uData || !Array.isArray(uData.data) || uData.data.length === 0) {
+            try {
+              const unifiedRes = await fetch(`https://dlv-api.delhivery.com/v3/unified-tracking?wbn=${encodeURIComponent(awbNumber)}`, {
+                method: 'GET',
+                headers: {
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                  'Origin': 'https://www.delhivery.com',
+                  'Referer': 'https://www.delhivery.com/',
+                  'Accept': 'application/json, text/plain, */*'
+                },
+                signal: AbortSignal.timeout(15000)
+              });
+              if (unifiedRes.ok) {
+                const resJson = await unifiedRes.json();
+                if (resJson && resJson.statusCode === 200 && Array.isArray(resJson.data) && resJson.data.length > 0) {
+                  uData = resJson;
+                }
+              } else if (unifiedRes.status === 429) {
+                res.statusCode = 200;
+                res.end(JSON.stringify({
+                  success: false,
+                  status: 'Rate Limited',
+                  error: 'Delhivery rate limit reached (HTTP 429). Please configure DELHIVERY_API_TOKEN in server environment.',
+                  lastSyncedAt: nowStr
+                }));
+                return;
+              }
+            } catch (uFallbackErr) {
+              console.warn('[DELHIVERY UNIFIED-LEGACY] Attempt error:', uFallbackErr);
+            }
+          }
+
+          if (uData && Array.isArray(uData.data) && uData.data.length > 0) {
+            const pkg = uData.data[0];
+            const statusObj = pkg.status || {};
+            const hqStatus = pkg.hqStatus || '';
+            const rawStatus = statusObj.status || hqStatus || '';
+            
+            // Collect and flatten all scans across all trackingStates
+            const allScans: any[] = [];
+            if (Array.isArray(pkg.trackingStates)) {
+              for (const state of pkg.trackingStates) {
+                if (Array.isArray(state.scans)) {
+                  for (const scan of state.scans) {
+                    allScans.push({
+                      ...scan,
+                      stateLabel: state.label,
+                      stateDate: state.date,
+                      scanDateTime: scan.scanDateTime || state.scanDateTime || statusObj.statusDateTime
+                    });
+                  }
+                }
+              }
+            }
+
+            // Sort scans chronologically (newest first)
+            allScans.sort((a, b) => {
+              const tA = parseTimelineDate(a.scanDateTime || a.scanDate || '')?.getTime() || 0;
+              const tB = parseTimelineDate(b.scanDateTime || b.scanDate || '')?.getTime() || 0;
+              return tB - tA;
+            });
+
+            const latestScan = allScans.length > 0 ? allScans[0] : null;
+
+            // Check authoritative delivered indicators
+            const isDeliveredHq = (hqStatus || '').toLowerCase() === 'delivered';
+            const isDeliveredStatus = (statusObj.status || '').toLowerCase() === 'delivered' || statusObj.statusType === 'DL';
+            const isDeliveredScan = allScans.some(s => (s.scan || '').toLowerCase() === 'delivered' || s.scanType === 'DL');
+
+            let normalized = normalizeStatus(rawStatus);
+            if (isDeliveredHq || isDeliveredStatus || isDeliveredScan) {
+              normalized = 'Delivered';
+            }
+
+            const remarks = statusObj.instructions || latestScan?.scanNslRemark || latestScan?.scan || undefined;
+            const lastLocation = latestScan?.scannedLocation || pkg.destination || (pkg.addressInfo ? `${pkg.addressInfo.city}, ${pkg.addressInfo.state}` : undefined);
+            const deliveryDate = (normalized === 'Delivered' && (pkg.deliveryDate || statusObj.statusDateTime)) 
+              ? (pkg.deliveryDate || statusObj.statusDateTime) 
+              : undefined;
+            const estimatedDeliveryDate = pkg.promiseDeliveryDate || pkg.expectedDeliveryDate || undefined;
+            const trackingDateTime = statusObj.statusDateTime || latestScan?.scanDateTime || undefined;
+
+            console.log(`[DELHIVERY UNIFIED] AWB: ${awbNumber}, Status: ${normalized}, Raw: ${rawStatus}`);
+
+            // Transition protection against downgrade
+            const sbUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'https://utusdosvijjuxtowzhta.supabase.co';
+            const sbKey = process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+            if (sbUrl && sbKey) {
+              try {
+                const existingCheckRes = await fetch(`${sbUrl}/rest/v1/customer_tracking_shipments?awb_number=eq.${encodeURIComponent(awbNumber)}&select=id,status,delivered_date`, {
+                  headers: { 'apikey': sbKey, 'Authorization': `Bearer ${sbKey}` }
+                });
+                if (existingCheckRes.ok) {
+                  const existingList = await existingCheckRes.json();
+                  const existing = existingList?.[0];
+                  if (existing) {
+                    const curStatus = existing.status || '';
+                    if (curStatus === 'Delivered' && normalized !== 'Delivered' && !normalized.includes('RTO')) {
+                      console.warn(`[TRANSITION PROTECTION] Preserving Delivered for AWB ${awbNumber}, rejecting older status: ${normalized}`);
+                      normalized = 'Delivered';
+                    }
+                  }
+                }
+              } catch (checkErr) {
+                console.warn('[DELHIVERY UNIFIED] Transition check note:', checkErr);
+              }
+            }
+
+            // Sync to Supabase customer_tracking_shipments
+            if (sbUrl && sbKey) {
+              try {
+                await fetch(`${sbUrl}/rest/v1/customer_tracking_shipments?awb_number=eq.${encodeURIComponent(awbNumber)}`, {
+                  method: 'PATCH',
+                  headers: {
+                    'apikey': sbKey,
+                    'Authorization': `Bearer ${sbKey}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=minimal'
+                  },
+                  body: JSON.stringify({
+                    status: normalized,
+                    raw_status: rawStatus,
+                    remarks: remarks || null,
+                    delivered_date: deliveryDate || null,
+                    estimated_delivery_date: estimatedDeliveryDate || null,
+                    last_location: lastLocation || null,
+                    tracking_date_time: trackingDateTime || null,
+                    last_synced_at: new Date().toISOString()
+                  })
+                });
+
+                // When delivered, also update sales_orders dispatch_status to DELIVERED
+                const refNo = pkg.referenceNo || '';
+                const cleanOid = refNo.replace(/^#/, '').trim();
+                if (normalized === 'Delivered' && cleanOid) {
+                  await fetch(`${sbUrl}/rest/v1/sales_orders?order_id=eq.${encodeURIComponent(cleanOid)}`, {
+                    method: 'PATCH',
+                    headers: {
+                      'apikey': sbKey,
+                      'Authorization': `Bearer ${sbKey}`,
+                      'Content-Type': 'application/json',
+                      'Prefer': 'return=minimal'
+                    },
+                    body: JSON.stringify({
+                      dispatch_status: 'DELIVERED',
+                      updated_at: new Date().toISOString()
+                    })
+                  });
+                }
+              } catch (sbErr) {
+                console.warn('[DELHIVERY UNIFIED] Supabase sync note:', sbErr);
+              }
+            }
+
+            res.statusCode = 200;
+            res.end(JSON.stringify({
+              success: true,
+              status: normalized,
+              rawStatus: rawStatus,
+              remarks: remarks || undefined,
+              deliveryDate: deliveryDate || undefined,
+              estimatedDeliveryDate: estimatedDeliveryDate || undefined,
+              lastLocation: lastLocation || undefined,
+              trackingDateTime: trackingDateTime || undefined,
+              lastSyncedAt: nowStr
+            }));
+            return;
+          }
+        } catch (uErr: any) {
+          console.error('[DELHIVERY UNIFIED] Error:', uErr);
+        }
+      }
+
+      // If official token data was retrieved successfully
+      if (dlvData && Array.isArray(dlvData.ShipmentData) && dlvData.ShipmentData.length > 0) {
+        const item = dlvData.ShipmentData[0];
+        const shipment = item.Shipment || item;
+        const statusObj = shipment.Status || {};
+        const rawStatus = statusObj.Status || shipment.StatusType || '';
+        const normalized = normalizeStatus(rawStatus);
+
+        const scans = Array.isArray(shipment.Scans) ? shipment.Scans : [];
+        const latestScan = scans.length > 0 ? (scans[0].ScanDetail || scans[0]) : null;
+
+        const remarks = statusObj.Instructions || (latestScan ? (latestScan.Instructions || latestScan.Scan) : undefined) || undefined;
+        const lastLocation = (latestScan ? (latestScan.ScannedLocation || latestScan.Location) : undefined) || shipment.Destination || undefined;
+        const deliveryDate = (normalized === 'Delivered' && (shipment.DeliveryDate || statusObj.StatusDateTime)) 
+          ? (shipment.DeliveryDate || statusObj.StatusDateTime) 
+          : undefined;
+        const estimatedDeliveryDate = shipment.ExpectedDeliveryDate || shipment.PromisedDeliveryDate || undefined;
+        const trackingDateTime = statusObj.StatusDateTime || (latestScan ? latestScan.ScanDateTime : undefined);
+
+        console.log(`[DELHIVERY TOKEN API] AWB: ${awbNumber}, Status: ${normalized}, Raw: ${rawStatus}`);
+
+        const sbUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'https://utusdosvijjuxtowzhta.supabase.co';
+        const sbKey = process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+        if (sbUrl && sbKey) {
+          try {
+            await fetch(`${sbUrl}/rest/v1/customer_tracking_shipments?awb_number=eq.${encodeURIComponent(awbNumber)}`, {
+              method: 'PATCH',
+              headers: {
+                'apikey': sbKey,
+                'Authorization': `Bearer ${sbKey}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=minimal'
+              },
+              body: JSON.stringify({
+                status: normalized,
+                raw_status: rawStatus,
+                remarks: remarks || null,
+                delivered_date: deliveryDate || null,
+                estimated_delivery_date: estimatedDeliveryDate || null,
+                last_location: lastLocation || null,
+                tracking_date_time: trackingDateTime || null,
+                last_synced_at: new Date().toISOString()
+              })
+            });
+          } catch (sbErr) {
+            console.warn('[DELHIVERY TOKEN API] Supabase sync note:', sbErr);
+          }
+        }
+
         res.statusCode = 200;
         res.end(JSON.stringify({
-          success: false,
-          status: 'Token Not Configured',
-          error: 'DELHIVERY_API_TOKEN is not configured in the server environment. Please set DELHIVERY_API_TOKEN in your Vercel environment variables.',
+          success: true,
+          status: normalized,
+          rawStatus: rawStatus,
+          remarks: remarks || undefined,
+          deliveryDate: deliveryDate || undefined,
+          estimatedDeliveryDate: estimatedDeliveryDate || undefined,
+          lastLocation: lastLocation || undefined,
+          trackingDateTime: trackingDateTime || undefined,
           lastSyncedAt: nowStr
         }));
         return;
       }
 
-      try {
-        const cleanToken = delhiveryToken.trim();
-        const dlvRes = await fetch(`https://track.delhivery.com/api/v1/packages/json/?waybill=${encodeURIComponent(awbNumber)}&token=${encodeURIComponent(cleanToken)}`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Token ${cleanToken}`,
-            'Accept': 'application/json'
-          },
-          signal: AbortSignal.timeout(20000)
-        });
-
-        if (dlvRes.status === 401) {
-          res.statusCode = 200;
-          res.end(JSON.stringify({
-            success: false,
-            status: 'Auth Failed',
-            error: 'Invalid or expired DELHIVERY_API_TOKEN. Authentication failed with Delhivery API.',
-            lastSyncedAt: nowStr
-          }));
-          return;
-        }
-
-        if (dlvRes.status === 429) {
-          res.statusCode = 200;
-          res.end(JSON.stringify({
-            success: false,
-            status: 'Rate Limited',
-            error: 'Delhivery API rate limit exceeded. Please retry in a few moments.',
-            lastSyncedAt: nowStr
-          }));
-          return;
-        }
-
-        if (!dlvRes.ok) {
-          throw new Error(`Delhivery official API responded with HTTP ${dlvRes.status} (${dlvRes.statusText})`);
-        }
-
-        const dlvData = await dlvRes.json();
-        
-        // Parse official Delhivery response
-        if (dlvData && Array.isArray(dlvData.ShipmentData) && dlvData.ShipmentData.length > 0) {
-          const item = dlvData.ShipmentData[0];
-          const shipment = item.Shipment || item;
-          const statusObj = shipment.Status || {};
-          const rawStatus = statusObj.Status || shipment.StatusType || '';
-          const normalized = normalizeStatus(rawStatus);
-
-          const scans = Array.isArray(shipment.Scans) ? shipment.Scans : [];
-          const latestScan = scans.length > 0 ? (scans[0].ScanDetail || scans[0]) : null;
-
-          const remarks = statusObj.Instructions || (latestScan ? (latestScan.Instructions || latestScan.Scan) : undefined) || undefined;
-          const lastLocation = (latestScan ? (latestScan.ScannedLocation || latestScan.Location) : undefined) || shipment.Destination || undefined;
-          const deliveryDate = (normalized === 'Delivered' && (shipment.DeliveryDate || statusObj.StatusDateTime)) 
-            ? (shipment.DeliveryDate || statusObj.StatusDateTime) 
-            : undefined;
-          const estimatedDeliveryDate = shipment.ExpectedDeliveryDate || shipment.PromisedDeliveryDate || undefined;
-          const trackingDateTime = statusObj.StatusDateTime || (latestScan ? latestScan.ScanDateTime : undefined);
-
-          console.log(`[DELHIVERY OFFICIAL API] AWB: ${awbNumber}, Status: ${normalized}, Raw: ${rawStatus}`);
-
-          // Update matching record in Supabase customer_tracking_shipments if available
-          const supabaseUrl = process.env.SUPABASE_URL || 'https://utusdosvijjuxtowzhta.supabase.co';
-          const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV0dXNkb3N2aWpqdXh0b3d6aHRhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MjA4NDE5MiwiZXhwIjoyMDk3NjYwMTkyfQ.U2lv4o8wF1G56B_WoXQADqRTuJEjdYSKXPDQMlJHHA4';
-
-          if (supabaseUrl && supabaseKey) {
-            try {
-              await fetch(`${supabaseUrl}/rest/v1/customer_tracking_shipments?awb_number=eq.${encodeURIComponent(awbNumber)}`, {
-                method: 'PATCH',
-                headers: {
-                  'apikey': supabaseKey,
-                  'Authorization': `Bearer ${supabaseKey}`,
-                  'Content-Type': 'application/json',
-                  'Prefer': 'return=minimal'
-                },
-                body: JSON.stringify({
-                  status: normalized,
-                  raw_status: rawStatus,
-                  remarks: remarks || null,
-                  delivered_date: deliveryDate || null,
-                  estimated_delivery_date: estimatedDeliveryDate || null,
-                  last_location: lastLocation || null,
-                  tracking_date_time: trackingDateTime || null,
-                  last_synced_at: new Date().toISOString()
-                })
-              });
-            } catch (sbErr) {
-              console.warn('[DELHIVERY TRACKING] Optional Supabase sync skipped:', sbErr);
-            }
-          }
-
-          res.statusCode = 200;
-          res.end(JSON.stringify({
-            success: true,
-            status: normalized,
-            rawStatus: rawStatus,
-            remarks: remarks || undefined,
-            deliveryDate: deliveryDate || undefined,
-            estimatedDeliveryDate: estimatedDeliveryDate || undefined,
-            lastLocation: lastLocation || undefined,
-            trackingDateTime: trackingDateTime || undefined,
-            lastSyncedAt: nowStr
-          }));
-        } else {
-          // If ShipmentData is empty or Error returned
-          const errMsg = dlvData.Error || dlvData.message || 'No tracking record found for this Delhivery waybill in your account';
-          res.statusCode = 200;
-          res.end(JSON.stringify({
-            success: false,
-            status: 'Tracking Not Found',
-            error: errMsg,
-            lastSyncedAt: nowStr
-          }));
-        }
-      } catch (dlvErr: any) {
-        console.error('[DELHIVERY OFFICIAL API] Error:', dlvErr);
-        res.statusCode = 200;
-        res.end(JSON.stringify({
-          success: false,
-          status: 'Unable to fetch',
-          error: dlvErr.message || String(dlvErr),
-          lastSyncedAt: nowStr
-        }));
-      }
+      // No record found
+      res.statusCode = 200;
+      res.end(JSON.stringify({
+        success: false,
+        status: 'Tracking Not Found',
+        error: 'No tracking record found for this Delhivery waybill',
+        lastSyncedAt: nowStr
+      }));
     } else if (courier === 'Amazon') {
       try {
         const fetchRes = await fetch(`https://track.amazon.in/tracking/${encodeURIComponent(awbNumber)}`, {

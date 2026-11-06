@@ -641,9 +641,26 @@ export class WebsiteSalesService {
       });
     });
 
+    // Attach live logistics tracking, courier, and RTO status from Dexie
+    const logisticsMap = new Map<string, any>();
+    try {
+      const rawIds = orderRows.map(o => cleanOrderId(o.order_id));
+      for (let i = 0; i < rawIds.length; i += 300) {
+        const chunk = rawIds.slice(i, i + 300);
+        const dbRecs = await db.logistics_orders.where('orderId').anyOfIgnoreCase(chunk).toArray();
+        dbRecs.forEach(rec => {
+          const cid = cleanOrderId(rec.orderId).toLowerCase();
+          logisticsMap.set(cid, rec);
+        });
+      }
+    } catch (e) {
+      // Dexie read fallback
+    }
+
     const orders: WebsiteConsolidatedOrder[] = orderRows.map(o => {
       const extra = o.extra_data || {};
       const items = itemsByOrderId.get(o.id) || [];
+      const logRec = logisticsMap.get(cleanOrderId(o.order_id).toLowerCase());
 
       const productNames = items.length > 0
         ? Array.from(new Set(items.map(it => it.product_name))).join(', ')
@@ -692,8 +709,10 @@ export class WebsiteSalesService {
         items,
         fulfillment_status: extra.fulfillment_status || o.dispatch_status || o.order_status || 'unfulfilled',
         financial_status: extra.financial_status || '',
-        awb_number: extra.awb_number || o.awb_number || '',
-        courier: extra.courier || o.courier || '',
+        awb_number: logRec?.awbNumber || extra.awb_number || o.awb_number || '',
+        courier: logRec?.courier || extra.courier || o.courier || '',
+        shipment_status: logRec?.status || logRec?.stage || (logRec?.awbNumber || extra.awb_number || o.awb_number ? 'Dispatched' : (o.dispatch_status === 'DELIVERED' ? 'Delivered' : 'Pending Manifest')),
+        raw_status: logRec?.rawStatus || (logRec as any)?.raw_status || extra.raw_status || '',
         fulfilled_date: extra.fulfilled_date || o.dispatch_date || '',
         order_status: o.order_status,
         cancellation: extra.cancellation || (o.order_status === 'CANCELLED' ? {

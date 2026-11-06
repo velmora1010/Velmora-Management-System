@@ -194,6 +194,22 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
         dot: 'bg-purple-400'
       };
     }
+    if (s.includes('ready for pickup') || s.includes('pickup scheduled')) {
+      return {
+        bg: 'bg-cyan-950/70',
+        text: 'text-cyan-300',
+        border: 'border-cyan-700/60',
+        dot: 'bg-cyan-400'
+      };
+    }
+    if (s.includes('ready to ship')) {
+      return {
+        bg: 'bg-indigo-950/70',
+        text: 'text-indigo-300',
+        border: 'border-indigo-700/60',
+        dot: 'bg-indigo-400'
+      };
+    }
     if (s.includes('delivered')) {
       return {
         bg: 'bg-emerald-950/60',
@@ -764,9 +780,9 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
                       <td className="px-3.5 py-3.5 whitespace-nowrap">
                         <div className="flex flex-col">
                           <span className="text-slate-200 font-medium text-xs">
-                            {order.dispatchDate ? parseAndFormatLogisticsDate(order.dispatchDate).displayDate || order.dispatchDate : 'Pending Manifest'}
+                            {(order.dispatchDate || order.orderDate) ? (parseAndFormatLogisticsDate(order.dispatchDate || order.orderDate).displayDate || order.dispatchDate || order.orderDate) : 'Pending Manifest'}
                           </span>
-                          {order.dispatchDate && (
+                          {(order.dispatchDate || order.orderDate) && (
                             <span className="text-[11px] text-slate-400 font-mono mt-0.5">
                               {parseAndFormatLogisticsDate(order.dispatchDate).timeStr || '11:50 AM'}
                             </span>
