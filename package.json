@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "package:extension": "node scripts/package-extension.mjs",
+    "build": "node scripts/package-extension.mjs && vite build",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -180,6 +180,26 @@ class RndExtensionService {
     }
   }
 
+  public async cancelResearch(): Promise<void> {
+    this.pendingRequests.forEach((item, id) => {
+      if (item.type === 'START_PROFILE_RESEARCH') {
+        if (item.timeoutId) {
+          clearTimeout(item.timeoutId);
+        }
+        this.pendingRequests.delete(id);
+        item.reject(new Error('RESEARCH_STOPPED_BY_USER'));
+      }
+    });
+
+    if (typeof window !== 'undefined') {
+      try {
+        await this.sendMessage('CANCEL_RESEARCH', undefined, 1500);
+      } catch {
+        // Ignore if extension is not connected or already idle
+      }
+    }
+  }
+
   public async runReelDiagnostic(username: string): Promise<DiagnosticResult> {
     try {
       // 35-second timeout for diagnostic handshake, navigation, and passive DOM snapshot

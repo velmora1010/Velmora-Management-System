@@ -1,16 +1,15 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { createPortal } from 'react-dom';
-import { ArrowLeft, UserSearch, Globe, Camera, CheckCircle2, XCircle, AlertCircle, Activity, AlertTriangle, ExternalLink, X, Code, Layers, Eye, Loader2, Clock, Info, Pause, RotateCcw } from 'lucide-react';
-import { rndExtensionService } from './rnd/services/rndExtensionService';
-import { ExtensionConnectionState, InstagramSessionState, DiagnosticResult } from './rnd/types/extensionTypes';
-import { ResearchJob, DiscoveredReel, ProfileResearchResult, ResearchInputProfile } from './rnd/types/rndTypes';
+import React, { useMemo, useState, useCallback } from 'react';
+import { ArrowLeft, UserSearch, Globe, Camera, CheckCircle2, XCircle, AlertCircle, Activity, AlertTriangle, ExternalLink, X, Code, Layers, Eye, Loader2, Clock, Info, Pause, Play, Square, Download, BarChart2 } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { DiscoveredReel } from './rnd/types/rndTypes';
 import { RnDUploadArea } from './rnd/components/RnDUploadArea';
 import { RnDPreviewTable, RnDInputFileSummary } from './rnd/components/RnDPreviewTable';
 import { RnDExportButton } from './rnd/components/RnDExportButton';
 import { RnDViewProfiles } from './rnd/components/RnDViewProfiles';
-import { RnDMiniPlayer, setupMiniWindowDocument } from './rnd/components/RnDMiniPlayer';
-import { parseInfluencerExcel } from './rnd/utils/excelParser';
 import { categorize, extractValidViewsFromResult } from './rnd/utils/rndExportService';
+import { useRnDContext } from './rnd/context/RnDContext';
+import { EXTENSION_RELEASE_METADATA } from './rnd/config/extensionReleaseConfig';
+import { downloadExtensionPackage } from './rnd/utils/extensionPackageDownload';
 
 function getCategoryQualifyingInfo(
   category?: string | null,
@@ -73,594 +72,84 @@ interface InfluencerRnDProps {
 }
 
 export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
-  const [extState, setExtState] = useState<ExtensionConnectionState>('CONNECTING');
-  const [igState, setIgState] = useState<InstagramSessionState>('CHECKING');
-  const [extVersion, setExtVersion] = useState<string | undefined>();
+  const {
+    extState,
+    igState,
+    extVersion,
+    isEngineConnected,
+    handleManualCheck,
+    handleOpenInstagram,
+    currentJob,
+    isParsing,
+    parseError,
+    researchMessage,
+    isBatchRunning,
+    isResearchPaused,
+    isUserPaused,
+    selectedProfileCode,
+    setSelectedProfileCode,
+    researchResults,
+    batchProgress,
+    researchState,
+    handleFileSelect,
+    handleReplaceFile,
+    handleStartResearch,
+    handleTogglePause,
+    handleStopSession,
+    diagnosticResult,
+    setDiagnosticResult,
+    isDiagnosing,
+    diagTargetUser,
+    isDiagModalOpen,
+    setIsDiagModalOpen,
+    manualUsernameInput,
+    setManualUsernameInput,
+    handleOpenDiagModal,
+    handleRunDiagnostic,
+    isMiniPlayerOpen,
+    handleOpenMiniPlayer,
+    handleCloseMiniPlayer,
+  } = useRnDContext();
 
-  const [currentJob, setCurrentJob] = useState<ResearchJob | null>(null);
-  const [isParsing, setIsParsing] = useState(false);
-  const [parseError, setParseError] = useState<string | null>(null);
-  const [researchMessage, setResearchMessage] = useState<string | null>(null);
-
-  // Batch Research states
-  const [isBatchRunning, setIsBatchRunning] = useState<boolean>(false);
-  const [isResearchPaused, setIsResearchPaused] = useState<boolean>(false);
-  const [selectedProfileCode, setSelectedProfileCode] = useState<string | null>(null);
-  const [researchResults, setResearchResults] = useState<Record<string, ProfileResearchResult>>({});
-  const [batchProgress, setBatchProgress] = useState<{
-    currentIndex: number;
-    totalEligible: number;
-    currentProfileCode: string;
-    currentUsername: string;
-    completedCount: number;
-    partialCount: number;
-    failedCount: number;
+  const [isDownloadingExtension, setIsDownloadingExtension] = useState(false);
+  const [extensionDownloadStatus, setExtensionDownloadStatus] = useState<{
+    type: 'success' | 'error';
+    message: string;
   } | null>(null);
 
-  // Mini Player states
-  const [isMiniPlayerOpen, setIsMiniPlayerOpen] = useState<boolean>(false);
-  const [isPipActive, setIsPipActive] = useState<boolean>(false);
-  const miniPlayerWindowRef = useRef<Window | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const isAnalyticsSubview = searchParams.get('subview') === 'analytics';
 
-  // Phase 1 Diagnostic states
-  const [diagnosticResult, setDiagnosticResult] = useState<DiagnosticResult | null>(null);
-  const [isDiagnosing, setIsDiagnosing] = useState(false);
-  const [diagTargetUser, setDiagTargetUser] = useState<string>('');
-  const [isDiagModalOpen, setIsDiagModalOpen] = useState(false);
-  const [manualUsernameInput, setManualUsernameInput] = useState('');
+  const handleOpenAnalytics = useCallback(() => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('tab', 'influencer-rnd');
+    nextParams.set('subview', 'analytics');
+    setSearchParams(nextParams);
 
-  // Restore persisted batch session on mount
-  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      const targetEl =
+        document.getElementById('rnd-analytics-section') ||
+        document.getElementById('rnd-workspace-section');
+      if (targetEl && typeof targetEl.scrollIntoView === 'function') {
+        targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+  }, [searchParams, setSearchParams]);
+
+  const handleDownloadExtensionAndGuide = useCallback(async () => {
+    if (isDownloadingExtension) return;
+    setIsDownloadingExtension(true);
+    setExtensionDownloadStatus(null);
     try {
-      const savedJob = localStorage.getItem('velmora_rnd_current_job');
-      const savedResults = localStorage.getItem('velmora_rnd_results');
-      const savedProgress = localStorage.getItem('velmora_rnd_progress');
-      if (savedJob) {
-        const parsedJob = JSON.parse(savedJob);
-        setCurrentJob(parsedJob);
-      }
-      if (savedResults) {
-        const parsedResults = JSON.parse(savedResults);
-        setResearchResults(parsedResults);
-      }
-      if (savedProgress) {
-        const parsedProgress = JSON.parse(savedProgress);
-        setBatchProgress(parsedProgress);
-        if (parsedProgress.currentProfileCode) {
-          setSelectedProfileCode(parsedProgress.currentProfileCode);
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to restore R&D session from localStorage', e);
-    }
-  }, []);
-
-  // Sync session state to localStorage
-  useEffect(() => {
-    if (currentJob) {
-      try {
-        localStorage.setItem('velmora_rnd_current_job', JSON.stringify(currentJob));
-      } catch (e) {}
-    }
-  }, [currentJob]);
-
-  useEffect(() => {
-    if (researchResults && Object.keys(researchResults).length > 0) {
-      try {
-        localStorage.setItem('velmora_rnd_results', JSON.stringify(researchResults));
-      } catch (e) {}
-    }
-  }, [researchResults]);
-
-  useEffect(() => {
-    if (batchProgress) {
-      try {
-        localStorage.setItem('velmora_rnd_progress', JSON.stringify(batchProgress));
-      } catch (e) {}
-    }
-  }, [batchProgress]);
-
-
-  useEffect(() => {
-    return () => {
-      if (miniPlayerWindowRef.current && !miniPlayerWindowRef.current.closed) {
-        try {
-          miniPlayerWindowRef.current.close();
-        } catch (e) {
-          // Ignore
-        }
-        miniPlayerWindowRef.current = null;
-      }
-    };
-  }, []);
-
-  const handleOpenMiniPlayer = async () => {
-    if (miniPlayerWindowRef.current && !miniPlayerWindowRef.current.closed) {
-      try {
-        miniPlayerWindowRef.current.focus();
-      } catch (e) {
-        // Ignore
-      }
-      return;
-    }
-
-    let newWin: Window | null = null;
-    let isPip = false;
-
-    // 1. Try Document Picture-in-Picture first (Chrome 116+)
-    if (typeof window !== 'undefined' && 'documentPictureInPicture' in window) {
-      try {
-        const pip = (window as any).documentPictureInPicture;
-        if (typeof pip?.requestWindow === 'function') {
-          newWin = await pip.requestWindow({
-            width: 380,
-            height: 520
-          });
-          isPip = true;
-        }
-      } catch (pipErr) {
-        console.warn('Document Picture-in-Picture request failed or denied, using popup fallback:', pipErr);
-      }
-    }
-
-    // 2. Fallback to standard window.open popup
-    if (!newWin) {
-      try {
-        const left = Math.max(0, (window.screenLeft || window.screenX || 0) + (window.outerWidth || 1024) - 400);
-        const top = Math.max(0, (window.screenTop || window.screenY || 0) + 60);
-        newWin = window.open(
-          '',
-          'VelmoraRnDMiniPlayer',
-          `width=380,height=520,left=${left},top=${top},resizable=yes,scrollbars=no`
-        );
-        isPip = false;
-      } catch (openErr) {
-        console.error('Failed to open popup window for Mini Player:', openErr);
-      }
-    }
-
-    if (!newWin) {
-      alert('Unable to open Mini Player. Please allow popups for this site in your browser settings.');
-      return;
-    }
-
-    setupMiniWindowDocument(newWin.document);
-
-    const handleClosed = () => {
-      setIsMiniPlayerOpen(false);
-      miniPlayerWindowRef.current = null;
-    };
-
-    newWin.addEventListener('pagehide', handleClosed);
-    newWin.addEventListener('unload', handleClosed);
-
-    miniPlayerWindowRef.current = newWin;
-    setIsPipActive(isPip);
-    setIsMiniPlayerOpen(true);
-  };
-
-  const handleCloseMiniPlayer = () => {
-    if (miniPlayerWindowRef.current && !miniPlayerWindowRef.current.closed) {
-      try {
-        miniPlayerWindowRef.current.close();
-      } catch (e) {
-        // Ignore
-      }
-    }
-    miniPlayerWindowRef.current = null;
-    setIsMiniPlayerOpen(false);
-  };
-
-  const handleFocusMainApp = () => {
-    try {
-      window.focus();
-    } catch (e) {
-      // Ignore
-    }
-  };
-
-  const checkStatus = async (mounted: { current: boolean }) => {
-    // 1. Check Extension
-    const status = await rndExtensionService.getExtensionStatus();
-
-    if (!mounted.current) return;
-
-    if (!status.connected) {
-      setExtState('NOT_DETECTED');
-      setIgState('NOT_AVAILABLE');
-      setExtVersion(undefined);
-      return;
-    }
-
-    setExtState('CONNECTED');
-    setExtVersion(status.version);
-
-    // 2. Check Instagram Session if Extension is connected
-    const igResult = await rndExtensionService.checkInstagramSession();
-    if (!mounted.current) return;
-
-    if (igResult.error) {
-      setIgState('NOT_AVAILABLE');
-    } else if (igResult.available) {
-      if (igResult.session === 'detected') {
-        setIgState('SESSION_DETECTED');
-      } else {
-        setIgState('LOGIN_REQUIRED');
-      }
-    } else {
-      setIgState('NOT_AVAILABLE');
-    }
-  };
-
-  useEffect(() => {
-    const mounted = { current: true };
-
-    checkStatus(mounted);
-    // Re-check periodically
-    const interval = setInterval(() => checkStatus(mounted), 5000);
-
-    return () => {
-      mounted.current = false;
-      clearInterval(interval);
-    };
-  }, []);
-
-  const handleManualCheck = () => {
-    setExtState('CONNECTING');
-    setIgState('CHECKING');
-    checkStatus({ current: true });
-  };
-
-  const handleOpenInstagram = () => {
-    window.open('https://www.instagram.com', '_blank');
-  };
-
-  const handleOpenDiagModal = () => {
-    const firstReady = currentJob?.profiles.find(p => p.validationStatus !== 'invalid');
-    setManualUsernameInput(firstReady?.username || manualUsernameInput || '');
-    setIsDiagModalOpen(true);
-  };
-
-  const handleRunDiagnostic = async (usernameToTest?: string) => {
-    const user = (usernameToTest || manualUsernameInput).trim().replace(/^@/, '');
-    if (!user) {
-      handleOpenDiagModal();
-      return;
-    }
-    setIsDiagModalOpen(false);
-    setIsDiagnosing(true);
-    setDiagTargetUser(user);
-    setDiagnosticResult(null);
-
-    const result = await rndExtensionService.runReelDiagnostic(user);
-    setDiagnosticResult(result);
-    setIsDiagnosing(false);
-  };
-
-  const handleFileSelect = async (file: File) => {
-    setIsParsing(true);
-    setParseError(null);
-    setResearchMessage(null);
-    setBatchProgress(null);
-    setIsBatchRunning(false);
-    setResearchResults({});
-    setSelectedProfileCode(null);
-    setResearchState(null);
-
-    try {
-      const job = await parseInfluencerExcel(file);
-      setCurrentJob(job);
-    } catch (err: any) {
-      setParseError(err.message || 'An error occurred while parsing the file.');
+      const result = await downloadExtensionPackage();
+      setExtensionDownloadStatus({
+        type: result.success ? 'success' : 'error',
+        message: result.message
+      });
     } finally {
-      setIsParsing(false);
+      setIsDownloadingExtension(false);
     }
-  };
-
-  const [researchState, setResearchState] = useState<{
-    profileCode: string;
-    username: string;
-    statusText: string;
-    followerDisplay: string | null;
-    reelsDiscovered: number | null;
-    pinnedReelsExcluded: number | null;
-    selectedReelCount: number | null;
-    validViewCountsCount?: number | null;
-    averageViews?: number | null;
-    rawViewCounts?: number[] | null;
-    selectedReels?: DiscoveredReel[] | null;
-    missingViewCountsCount?: number | null;
-    category?: string | null;
-    isComplete: boolean;
-    error: string | null;
-    finalUrl?: string;
-    navigationSuccess?: boolean;
-    pageReadiness?: string;
-    reelAnchorsAtStart?: number;
-    failureStage?: string | null;
-    failureReason?: string | null;
-  } | null>(null);
-
-  useEffect(() => {
-    // Listen for live extension events
-    const unsubscribe = rndExtensionService.onEvent((event) => {
-      const type = event.type;
-      const textMap: Record<string, string> = {
-        'PROFILE_OPENING': 'Opening profile...',
-        'PROFILE_VERIFYING': 'Verifying profile...',
-        'PROFILE_DATA_FOUND': 'Reading followers...',
-        'REELS_PAGE_OPENING': 'Opening Reels (waiting for grid to render)...',
-        'REELS_LOADING': event.payload?.extractionMoment?.reelAnchorsCount
-          ? `Reels grid rendered (${event.payload.extractionMoment.reelAnchorsCount} reels found)...`
-          : 'Loading Reels grid...',
-        'REELS_SCROLLING': 'Discovering reels...',
-        'REELS_DISCOVERED': `Discovering reels (${event.payload?.discovered || 0} found, ${event.payload?.validViews || 0} views)...`,
-        'PINNED_REELS_FILTERED': `Filtering pinned reels (${event.payload?.excluded || 0} excluded)...`,
-        'REELS_SELECTION_COMPLETE': `Selected ${event.payload?.selected || 0} reels (avg views: ${(event.payload?.averageViews || 0).toLocaleString()})...`,
-        'RESEARCH_RETRYING': 'Not enough valid reel views, retrying...',
-      };
-
-      if (type === 'RESEARCH_PAUSED') {
-        setIsResearchPaused(true);
-        const pauseMsg =
-          event.payload?.statusText ||
-          (event.payload?.reason === 'occlusion_suspected'
-            ? 'Paused — Instagram Companion window appears to be covered. Bring it to the front to continue.'
-            : 'Paused — Instagram window inactive');
-        setResearchState(prev => (prev ? { ...prev, statusText: pauseMsg, error: null } : null));
-        return;
-      }
-
-      if (type === 'RESEARCH_RESUMED') {
-        setIsResearchPaused(false);
-        setResearchState(prev =>
-          prev ? { ...prev, statusText: 'Resumed — continuing reel discovery...', error: null } : null
-        );
-        return;
-      }
-
-      if (textMap[type]) {
-        setIsResearchPaused(false);
-        setResearchState(prev => prev ? { ...prev, statusText: textMap[type], error: null } : null);
-      }
-    });
-    return unsubscribe;
-  }, []);
-
-  const handleStartResearch = async (options?: { retryOnlyFailed?: boolean }) => {
-    if (!currentJob || isBatchRunning) return;
-
-    // Eligible profiles: all rows that are not invalid (preserves Excel order)
-    const allEligible = currentJob.profiles.filter(p => p.validationStatus !== 'invalid');
-    if (allEligible.length === 0) {
-      setResearchMessage("No valid profiles to research.");
-      return;
-    }
-
-    const targetProfiles = options?.retryOnlyFailed
-      ? allEligible.filter(p => p.researchStatus !== 'completed')
-      : allEligible;
-
-    if (targetProfiles.length === 0) {
-      setResearchMessage("All eligible profiles are already completed.");
-      return;
-    }
-
-    setIsBatchRunning(true);
-    setIsResearchPaused(false);
-    setResearchMessage(null);
-
-    let completedCount = options?.retryOnlyFailed
-      ? allEligible.filter(p => p.researchStatus === 'completed').length
-      : 0;
-    let partialCount = 0;
-    let failedCount = 0;
-
-    try {
-      for (let i = 0; i < targetProfiles.length; i++) {
-        const profile = targetProfiles[i];
-
-        setIsResearchPaused(false);
-        setSelectedProfileCode(profile.influencerCode);
-        setBatchProgress({
-          currentIndex: completedCount + partialCount + failedCount + 1,
-          totalEligible: allEligible.length,
-          currentProfileCode: profile.influencerCode,
-          currentUsername: profile.username,
-          completedCount,
-          partialCount,
-          failedCount
-        });
-
-        setResearchState({
-          profileCode: profile.influencerCode,
-          username: profile.username,
-          statusText: 'Starting research...',
-          followerDisplay: null,
-          reelsDiscovered: null,
-          pinnedReelsExcluded: null,
-          selectedReelCount: null,
-          validViewCountsCount: null,
-          averageViews: null,
-          rawViewCounts: null,
-          selectedReels: null,
-          missingViewCountsCount: null,
-          isComplete: false,
-          error: null
-        });
-
-        // Mark running in currentJob queue
-        setCurrentJob(prev => {
-          if (!prev) return prev;
-          const profiles = prev.profiles.map(p =>
-            p.influencerCode === profile.influencerCode ? { ...p, researchStatus: 'running' as const } : p
-          );
-          return { ...prev, profiles };
-        });
-
-        const profileStartTime = Date.now();
-
-        try {
-          const result = await rndExtensionService.startProfileResearch(
-            currentJob.jobId,
-            profile.influencerCode,
-            profile.username
-          );
-          setIsResearchPaused(false);
-
-          const isPartial = result.status === 'partial' || result.status === 'reels_not_enough' || (result.validViewCountsCount !== undefined && result.validViewCountsCount < 15);
-          const isFailed = result.status === 'reels_not_found' || result.status === 'failed';
-          const finalStatus: 'completed' | 'partial' | 'failed' = isFailed ? 'failed' : isPartial ? 'partial' : 'completed';
-
-          if (finalStatus === 'completed') completedCount++;
-          else if (finalStatus === 'partial') partialCount++;
-          else failedCount++;
-
-          const calculatedCategory =
-            result.category ||
-            result.creatorCategory ||
-            categorize(extractValidViewsFromResult(result));
-          const enrichedResult: ProfileResearchResult = {
-            ...result,
-            category: calculatedCategory,
-            creatorCategory: calculatedCategory
-          };
-
-          // Save completed result into results map
-          setResearchResults(prev => ({
-            ...prev,
-            [profile.influencerCode]: enrichedResult
-          }));
-
-          setResearchState({
-            profileCode: enrichedResult.influencerCode,
-            username: enrichedResult.requestedUsername,
-            statusText: isFailed
-              ? (enrichedResult.error || 'Failed')
-              : isPartial
-                ? `Partial (${enrichedResult.validViewCountsCount ?? 0}/15 valid view counts)`
-                : 'Completed',
-            followerDisplay: enrichedResult.followerDisplay,
-            reelsDiscovered: enrichedResult.reelsDiscovered || 0,
-            pinnedReelsExcluded: enrichedResult.pinnedReelsExcluded || 0,
-            selectedReelCount: enrichedResult.selectedReelCount || 0,
-            validViewCountsCount: enrichedResult.validViewCountsCount || 0,
-            averageViews: enrichedResult.averageViews || 0,
-            rawViewCounts: enrichedResult.rawViewCounts || [],
-            selectedReels: enrichedResult.selectedReels || [],
-            missingViewCountsCount: typeof enrichedResult.missingViewCountsCount === 'number'
-              ? enrichedResult.missingViewCountsCount
-              : Math.max(0, 15 - (enrichedResult.validViewCountsCount || 0)),
-            category: calculatedCategory,
-            isComplete: true,
-            error: isFailed ? (enrichedResult.error || 'Zero reels were discovered') : null,
-            finalUrl: enrichedResult.finalUrl,
-            navigationSuccess: enrichedResult.navigationSuccess,
-            pageReadiness: enrichedResult.pageReadiness,
-            reelAnchorsAtStart: enrichedResult.reelAnchorsAtStart,
-            failureStage: enrichedResult.failureStage,
-            failureReason: enrichedResult.failureReason
-          });
-
-          // Mark completed / partial / failed in currentJob and attach researchResult
-          setCurrentJob(prev => {
-            if (!prev) return prev;
-            const profiles = prev.profiles.map(p =>
-              p.influencerCode === profile.influencerCode
-                ? {
-                    ...p,
-                    category: calculatedCategory,
-                    creatorCategory: calculatedCategory,
-                    researchStatus: finalStatus,
-                    researchResult: enrichedResult
-                  }
-                : p
-            );
-            return { ...prev, profiles };
-          });
-
-        } catch (profileErr: any) {
-          setIsResearchPaused(false);
-          failedCount++;
-          const errorMsg = profileErr?.message || 'An error occurred during research.';
-          const failedResult: ProfileResearchResult = {
-            jobId: currentJob.jobId,
-            influencerCode: profile.influencerCode,
-            requestedUsername: profile.username,
-            verifiedUsername: profile.username,
-            followerDisplay: null,
-            followerCount: 0,
-            status: 'failed',
-            error: errorMsg,
-            startedAt: profileStartTime,
-            completedAt: Date.now()
-          };
-
-          setResearchResults(prev => ({
-            ...prev,
-            [profile.influencerCode]: failedResult
-          }));
-
-          setResearchState({
-            profileCode: profile.influencerCode,
-            username: profile.username,
-            statusText: 'Failed',
-            followerDisplay: null,
-            reelsDiscovered: null,
-            pinnedReelsExcluded: null,
-            selectedReelCount: null,
-            validViewCountsCount: null,
-            averageViews: null,
-            rawViewCounts: null,
-            selectedReels: null,
-            missingViewCountsCount: null,
-            isComplete: true,
-            error: errorMsg
-          });
-
-          setCurrentJob(prev => {
-            if (!prev) return prev;
-            const profiles = prev.profiles.map(p =>
-              p.influencerCode === profile.influencerCode
-                ? { ...p, researchStatus: 'failed' as const, researchResult: failedResult }
-                : p
-            );
-            return { ...prev, profiles };
-          });
-        }
-
-        // Update batch progress after each profile finishes
-        setBatchProgress({
-          currentIndex: Math.min(allEligible.length, completedCount + partialCount + failedCount),
-          totalEligible: allEligible.length,
-          currentProfileCode: profile.influencerCode,
-          currentUsername: profile.username,
-          completedCount,
-          partialCount,
-          failedCount
-        });
-
-        // Let the browser and Instagram tab settle before transitioning to the next profile
-        if (i < targetProfiles.length - 1) {
-          await new Promise(r => setTimeout(r, 1000));
-        }
-      }
-    } finally {
-      setIsBatchRunning(false);
-      setIsResearchPaused(false);
-    }
-  };
-
-  const handleRetryFailed = () => {
-    handleStartResearch({ retryOnlyFailed: true });
-  };
-
-  const failedProfilesCount = useMemo(() => {
-    if (!currentJob) return 0;
-    const hasAnyRun = currentJob.profiles.some(p => p.researchStatus && p.researchStatus !== 'pending');
-    if (!hasAnyRun && !batchProgress) return 0;
-    return currentJob.profiles.filter(p => p.validationStatus !== 'invalid' && p.researchStatus !== 'completed').length;
-  }, [currentJob, batchProgress]);
+  }, [isDownloadingExtension]);
 
   const activeCardData = useMemo(() => {
     if (!selectedProfileCode) return researchState;
@@ -709,42 +198,93 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
     return researchState;
   }, [selectedProfileCode, researchState, researchResults]);
 
-  const isEngineConnected = extState === 'CONNECTED' && igState === 'SESSION_DETECTED';
-
   return (
     <div className="p-4 sm:p-6 text-[#F1F5F9] max-w-7xl mx-auto space-y-6 animate-fade-in">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-2 pb-4 border-b border-[#293548]">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onBack}
-            className="p-2 bg-[#171F2B] hover:bg-[#1D2736] text-[#F1F5F9] rounded-lg transition-colors border border-[#293548]"
-            title="Go back"
-          >
-            <ArrowLeft size={18} />
-          </button>
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-[#3B82F6]/10 text-[#3B82F6] border border-[#3B82F6]/20 rounded-lg">
-              <UserSearch size={22} />
+      {/* Row 1: Main Header (Title + Extension Distribution + Version + Analytics) */}
+      <div className="space-y-3">
+        <div
+          data-testid="rnd-main-header"
+          className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-3.5 border-b border-[#293548]"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              onClick={onBack}
+              className="p-2 bg-[#171F2B] hover:bg-[#1D2736] text-[#F1F5F9] rounded-lg transition-colors border border-[#293548] shrink-0"
+              title="Go back"
+            >
+              <ArrowLeft size={18} />
+            </button>
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="p-2 bg-[#3B82F6]/10 text-[#3B82F6] border border-[#3B82F6]/20 rounded-lg shrink-0">
+                <UserSearch size={22} />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-xl font-bold text-[#F1F5F9] tracking-tight truncate">Influencer Research & Development</h2>
+                <p className="text-xs text-[#94A3B8] truncate">Discover, scrape, and categorize Instagram creators</p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-xl font-bold text-[#F1F5F9] tracking-tight">Influencer Research & Development</h2>
-              <p className="text-xs text-[#94A3B8]">Discover, scrape, and categorize Instagram creators</p>
-            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+            <button
+              type="button"
+              onClick={handleDownloadExtensionAndGuide}
+              disabled={isDownloadingExtension}
+              data-testid="download-extension-setup-guide-btn"
+              title={`Download ${EXTENSION_RELEASE_METADATA.zipFilename} (Extension v${EXTENSION_RELEASE_METADATA.version} + Setup Guide PDF + README)`}
+              className="px-3.5 py-2 bg-[#3B82F6] hover:bg-[#2563EB] text-white text-xs font-semibold rounded-lg transition-colors border border-[#60A5FA]/30 shadow-sm flex items-center gap-1.5 disabled:opacity-60"
+            >
+              {isDownloadingExtension ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" />
+                  <span>Preparing Download...</span>
+                </>
+              ) : (
+                <>
+                  <Download size={14} />
+                  <span>Download Extension + Setup Guide</span>
+                </>
+              )}
+            </button>
+            <span
+              data-testid="extension-release-version-badge"
+              className="px-2.5 py-1.5 text-[11px] font-mono font-semibold text-[#93C5FD] bg-[#1E293B] border border-[#3B82F6]/30 rounded-lg"
+              title="Latest approved Velmora Instagram Companion extension release version"
+            >
+              v{EXTENSION_RELEASE_METADATA.version}
+            </span>
+            <button
+              type="button"
+              onClick={handleOpenAnalytics}
+              data-testid="rnd-analytics-btn"
+              title="Open Influencer R&D Analytics section"
+              className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors border flex items-center gap-1.5 ${
+                isAnalyticsSubview
+                  ? 'bg-[#3B82F6]/15 text-[#60A5FA] border-[#3B82F6]/40'
+                  : 'bg-[#171F2B] hover:bg-[#1D2736] text-[#F1F5F9] border-[#293548]'
+              }`}
+            >
+              <BarChart2 size={14} />
+              <span>Analytics</span>
+            </button>
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          {currentJob && (
-            <RnDExportButton
-              job={currentJob}
-              researchResults={researchResults}
-              isBatchRunning={isBatchRunning}
-              size="sm"
-            />
-          )}
+        {/* Row 2: Second-Level Operational Action Toolbar (Export Results | Open Mini Player | Check Connection) */}
+        <div
+          data-testid="rnd-action-toolbar"
+          className="flex flex-wrap items-center justify-start sm:justify-end gap-2.5"
+        >
+          <RnDExportButton
+            job={currentJob}
+            researchResults={researchResults}
+            isBatchRunning={isBatchRunning}
+            size="sm"
+          />
           <button
             type="button"
-            onClick={handleOpenMiniPlayer}
+            onClick={isMiniPlayerOpen ? handleCloseMiniPlayer : handleOpenMiniPlayer}
+            data-testid="rnd-open-miniplayer-btn"
             className={`px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors border flex items-center gap-1.5 ${
               isMiniPlayerOpen
                 ? 'bg-[#3B82F6]/10 text-[#3B82F6] border-[#3B82F6]/30'
@@ -756,14 +296,44 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
             <span>{isMiniPlayerOpen ? 'Mini Player Open' : 'Open Mini Player'}</span>
           </button>
           <button
+            type="button"
             onClick={handleManualCheck}
             disabled={isBatchRunning}
+            data-testid="rnd-check-connection-btn"
             className="px-3.5 py-2 bg-[#171F2B] hover:bg-[#1D2736] text-[#F1F5F9] text-xs font-semibold rounded-lg transition-colors border border-[#293548] disabled:opacity-50"
           >
             Check Connection
           </button>
         </div>
       </div>
+
+      {extensionDownloadStatus && (
+        <div
+          data-testid="extension-download-feedback"
+          className={`max-w-6xl mx-auto px-4 py-3 rounded-xl border flex items-start justify-between gap-3 text-xs ${
+            extensionDownloadStatus.type === 'success'
+              ? 'bg-[#10B981]/10 border-[#10B981]/30 text-[#D1FAE5]'
+              : 'bg-[#EF4444]/10 border-[#EF4444]/30 text-[#FEE2E2]'
+          }`}
+        >
+          <div className="flex items-start gap-2.5">
+            {extensionDownloadStatus.type === 'success' ? (
+              <CheckCircle2 size={16} className="text-[#10B981] shrink-0 mt-0.5" />
+            ) : (
+              <AlertCircle size={16} className="text-[#EF4444] shrink-0 mt-0.5" />
+            )}
+            <span className="leading-relaxed">{extensionDownloadStatus.message}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setExtensionDownloadStatus(null)}
+            className="text-[#94A3B8] hover:text-[#F1F5F9] p-0.5 rounded transition-colors shrink-0"
+            title="Dismiss message"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* Status Cards Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-6xl mx-auto">
@@ -802,11 +372,10 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
                 : 'Velmora Influencer R&D extension is not connected. Please ensure the extension is installed and enabled in your browser.'}
             </p>
           </div>
-          {extVersion && (
-            <div className="text-[11px] text-[#64748B] mt-2 font-mono">
-              Version {extVersion}
-            </div>
-          )}
+          <div className="flex items-center justify-between text-[11px] text-[#64748B] mt-2 pt-2 border-t border-[#293548]/60 font-mono">
+            <span>Latest Package: v{EXTENSION_RELEASE_METADATA.version}</span>
+            {extVersion && <span>Installed: v{extVersion}</span>}
+          </div>
         </div>
 
         {/* Instagram Status Card */}
@@ -863,7 +432,7 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
       </div>
 
       {/* Main Workspace */}
-      <div className="max-w-6xl mx-auto space-y-5">
+      <div id="rnd-workspace-section" className="max-w-6xl mx-auto space-y-5">
         <h2 className="text-base font-bold text-[#F1F5F9] mb-3 tracking-tight">New Research Run</h2>
 
         {/* Phase 1: Communication & Reel Discovery Diagnostic Panel */}
@@ -1440,15 +1009,7 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
             {/* 3 & 4. Input File Card (with Replace File, Run Reel Diagnostic, Start Research) & Validation Summary Cards */}
             <RnDInputFileSummary
               job={currentJob}
-              onReplaceFile={() => {
-                setCurrentJob(null);
-                setBatchProgress(null);
-                setIsBatchRunning(false);
-                setIsResearchPaused(false);
-                setResearchResults({});
-                setSelectedProfileCode(null);
-                setResearchState(null);
-              }}
+              onReplaceFile={handleReplaceFile}
               onStartResearch={handleStartResearch}
               onRunDiagnostic={() => {
                 const firstReady = currentJob?.profiles.find(p => p.validationStatus !== 'invalid');
@@ -1502,11 +1063,33 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
                   </div>
 
                   <div className="flex items-center gap-2.5 self-end sm:self-auto shrink-0">
+                    {isBatchRunning && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleTogglePause}
+                          className="px-2.5 py-1.5 bg-[#111827] hover:bg-[#1A2332] text-[#94A3B8] hover:text-[#F59E0B] border border-[#293548] rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5"
+                          title={isUserPaused || isResearchPaused ? 'Resume Batch' : 'Pause Batch'}
+                        >
+                          {isUserPaused || isResearchPaused ? <Play size={12} /> : <Pause size={12} />}
+                          <span>{isUserPaused || isResearchPaused ? 'Resume' : 'Pause'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleStopSession}
+                          className="px-2.5 py-1.5 bg-[#EF4444]/10 hover:bg-[#EF4444]/20 text-[#EF4444] border border-[#EF4444]/30 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5"
+                          title="Explicitly stop active R&D session"
+                        >
+                          <Square size={11} />
+                          <span>Stop Session</span>
+                        </button>
+                      </>
+                    )}
                     <button
                       type="button"
                       onClick={handleOpenMiniPlayer}
                       className="px-2.5 py-1.5 bg-[#111827] hover:bg-[#1A2332] text-[#94A3B8] hover:text-[#3B82F6] border border-[#293548] rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5"
-                      title="Pop out Mini Player"
+                      title="Show Global Mini Player"
                     >
                       <ExternalLink size={12} />
                       <span>Mini Player</span>
@@ -1520,7 +1103,7 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
                   </div>
                 </div>
 
-                {isBatchRunning && isResearchPaused && (
+                {isBatchRunning && (isResearchPaused || isUserPaused) && (
                   <div className="p-3.5 bg-[#F59E0B]/15 border border-[#F59E0B]/40 rounded-xl text-[#F59E0B] text-xs flex items-start gap-2.5 animate-pulse">
                     <Pause size={16} className="mt-0.5 shrink-0" />
                     <div className="flex flex-col gap-0.5">
@@ -1587,7 +1170,8 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
               </div>
             )}
 
-            {/* View Profiles Section */}
+            {/* View Profiles & Analytics Section */}
+            <div id="rnd-analytics-section" className="contents" />
             {currentJob && (Object.keys(researchResults).length > 0 || isBatchRunning) && (
               <RnDViewProfiles
                 profiles={currentJob.profiles}
@@ -1912,22 +1496,6 @@ export const InfluencerRnD: React.FC<InfluencerRnDProps> = ({ onBack }) => {
             </div>
           </div>
         </div>
-      )}
-
-      {/* Document PiP / Popup Mini Player Portal */}
-      {isMiniPlayerOpen && miniPlayerWindowRef.current?.document?.body && createPortal(
-        <RnDMiniPlayer
-          isBatchRunning={isBatchRunning}
-          batchProgress={batchProgress}
-          researchState={researchState}
-          isEngineConnected={isEngineConnected}
-          isPipMode={isPipActive}
-          isPaused={isResearchPaused}
-          onRetryFailed={failedProfilesCount > 0 ? handleRetryFailed : undefined}
-          onFocusMainApp={handleFocusMainApp}
-          onClose={handleCloseMiniPlayer}
-        />,
-        miniPlayerWindowRef.current.document.body
       )}
     </div>
   );
