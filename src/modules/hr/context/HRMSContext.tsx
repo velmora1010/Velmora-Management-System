@@ -51,6 +51,7 @@ import {
   fetchEmployeeFilesFromSupabase,
   insertEmployeeFileInSupabase,
   deleteEmployeeFileFromSupabase,
+  deleteEmployeeFileFromStorage,
   uploadEmployeeFileToStorage,
   deleteEmployeeFromSupabase,
   fetchAttendanceFromSupabase,
@@ -778,17 +779,24 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const deleteEmployeeFile = async (fileId: string): Promise<boolean> => {
+    const targetFile = employeeFiles.find((f) => f.id === fileId);
     setEmployeeFiles((prev) => {
       const updated = prev.filter((f) => f.id !== fileId);
       safeSetItem(LOCAL_STORAGE_KEYS.FILES, JSON.stringify(updated));
       return updated;
     });
 
+    if (targetFile?.storagePath) {
+      deleteEmployeeFileFromStorage(targetFile.storagePath).catch((err) => {
+        console.warn('[Supabase Storage] Failed to delete file from storage:', err);
+      });
+    }
+
     deleteEmployeeFileFromSupabase(fileId).catch((err) => {
       console.warn('[Supabase HR] Failed to delete file record:', err);
     });
 
-    showToast('Document removed successfully.', 'info', 'File Deleted');
+    showToast('Document deleted successfully.', 'success', 'File Deleted');
     return true;
   };
 

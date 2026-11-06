@@ -867,6 +867,22 @@ export async function insertEmployeeFileInSupabase(file: EmployeeFile): Promise<
   }
 }
 
+export async function deleteEmployeeFileFromStorage(storagePath: string): Promise<boolean> {
+  if (!storagePath) return false;
+  try {
+    const bucket = 'employee-documents';
+    const { error } = await supabase.storage.from(bucket).remove([storagePath]);
+    if (error) {
+      console.warn('[Supabase Storage] Error deleting file from storage:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('[Supabase Storage] Exception deleting file from storage:', err);
+    return false;
+  }
+}
+
 export async function deleteEmployeeFileFromSupabase(fileId: string): Promise<boolean> {
   try {
     const { error } = await supabase.from('employee_files').delete().eq('id', fileId);

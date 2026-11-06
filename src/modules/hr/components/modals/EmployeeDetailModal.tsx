@@ -140,6 +140,8 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
   const [docCategory, setDocCategory] = useState<EmployeeFileCategory>('ID Proof');
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
   const [docFeedback, setDocFeedback] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+  const [documentToDelete, setDocumentToDelete] = useState<EmployeeFile | null>(null);
+  const [isDeletingDoc, setIsDeletingDoc] = useState(false);
   const employeeFileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   // Strictly filter to personal employee submissions owned by this employee (HR-uploaded company records excluded)
@@ -217,6 +219,31 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+  };
+
+  const handleConfirmDeleteDoc = async () => {
+    if (!documentToDelete || !employee) return;
+
+    // Security & Ownership check: Only allow deleting employee-submitted documents
+    const isEmployeeSubmission =
+      documentToDelete.submissionSource === 'employee' ||
+      documentToDelete.uploaderRole === 'employee';
+
+    if (!isEmployeeSubmission) {
+      showToast('HR-uploaded official company records cannot be deleted from here.', 'error');
+      setDocumentToDelete(null);
+      return;
+    }
+
+    setIsDeletingDoc(true);
+    try {
+      await deleteEmployeeFile(documentToDelete.id);
+      setDocumentToDelete(null);
+    } catch (err: any) {
+      showToast(err.message || 'Failed to delete document.', 'error');
+    } finally {
+      setIsDeletingDoc(false);
+    }
   };
 
   useEffect(() => {
@@ -1244,9 +1271,10 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
                       <tr>
                         <th className="py-2.5 px-3">Document Name</th>
                         <th className="py-2.5 px-3">Category</th>
-                        <th className="py-2.5 px-3">Size</th>
+                        <th className="py-2.5 px-3">File Size</th>
                         <th className="py-2.5 px-3">Submitted By</th>
-                        <th className="py-2.5 px-3">Status</th>
+                        <th className="py-2.5 px-3">Submission Date & Time</th>
+                        <th className="py-2.5 px-3">Verification Status</th>
                         <th className="py-2.5 px-3 text-right">Actions</th>
                       </tr>
                     </thead>
@@ -1264,12 +1292,14 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
                               {doc.category}
                             </span>
                           </td>
-                          <td className="py-2.5 px-3 text-[#94A3B8]">{doc.fileSize}</td>
+                          <td className="py-2.5 px-3 text-[#94A3B8] font-mono text-[11px]">{doc.fileSize}</td>
                           <td className="py-2.5 px-3">
                             <span className="text-[11px] font-medium text-blue-300">
-                              Submitted by {doc.uploadedBy || employee.fullName}
+                              {doc.uploadedBy || employee.fullName}
                             </span>
-                            <span className="text-[9px] text-[#64748B] block">{doc.uploadedAt}</span>
+                          </td>
+                          <td className="py-2.5 px-3 text-[11px] text-[#94A3B8] font-mono">
+                            {doc.uploadedAt}
                           </td>
                           <td className="py-2.5 px-3">
                             {doc.verificationStatus === 'verified' ? (
@@ -1307,6 +1337,14 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
                               >
                                 <Download className="w-3 h-3" />
                               </button>
+                              <button
+                                type="button"
+                                onClick={() => setDocumentToDelete(doc)}
+                                className="p-1 rounded border border-rose-500/30 text-rose-400 hover:text-white hover:bg-rose-500/20 transition-colors cursor-pointer"
+                                title="Delete Document"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -1316,6 +1354,99 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Delete Confirmation Modal */}
+            {documentToDelete && (
+              <div className="fixed inset-0 z-[70] overflow-y-auto">
+                <div
+                  className="fixed inset-0 bg-[#0F172A]/75 backdrop-blur-xs transition-opacity animate-fade-in"
+                  onClick={() => {
+                    if (!isDeletingDoc) setDocumentToDelete(null);
+                  }}
+                />
+                <div className="flex min-h-full items-center justify-center p-4 text-center sm:p-0">
+                  <div
+                    className="relative transform overflow-hidden rounded-2xl bg-[#151D2B] text-left shadow-2xl transition-all w-full max-w-md my-8 border border-[#334155] animate-fade-in"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="flex items-center justify-between border-b border-[#334155] px-6 py-4 bg-[#111827]">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-lg bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+                          <Trash2 className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-bold text-white">Delete Submitted Document</h3>
+                          <p className="text-[11px] text-[#94A3B8]">Confirm document removal</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={isDeletingDoc}
+                        onClick={() => setDocumentToDelete(null)}
+                        className="rounded-lg p-1 text-[#94A3B8] hover:bg-white/5 hover:text-white transition-colors cursor-pointer"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="p-6 space-y-4">
+                      <p className="text-xs text-slate-300 leading-relaxed">
+                        Are you sure you want to delete <strong className="text-white font-mono bg-[#0B0F14] px-1.5 py-0.5 rounded border border-[#334155] break-all">{documentToDelete.fileName}</strong>?
+                      </p>
+                      <div className="p-3 rounded-lg bg-[#0F172A] border border-[#334155] space-y-1.5 text-[11px]">
+                        <div className="flex justify-between text-slate-400">
+                          <span>Category:</span>
+                          <span className="font-medium text-slate-200">{documentToDelete.category}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-400">
+                          <span>File Size:</span>
+                          <span className="font-medium text-slate-200">{documentToDelete.fileSize}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-400">
+                          <span>Submitted By:</span>
+                          <span className="font-medium text-slate-200">{documentToDelete.uploadedBy || employee.fullName}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-400">
+                          <span>Submission Date & Time:</span>
+                          <span className="font-medium text-slate-200 font-mono">{documentToDelete.uploadedAt}</span>
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-rose-400/90 flex items-center gap-1.5">
+                        <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                        <span>This action will permanently delete this employee-submitted document.</span>
+                      </p>
+                      <div className="flex justify-end gap-2.5 pt-4 border-t border-[#334155]">
+                        <button
+                          type="button"
+                          disabled={isDeletingDoc}
+                          onClick={() => setDocumentToDelete(null)}
+                          className="px-4 py-2 text-xs font-semibold text-[#94A3B8] hover:text-white bg-transparent border border-[#334155] hover:bg-white/5 rounded-xl disabled:opacity-50 cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isDeletingDoc}
+                          onClick={handleConfirmDeleteDoc}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 active:bg-rose-800 rounded-xl shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+                        >
+                          {isDeletingDoc ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>Deleting...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Confirm Delete</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
