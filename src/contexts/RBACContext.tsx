@@ -59,7 +59,7 @@ export const RBACProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const hasPermission = useCallback((module: AppModule, action: PermissionAction): boolean => {
     if (!isEnabled) return false;
-    if (role === ROLES.SUPER_ADMIN) return true;
+    if (role === ROLES.SUPER_ADMIN || role === ROLES.ADMIN) return true;
     if (!permissionMatrix) return true; // Safe fallback during initial hydration
     return Boolean(permissionMatrix[role]?.[module]?.[action]);
   }, [role, isEnabled, permissionMatrix]);
