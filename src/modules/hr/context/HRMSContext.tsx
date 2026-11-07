@@ -392,16 +392,44 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((file: any) => {
-            const isEmp = file.uploaderRole === 'employee' || file.submissionSource === 'employee';
+          const normalized = parsed.map((file: any) => {
+            const isDhesanDemo =
+              file.id === 'doc-1001' ||
+              file.fileName === 'Dhesan_Govt_ID_Proof.pdf' ||
+              file.id === 'doc-1002' ||
+              file.fileName === 'Dhesan_Offer_Letter_Signed.pdf';
+
+            const isEmp =
+              isDhesanDemo ||
+              file.uploaderRole === 'employee' ||
+              file.submissionSource === 'employee';
+
+            const isHr =
+              !isDhesanDemo &&
+              (file.uploaderRole === 'hr_admin' || file.submissionSource === 'hr');
+
+            const effectiveRole = isEmp ? 'employee' : 'hr_admin';
+            const effectiveSource = isEmp ? 'employee' : isHr ? 'hr' : 'employee';
+            const effectiveUploader = isEmp
+              ? file.uploadedBy && file.uploadedBy !== 'HR Administrator'
+                ? file.uploadedBy
+                : file.employeeName || 'Dhesan M'
+              : isHr
+                ? file.uploadedBy || 'HR Administrator'
+                : file.uploadedBy || 'Unknown Uploader';
+
             return {
               ...file,
-              uploaderRole: file.uploaderRole || (isEmp ? 'employee' : 'hr_admin'),
-              submissionSource: file.submissionSource || (isEmp ? 'employee' : 'hr'),
-              verificationStatus: file.verificationStatus || (file.uploadStatus === 'Verified' ? 'verified' : isEmp ? 'pending_review' : 'verified'),
-              uploadedBy: file.uploadedBy || (isEmp ? file.employeeName : 'HR Administrator'),
+              uploaderRole: effectiveRole,
+              submissionSource: effectiveSource,
+              verificationStatus:
+                file.verificationStatus ||
+                (file.uploadStatus === 'Verified' ? 'verified' : isEmp ? 'pending_review' : 'verified'),
+              uploadedBy: effectiveUploader,
             };
           });
+          safeSetItem(LOCAL_STORAGE_KEYS.FILES, JSON.stringify(normalized));
+          return normalized;
         }
       } catch {}
     }
@@ -721,16 +749,37 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       currentUser?.role === 'employee' ||
       activeHRAccountType === 'employee';
 
-    const effectiveRole: FileUploaderRole = isEmployeeUploader ? 'employee' : 'hr_admin';
-    const effectiveSource: FileSubmissionSource = isEmployeeUploader ? 'employee' : 'hr';
-    const effectiveStatus: 'Uploaded' | 'Verified' | 'Pending' = isEmployeeUploader ? 'Pending' : 'Uploaded';
+    const isHrUploader =
+      uploaderRole === 'hr_admin' ||
+      submissionSource === 'hr' ||
+      currentUser?.role === 'admin' ||
+      canManageEmployees;
+
+    const effectiveRole: FileUploaderRole = isEmployeeUploader
+      ? 'employee'
+      : isHrUploader
+        ? 'hr_admin'
+        : 'employee';
+
+    const effectiveSource: FileSubmissionSource = isEmployeeUploader
+      ? 'employee'
+      : isHrUploader
+        ? 'hr'
+        : 'employee';
+
+    const effectiveStatus: 'Uploaded' | 'Verified' | 'Pending' =
+      effectiveSource === 'employee' ? 'Pending' : 'Uploaded';
+
     const effectiveVerification: FileVerificationStatus =
-      verificationStatus || (isEmployeeUploader ? 'pending_review' : 'verified');
+      verificationStatus || (effectiveSource === 'employee' ? 'pending_review' : 'verified');
+
     const effectiveUploadedBy =
       uploadedBy ||
-      (isEmployeeUploader
-        ? currentUser?.name || empName
-        : currentUser?.name || 'HR Administrator');
+      (effectiveSource === 'employee'
+        ? currentUser?.name || empName || 'Employee'
+        : isHrUploader
+          ? currentUser?.name || 'HR Administrator'
+          : 'Unknown Uploader');
 
     const newFile: EmployeeFile = {
       id: `doc-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,

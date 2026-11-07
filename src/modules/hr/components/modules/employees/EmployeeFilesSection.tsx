@@ -115,9 +115,9 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
       (d) => d.submissionSource === 'employee' || d.uploaderRole === 'employee'
     ).length;
     const hrUploaded = docs.filter(
-      (d) => d.submissionSource === 'hr' || d.uploaderRole === 'hr_admin' || (!d.submissionSource && !d.uploaderRole)
+      (d) => d.submissionSource === 'hr' || (d.uploaderRole === 'hr_admin' && d.submissionSource !== 'employee')
     ).length;
-    const total = docs.length;
+    const total = employeeSubmitted + hrUploaded;
     return { employeeSubmitted, hrUploaded, total, docs };
   };
 
@@ -753,10 +753,15 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
                                 <UserCheck className="w-2.5 h-2.5 text-blue-400" />
                                 <span>Submitted by {file.uploadedBy || activeEmployee.fullName}</span>
                               </span>
-                            ) : (
+                            ) : file.submissionSource === 'hr' || file.uploaderRole === 'hr_admin' ? (
                               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-500/10 text-purple-300 border border-purple-500/20">
                                 <ShieldCheck className="w-2.5 h-2.5 text-purple-400" />
                                 <span>Uploaded by {file.uploadedBy || 'HR Administrator'}</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-500/10 text-slate-300 border border-slate-500/20">
+                                <ShieldCheck className="w-2.5 h-2.5 text-slate-400" />
+                                <span>Uploaded by {file.uploadedBy || 'Unknown Uploader'}</span>
                               </span>
                             )}
                           </div>

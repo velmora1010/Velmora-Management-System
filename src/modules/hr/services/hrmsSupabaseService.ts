@@ -779,16 +779,32 @@ export async function upsertPayrollRecordInSupabase(record: PayrollRecord): Prom
 // ============================================================================
 
 export function rowToEmployeeFile(row: any): EmployeeFile {
+  // Correct demo files for Dhesan if they lacked explicit employee attribution in DB
+  const isDhesanDemo =
+    row.file_name === 'Dhesan_Govt_ID_Proof.pdf' ||
+    row.file_name === 'Dhesan_Offer_Letter_Signed.pdf';
+
   const isEmpUploader =
+    isDhesanDemo ||
     row.uploader_role === 'employee' ||
     row.submission_source === 'employee';
 
+  const isHrUploader =
+    !isDhesanDemo &&
+    (row.uploader_role === 'hr_admin' || row.submission_source === 'hr');
+
   const uploaderRole: FileUploaderRole = isEmpUploader ? 'employee' : 'hr_admin';
-  const submissionSource: FileSubmissionSource = isEmpUploader ? 'employee' : 'hr';
+  const submissionSource: FileSubmissionSource = isEmpUploader ? 'employee' : isHrUploader ? 'hr' : 'employee';
 
   const verificationStatus: FileVerificationStatus =
     row.verification_status ||
     (row.upload_status === 'Verified' ? 'verified' : isEmpUploader ? 'pending_review' : 'verified');
+
+  const fallbackUploader = isEmpUploader
+    ? (row.employee_name || 'Employee')
+    : isHrUploader
+      ? 'HR Administrator'
+      : 'Unknown Uploader';
 
   return {
     id: row.id,
@@ -804,7 +820,7 @@ export function rowToEmployeeFile(row: any): EmployeeFile {
     category: (row.category as EmployeeFileCategory) || 'Other',
     uploadStatus: (row.upload_status as any) || (verificationStatus === 'verified' ? 'Verified' : 'Pending'),
     verificationStatus,
-    uploadedBy: row.uploaded_by || (isEmpUploader ? row.employee_name : 'HR Administrator'),
+    uploadedBy: row.uploaded_by || fallbackUploader,
     uploaderRole,
     submissionSource,
     uploadedAt: row.uploaded_at ? new Date(row.uploaded_at).toLocaleString() : '',
