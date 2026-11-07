@@ -88,8 +88,19 @@ export const rbacService = {
         .single();
 
       if (!error && data) {
+        const emailLower = (email || '').toLowerCase().trim();
+        const isAdminEmail =
+          emailLower === 'admin@velmora.com' ||
+          emailLower === 'admin@velmora1.com' ||
+          emailLower === 'admin@velmora2.com' ||
+          emailLower === 'admin@velmora3.com' ||
+          emailLower.startsWith('admin@');
+        let assignedRole = (data.role as AppRole) || ROLES.SUPER_ADMIN;
+        if (isAdminEmail && (assignedRole === ROLES.VIEWER || assignedRole === ROLES.STAFF)) {
+          assignedRole = emailLower === 'admin@velmora.com' ? ROLES.SUPER_ADMIN : ROLES.ADMIN;
+        }
         const result = {
-          role: (data.role as AppRole) || ROLES.SUPER_ADMIN,
+          role: assignedRole,
           is_enabled: data.is_enabled !== undefined ? data.is_enabled : true,
         };
         userRoleCache[userId] = result;

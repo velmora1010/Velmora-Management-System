@@ -74,7 +74,7 @@ export const RnDExportButton: React.FC<RnDExportButtonProps> = ({
         disabled={isDisabled}
         title={getButtonTitle()}
         className={`rounded-lg font-medium flex items-center gap-2 transition-all shadow-sm ${
-          isSmall ? 'px-3 py-1.5 text-xs' : 'px-4 py-2 text-sm'
+          isSmall ? 'px-3.5 py-2 text-xs font-semibold' : 'px-4 py-2 text-sm'
         } ${
           isDisabled
             ? 'bg-[#111827] text-[#64748B] border border-[#293548] cursor-not-allowed opacity-60'

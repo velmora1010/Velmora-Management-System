@@ -11,15 +11,22 @@ export type AppRole = typeof ROLES[keyof typeof ROLES];
 
 export const MODULES = {
   DASHBOARD: 'dashboard',
+  SALES: 'sales',
+  LOGISTICS: 'logistics',
+  INVENTORY: 'inventory',
+  DOCUMENTS: 'documents',
   MARKETING: 'marketing',
   TASKS: 'tasks',
+  RESEARCH: 'research',
+  HR: 'hr',
+  BRAND: 'brand',
+  OPERATIONS: 'operations',
   FINANCE: 'finance',
+  CUSTOMER_TICKETS: 'customer-tickets',
   VENDORS: 'vendors',
   PURCHASE_ORDERS: 'purchase_orders',
-  INVENTORY: 'inventory',
   PRODUCTION: 'production',
   QUALITY_CONTROL: 'quality_control',
-  HR: 'hr',
   SETTINGS: 'settings',
 } as const;
 

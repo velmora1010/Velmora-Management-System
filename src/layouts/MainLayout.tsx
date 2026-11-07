@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Home, CheckSquare, Archive, Settings, Menu, LogOut, Activity, UserCheck } from 'lucide-react';
 import { ErrorBoundary } from '../components/system/ErrorBoundary';
@@ -8,6 +8,7 @@ import { useAuth } from '../hooks/useAuth';
 import { getNavigationState, saveNavigationState, saveDepartmentNavigation, clearNavigationState } from '../utils/navigationPersistence';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
+import { GlobalRnDMiniPlayer } from '../modules/marketing/rnd/context/RnDContext';
 
 const SWITCHABLE_ACCOUNTS = [
   'admin@velmora.com',
@@ -411,9 +412,18 @@ export const MainLayout = () => {
 
         <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 relative min-w-0">
           <ErrorBoundary>
-            <Outlet />
+            <Suspense
+              fallback={
+                <div className="flex h-[calc(100vh-120px)] w-full items-center justify-center">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+                </div>
+              }
+            >
+              <Outlet />
+            </Suspense>
           </ErrorBoundary>
         </main>
+        <GlobalRnDMiniPlayer />
       </div>
     </div>
   );

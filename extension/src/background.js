@@ -1,6 +1,16 @@
 // background.js
 
 const EXTENSION_VERSION = "1.0.0";
+const ENABLE_OCCLUSION_AUTO_PAUSE = true;
+const OCCLUSION_STALL_ROUNDS_HIDDEN = 4;
+const OCCLUSION_STALL_ROUNDS_FALLBACK = 6;
+const OCCLUSION_RESUME_CONFIRM_POLLS = 2;
+
+function isOcclusionAutoPauseEnabled(payload = null) {
+  if (!ENABLE_OCCLUSION_AUTO_PAUSE) return false;
+  if (payload && payload.enableOcclusionAutoPause === false) return false;
+  return true;
+}
 let lastUsedIgTabId = null;
 let researchQueue = Promise.resolve();
 
@@ -111,6 +121,34 @@ async function getValidCompanionWindow(winId) {
   });
 }
 
+async function checkTabVisibility(tabId) {
+  if (!tabId) return { visible: true, visibilityState: 'visible' };
+  try {
+    const res = await new Promise((resolve) => {
+      chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => ({
+          visibilityState: document.visibilityState,
+          hidden: document.hidden
+        })
+      }, (results) => {
+        if (chrome.runtime.lastError || !results || !results[0]) {
+          resolve(null);
+        } else {
+          resolve(results[0].result);
+        }
+      });
+    });
+    if (!res) return { visible: true, visibilityState: 'unknown' };
+    return {
+      visible: res.visibilityState === 'visible' && !res.hidden,
+      visibilityState: res.visibilityState
+    };
+  } catch (e) {
+    return { visible: true, visibilityState: 'unknown' };
+  }
+}
+
 async function checkCompanionWindowState() {
   if (!companionWindowId) return { valid: false, state: 'unknown', focused: false };
   return new Promise((resolve) => {
@@ -118,10 +156,28 @@ async function checkCompanionWindowState() {
       if (chrome.runtime.lastError || !win) {
         resolve({ valid: false, state: 'closed', focused: false });
       } else {
-        resolve({ valid: true, state: win.state, focused: win.focused });
+        resolve({
+          valid: true,
+          state: win.state,
+          focused: win.focused,
+          left: win.left,
+          top: win.top,
+          width: win.width,
+          height: win.height
+        });
       }
     });
   });
+}
+
+function isCompanionWindowMinimized(winStatus) {
+  if (!winStatus || !winStatus.valid || winStatus.state === 'closed') return false;
+  if (winStatus.state === 'minimized') return true;
+  // Windows OS Win32 minimization coordinates fallback (e.g. left: -32000, top: -32000)
+  if (typeof winStatus.left === 'number' && winStatus.left <= -10000 && typeof winStatus.top === 'number' && winStatus.top <= -10000) {
+    return true;
+  }
+  return false;
 }
 
 async function closeCompanionWindow(reason = 'batch_complete') {
@@ -174,34 +230,84 @@ function scheduleCompanionIdleClose(delayMs = 45000) {
   }, delayMs);
 }
 
-async function handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, stage) {
+function recordPauseInTracker(timingTracker, totalExcludedMs, pauseMeta) {
+  if (!timingTracker || typeof timingTracker !== 'object') return;
+  if (typeof timingTracker.onPauseElapsed === 'function') {
+    timingTracker.onPauseElapsed(totalExcludedMs, pauseMeta);
+    return;
+  }
+  const isOcclusion = pauseMeta && pauseMeta.reason === 'occlusion_suspected';
+  const didResume = !pauseMeta || !pauseMeta.timedOut;
+  timingTracker.pausedMs = (timingTracker.pausedMs || 0) + totalExcludedMs;
+  if (isOcclusion) {
+    timingTracker.occlusionPausedMs = (timingTracker.occlusionPausedMs || 0) + (pauseMeta.durationMs || 0);
+    timingTracker.prePauseStallExcludedMs = (timingTracker.prePauseStallExcludedMs || 0) + (pauseMeta.prePauseStallMs || 0);
+    timingTracker.occlusionPauseCount = (timingTracker.occlusionPauseCount || 0) + 1;
+    timingTracker.lastPauseReason = 'occlusion_suspected';
+  } else {
+    timingTracker.minimizedPausedMs = (timingTracker.minimizedPausedMs || 0) + totalExcludedMs;
+    timingTracker.minimizedPauseCount = (timingTracker.minimizedPauseCount || 0) + 1;
+    timingTracker.lastPauseReason = 'companion_window_minimized';
+  }
+  if (didResume) {
+    timingTracker.resumeCount = (timingTracker.resumeCount || 0) + 1;
+  }
+  if (Array.isArray(timingTracker.pauseEvents) && pauseMeta) {
+    timingTracker.pauseEvents.push(pauseMeta);
+  }
+}
+
+async function handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, stage, igTabId = null, timingTracker = null) {
   // If companion window was closed during this batch, persistently throw COMPANION_WINDOW_CLOSED
   if (companionWindowClosedByUser) {
     throw new Error('COMPANION_WINDOW_CLOSED: Instagram research companion window was closed. Please keep the companion window open during batch research.');
   }
-  if (!companionWindowId) return;
+  if (!companionWindowId) return false;
   const winStatus = await checkCompanionWindowState();
   if (!winStatus.valid || winStatus.state === 'closed') {
     companionWindowClosedByUser = true;
     throw new Error('COMPANION_WINDOW_CLOSED: Instagram research companion window was closed. Please keep the companion window open during batch research.');
   }
 
-  if (winStatus.state === 'minimized') {
+  const effectiveTabId = igTabId || companionTabId;
+
+  // Only genuinely minimized Companion Chrome window triggers an automatic pause.
+  // Window blur, loss of focus, or being covered/occluded behind Velmora or another app must NOT pause!
+  const isMinimized = isCompanionWindowMinimized(winStatus);
+
+  if (isMinimized) {
     const pauseStartTs = Date.now();
+    let tabVis = { visible: false, visibilityState: 'minimized' };
+    if (effectiveTabId) {
+      try {
+        tabVis = await checkTabVisibility(effectiveTabId);
+      } catch (e) {}
+    }
+
     logBoundedDiag('pause_start', normalizedUser, {
       stage,
       winId: companionWindowId,
-      winState: 'minimized',
+      winState: winStatus.state,
+      docVisibility: tabVis.visibilityState,
       timestamp: pauseStartTs
     });
     if (sender) {
       sendEventToSender(sender, 'RESEARCH_PAUSED', {
         ...payload,
-        reason: 'companion_window_minimized'
+        reason: 'companion_window_inactive',
+        statusText: 'Paused — Instagram window inactive',
+        checkpoint: stage,
+        isPaused: true
       });
     }
 
-    const MAX_PAUSE_MS = 35000;
+    // Configurable inactivity timeout: default 15 minutes (900,000ms), customizable via payload
+    const MAX_PAUSE_MS = typeof payload?.inactivityTimeoutMs === 'number' && payload.inactivityTimeoutMs > 0
+      ? payload.inactivityTimeoutMs
+      : 15 * 60 * 1000;
+
+    let lastHeartbeatTs = Date.now();
+
     while (true) {
       await new Promise(r => setTimeout(r, 600));
       if (companionWindowClosedByUser) {
@@ -212,28 +318,333 @@ async function handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payloa
         companionWindowClosedByUser = true;
         throw new Error('COMPANION_WINDOW_CLOSED: Instagram research companion window was closed while paused.');
       }
-      if (currentWin.state !== 'minimized') {
+
+      // Resume as soon as the Companion window is no longer minimized.
+      // Do not block resume on tab visibility, so if restored behind another window it resumes immediately.
+      const stillMinimized = isCompanionWindowMinimized(currentWin);
+
+      if (!stillMinimized) {
+        let currentTabVis = { visible: true, visibilityState: 'unknown' };
+        if (effectiveTabId) {
+          try {
+            currentTabVis = await checkTabVisibility(effectiveTabId);
+          } catch (e) {}
+        }
+
         const pausedDuration = Date.now() - pauseStartTs;
         logBoundedDiag('pause_resumed', normalizedUser, {
           stage,
           winId: companionWindowId,
           winState: currentWin.state,
+          docVisibility: currentTabVis.visibilityState,
           pausedDurationMs: pausedDuration
         });
         if (sender) {
           sendEventToSender(sender, 'RESEARCH_RESUMED', {
             ...payload,
-            pausedDurationMs: pausedDuration
+            pausedDurationMs: pausedDuration,
+            checkpoint: stage,
+            isPaused: false
           });
         }
-        // Give browser 1000ms after restore for rendering pipeline to stabilize
-        await new Promise(r => setTimeout(r, 1000));
-        break;
+        // Stabilization wait: 1500ms for Blink compositor and React virtual DOM
+        await new Promise(r => setTimeout(r, 1500));
+
+        // Active wake-up: trigger IntersectionObserver and virtual scroller
+        if (effectiveTabId) {
+          try {
+            await injectScript(effectiveTabId, () => {
+              try {
+                window.scrollBy(0, -100);
+                window.scrollBy(0, 150);
+                window.dispatchEvent(new Event('scroll', { bubbles: true }));
+                window.dispatchEvent(new Event('resize', { bubbles: true }));
+                window.dispatchEvent(new WheelEvent('wheel', { deltaY: 200, bubbles: true }));
+              } catch (e) {}
+            });
+            await new Promise(r => setTimeout(r, 500));
+          } catch (e) {}
+        }
+        const resumeEndTs = Date.now();
+        const totalPausedAndWakeupMs = resumeEndTs - pauseStartTs;
+        const pauseMeta = {
+          reason: 'companion_window_minimized',
+          stage,
+          startedAt: pauseStartTs,
+          endedAt: resumeEndTs,
+          durationMs: totalPausedAndWakeupMs,
+          prePauseStallMs: 0,
+          winStateAtStart: winStatus.state || 'minimized',
+          docVisAtStart: tabVis.visibilityState || 'minimized',
+          winStateAtResume: currentWin.state || 'normal',
+          docVisAtResume: currentTabVis.visibilityState || 'unknown'
+        };
+        recordPauseInTracker(timingTracker, totalPausedAndWakeupMs, pauseMeta);
+        return true;
       }
+
+      // Heartbeat event every 5 seconds so client UI and Mini Player stay informed of paused duration
+      if (Date.now() - lastHeartbeatTs >= 5000) {
+        lastHeartbeatTs = Date.now();
+        if (sender) {
+          sendEventToSender(sender, 'RESEARCH_PAUSED', {
+            ...payload,
+            reason: 'companion_window_inactive',
+            statusText: 'Paused — Instagram window inactive',
+            checkpoint: stage,
+            isPaused: true,
+            pausedDurationMs: Date.now() - pauseStartTs
+          });
+        }
+      }
+
       if (Date.now() - pauseStartTs > MAX_PAUSE_MS) {
-        logBoundedDiag('pause_timeout_exceeded', normalizedUser, { winId: companionWindowId, pauseDurationMs: Date.now() - pauseStartTs });
-        throw new Error('COMPANION_WINDOW_MINIMIZED_TIMEOUT: Instagram research companion window remained minimized for over 35 seconds. Please keep the companion window open during research.');
+        const timeoutEndTs = Date.now();
+        const timedOutPauseMs = Math.max(0, timeoutEndTs - pauseStartTs);
+        recordPauseInTracker(timingTracker, timedOutPauseMs, {
+          reason: 'companion_window_minimized',
+          stage,
+          startedAt: pauseStartTs,
+          endedAt: timeoutEndTs,
+          durationMs: timedOutPauseMs,
+          prePauseStallMs: 0,
+          totalExcludedMs: timedOutPauseMs,
+          winStateAtStart: winStatus.state || 'minimized',
+          docVisAtStart: tabVis.visibilityState || 'minimized',
+          winStateAtResume: currentWin.state || 'minimized',
+          docVisAtResume: 'hidden',
+          timedOut: true
+        });
+        logBoundedDiag('pause_timeout_exceeded', normalizedUser, { winId: companionWindowId, pauseDurationMs: timedOutPauseMs });
+        throw new Error(`COMPANION_WINDOW_INACTIVITY_TIMEOUT: Instagram research companion window remained inactive for over ${Math.round(MAX_PAUSE_MS / 60000)} minutes.`);
       }
+    }
+  }
+  return false;
+}
+
+async function handleCompanionOcclusionPauseIfNeeded(
+  normalizedUser,
+  sender,
+  payload,
+  stage,
+  igTabId = null,
+  timingTracker = null,
+  prePauseStallMs = 0
+) {
+  if (!isOcclusionAutoPauseEnabled(payload)) return false;
+  if (companionWindowClosedByUser) {
+    throw new Error('COMPANION_WINDOW_CLOSED: Instagram research companion window was closed. Please keep the companion window open during batch research.');
+  }
+  if (!companionWindowId) return false;
+
+  const winStatus = await checkCompanionWindowState();
+  if (!winStatus.valid || winStatus.state === 'closed') {
+    companionWindowClosedByUser = true;
+    throw new Error('COMPANION_WINDOW_CLOSED: Instagram research companion window was closed. Please keep the companion window open during batch research.');
+  }
+
+  // If the window actually became minimized, delegate to the minimized-window pause handler
+  if (isCompanionWindowMinimized(winStatus)) {
+    return await handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, stage, igTabId, timingTracker);
+  }
+
+  const effectiveTabId = igTabId || companionTabId;
+  let initialTabVis = { visible: false, visibilityState: 'hidden' };
+  if (effectiveTabId) {
+    try {
+      initialTabVis = await checkTabVisibility(effectiveTabId);
+    } catch (e) {}
+  }
+
+  // Verify composite occlusion condition before entering pause:
+  // Window must be normal (unminimized), unfocused, and not actively visible+focused
+  if (winStatus.focused && initialTabVis.visibilityState === 'visible') {
+    return false;
+  }
+
+  const pauseStartTs = Date.now();
+  const clampedPrePauseStallMs = Math.max(0, Number(prePauseStallMs) || 0);
+  const occlusionStatusText =
+    'Paused — Instagram Companion window appears to be covered. Bring it to the front to continue.';
+
+  logBoundedDiag('occlusion_pause_start', normalizedUser, {
+    stage,
+    winId: companionWindowId,
+    winState: winStatus.state,
+    winFocused: !!winStatus.focused,
+    docVisibility: initialTabVis.visibilityState,
+    prePauseStallMs: clampedPrePauseStallMs,
+    timestamp: pauseStartTs
+  });
+
+  if (sender) {
+    sendEventToSender(sender, 'RESEARCH_PAUSED', {
+      ...payload,
+      reason: 'occlusion_suspected',
+      statusText: occlusionStatusText,
+      checkpoint: stage,
+      isPaused: true
+    });
+  }
+
+  const MAX_PAUSE_MS =
+    typeof payload?.inactivityTimeoutMs === 'number' && payload.inactivityTimeoutMs > 0
+      ? payload.inactivityTimeoutMs
+      : 15 * 60 * 1000;
+
+  let lastHeartbeatTs = Date.now();
+  let consecutiveReadyPolls = 0;
+
+  while (true) {
+    const pollDelayMs = consecutiveReadyPolls > 0 ? 300 : 600;
+    await new Promise(r => setTimeout(r, pollDelayMs));
+
+    if (companionWindowClosedByUser) {
+      throw new Error('COMPANION_WINDOW_CLOSED: Instagram research companion window was closed while paused.');
+    }
+    const currentWin = await checkCompanionWindowState();
+    if (!currentWin.valid || currentWin.state === 'closed') {
+      companionWindowClosedByUser = true;
+      throw new Error('COMPANION_WINDOW_CLOSED: Instagram research companion window was closed while paused.');
+    }
+
+    const stillMinimized = isCompanionWindowMinimized(currentWin);
+    let currentTabVis = { visible: false, visibilityState: 'unknown' };
+    if (!stillMinimized && effectiveTabId) {
+      try {
+        currentTabVis = await checkTabVisibility(effectiveTabId);
+      } catch (e) {}
+    }
+
+    // Strengthened resume confirmation:
+    // Require Companion window to be unminimized, focused, AND docVisibility === 'visible'
+    // (if visibilityState is available) for OCCLUSION_RESUME_CONFIRM_POLLS (2) consecutive checks.
+    const isDocVisible =
+      currentTabVis.visibilityState === 'visible' ||
+      (currentTabVis.visibilityState === 'unknown' && currentWin.focused);
+    const isUncoveredAndFocused = !stillMinimized && !!currentWin.focused && isDocVisible;
+
+    if (isUncoveredAndFocused) {
+      consecutiveReadyPolls++;
+    } else {
+      consecutiveReadyPolls = 0;
+    }
+
+    if (consecutiveReadyPolls >= OCCLUSION_RESUME_CONFIRM_POLLS) {
+      const pausedDuration = Date.now() - pauseStartTs;
+      logBoundedDiag('occlusion_pause_resumed', normalizedUser, {
+        stage,
+        winId: companionWindowId,
+        winState: currentWin.state,
+        winFocused: !!currentWin.focused,
+        docVisibility: currentTabVis.visibilityState,
+        pausedDurationMs: pausedDuration,
+        prePauseStallMs: clampedPrePauseStallMs,
+        confirmPolls: consecutiveReadyPolls
+      });
+
+      if (sender) {
+        sendEventToSender(sender, 'RESEARCH_RESUMED', {
+          ...payload,
+          reason: 'occlusion_suspected',
+          pausedDurationMs: pausedDuration,
+          checkpoint: stage,
+          isPaused: false
+        });
+      }
+
+      // Stabilization wait: 1500ms for Blink compositor and React virtual DOM
+      await new Promise(r => setTimeout(r, 1500));
+
+      // Re-check Instagram Reels page state & wake up virtualizer before continuing
+      if (effectiveTabId) {
+        try {
+          const targetReelsUrl = `https://www.instagram.com/${normalizedUser}/reels/`;
+          const pageCheck = await injectScript(effectiveTabId, (u) => {
+            const href = (window.location.href || '').toLowerCase();
+            const onReels = href.includes(`/${u.toLowerCase()}/reels`);
+            try {
+              window.scrollBy(0, -100);
+              window.scrollBy(0, 150);
+              window.dispatchEvent(new Event('scroll', { bubbles: true }));
+              window.dispatchEvent(new Event('resize', { bubbles: true }));
+              window.dispatchEvent(new WheelEvent('wheel', { deltaY: 200, bubbles: true }));
+            } catch (e) {}
+            return { onReels, href };
+          }, [normalizedUser]);
+
+          if (pageCheck && pageCheck.onReels === false && normalizedUser) {
+            await updateInstagramTabUrl(effectiveTabId, targetReelsUrl, normalizedUser, 'occlusion_resume:restore_reels_url');
+            await new Promise(r => setTimeout(r, 1000));
+          } else {
+            await new Promise(r => setTimeout(r, 500));
+          }
+        } catch (e) {}
+      }
+
+      const resumeEndTs = Date.now();
+      const pauseAndWakeupMs = Math.max(0, resumeEndTs - pauseStartTs);
+      // Total excluded time is the single contiguous slice [stallStreakStartTs, resumeEndTs]:
+      // clampedPrePauseStallMs ([t0, t1]) + pauseAndWakeupMs ([t1, t2]) with zero overlap.
+      const totalExcludedMs = clampedPrePauseStallMs + pauseAndWakeupMs;
+      const pauseMeta = {
+        reason: 'occlusion_suspected',
+        stage,
+        startedAt: pauseStartTs,
+        endedAt: resumeEndTs,
+        durationMs: pauseAndWakeupMs,
+        prePauseStallMs: clampedPrePauseStallMs,
+        totalExcludedMs,
+        winStateAtStart: winStatus.state || 'normal',
+        docVisAtStart: initialTabVis.visibilityState || 'hidden',
+        winStateAtResume: currentWin.state || 'normal',
+        docVisAtResume: currentTabVis.visibilityState || 'visible'
+      };
+
+      recordPauseInTracker(timingTracker, totalExcludedMs, pauseMeta);
+      return true;
+    }
+
+    // Heartbeat event every 5 seconds so client UI and Mini Player stay informed of paused duration
+    if (Date.now() - lastHeartbeatTs >= 5000) {
+      lastHeartbeatTs = Date.now();
+      if (sender) {
+        sendEventToSender(sender, 'RESEARCH_PAUSED', {
+          ...payload,
+          reason: 'occlusion_suspected',
+          statusText: occlusionStatusText,
+          checkpoint: stage,
+          isPaused: true,
+          pausedDurationMs: Date.now() - pauseStartTs
+        });
+      }
+    }
+
+    if (Date.now() - pauseStartTs > MAX_PAUSE_MS) {
+      const timeoutEndTs = Date.now();
+      const timedOutPauseMs = Math.max(0, timeoutEndTs - pauseStartTs);
+      const totalTimedOutExcludedMs = clampedPrePauseStallMs + timedOutPauseMs;
+      recordPauseInTracker(timingTracker, totalTimedOutExcludedMs, {
+        reason: 'occlusion_suspected',
+        stage,
+        startedAt: pauseStartTs,
+        endedAt: timeoutEndTs,
+        durationMs: timedOutPauseMs,
+        prePauseStallMs: clampedPrePauseStallMs,
+        totalExcludedMs: totalTimedOutExcludedMs,
+        winStateAtStart: winStatus.state || 'normal',
+        docVisAtStart: initialTabVis.visibilityState || 'hidden',
+        winStateAtResume: currentWin.state || 'normal',
+        docVisAtResume: currentTabVis.visibilityState || 'hidden',
+        timedOut: true
+      });
+      logBoundedDiag('occlusion_pause_timeout_exceeded', normalizedUser, {
+        winId: companionWindowId,
+        pauseDurationMs: timedOutPauseMs,
+        prePauseStallMs: clampedPrePauseStallMs
+      });
+      throw new Error(`COMPANION_WINDOW_INACTIVITY_TIMEOUT: Instagram research companion window remained covered/inactive for over ${Math.round(MAX_PAUSE_MS / 60000)} minutes.`);
     }
   }
 }
@@ -671,7 +1082,19 @@ async function injectScript(tabId, func, args = [], meta = {}) {
   });
 }
 
-async function verifyProfile(igTabId, targetUsername, timeout = 15000, sender = null, payload = null) {
+async function sleepBounded(desiredMs, timingTracker = null) {
+  const rem =
+    timingTracker && typeof timingTracker.getRemainingMs === 'function'
+      ? timingTracker.getRemainingMs()
+      : desiredMs;
+  const waitMs = Math.max(0, Math.min(desiredMs, rem));
+  if (waitMs > 0) {
+    await new Promise(r => setTimeout(r, waitMs));
+  }
+  return waitMs;
+}
+
+async function verifyProfile(igTabId, targetUsername, timeout = 15000, sender = null, payload = null, timingTracker = null) {
   let elapsed = 0;
   const interval = 1000;
   let consecutiveNotFound = 0;
@@ -681,7 +1104,10 @@ async function verifyProfile(igTabId, targetUsername, timeout = 15000, sender = 
 
   while (elapsed < timeout) {
     // Check companion window state before verifying profile: pause countdown if minimized
-    await handleCompanionWindowPauseIfNeeded(targetUsername, sender, payload, 'verifyProfile');
+    await handleCompanionWindowPauseIfNeeded(targetUsername, sender, payload, 'verifyProfile', igTabId, timingTracker);
+    if (timingTracker && typeof timingTracker.getRemainingMs === 'function' && timingTracker.getRemainingMs() <= 0) {
+      break;
+    }
 
     let res;
     try {
@@ -843,12 +1269,13 @@ async function verifyProfile(igTabId, targetUsername, timeout = 15000, sender = 
       consecutiveNotFound = 0;
     }
 
-    await new Promise(r => setTimeout(r, interval));
-    elapsed += interval;
+    const waited = await sleepBounded(interval, timingTracker);
+    if (waited <= 0) break;
+    elapsed += waited;
   }
 
   throw new Error(
-    `Instagram profile @${targetUsername} verification timed out after ${timeout}ms (Stage: ${lastDiag?.reason || 'loading'}, URL: ${lastDiag?.url || targetUrl}, readyState: ${lastDiag?.readyState || 'unknown'}).`
+    `Instagram profile @${targetUsername} verification timed out after ${elapsed}ms (Stage: ${lastDiag?.reason || 'loading'}, URL: ${lastDiag?.url || targetUrl}, readyState: ${lastDiag?.readyState || 'unknown'}).`
   );
 }
 
@@ -1171,27 +1598,157 @@ async function discoverReelLinks(igTabId, username = null) {
   }
 }
 
-async function scrollUntilEnoughReels(igTabId, sender, payload) {
-  const normalizedUser = normalizeUsername(payload?.username || '');
-  logTabOp('scrollUntilEnoughReels:start', normalizedUser, igTabId, `https://www.instagram.com/${normalizedUser}/reels/`);
-  sendEventToSender(sender, 'REELS_SCROLLING', payload);
+async function scrollUntilEnoughReels(igTabId, sender, payload, options = {}) {
+  const normalizedUser = normalizeUsername(payload?.username);
+  logTabOp('scrollUntilEnoughReels:start', normalizedUser, igTabId);
 
-  let uniqueReelCount = 0;
+  const scrollStartTs = Date.now();
+  const scrollPhaseTimeoutMs =
+    typeof options?.phaseTimeoutMs === 'number' && options.phaseTimeoutMs > 0
+      ? options.phaseTimeoutMs
+      : 60000; // 60s active (non-paused) ceiling per scroll phase
+  const profileTiming = options?.profileTiming || null;
+
+  let scrollPausedMs = 0;
+  let minimizedPausedMs = 0;
+  let occlusionPausedMs = 0;
+  let prePauseStallExcludedMs = 0;
+  let minimizedPauseCount = 0;
+  let occlusionPauseCount = 0;
+  let resumeCount = 0;
+  let lastPauseReason = null;
+  const pauseEvents = [];
+
+  const scrollTimingTracker = {
+    pausedMs: 0,
+    minimizedPausedMs: 0,
+    occlusionPausedMs: 0,
+    prePauseStallExcludedMs: 0,
+    minimizedPauseCount: 0,
+    occlusionPauseCount: 0,
+    resumeCount: 0,
+    lastPauseReason: null,
+    pauseEvents,
+    onPauseElapsed(ms, meta = null) {
+      const didResume = !meta || !meta.timedOut;
+      scrollPausedMs += ms;
+      if (meta && meta.reason === 'occlusion_suspected') {
+        occlusionPausedMs += meta.durationMs || 0;
+        prePauseStallExcludedMs += meta.prePauseStallMs || 0;
+        occlusionPauseCount++;
+        if (didResume) resumeCount++;
+        lastPauseReason = 'occlusion_suspected';
+      } else {
+        minimizedPausedMs += ms;
+        minimizedPauseCount++;
+        if (didResume) resumeCount++;
+        lastPauseReason = 'companion_window_minimized';
+      }
+      if (meta) {
+        pauseEvents.push(meta);
+      }
+      this.pausedMs = scrollPausedMs;
+      this.minimizedPausedMs = minimizedPausedMs;
+      this.occlusionPausedMs = occlusionPausedMs;
+      this.prePauseStallExcludedMs = prePauseStallExcludedMs;
+      this.minimizedPauseCount = minimizedPauseCount;
+      this.occlusionPauseCount = occlusionPauseCount;
+      this.resumeCount = resumeCount;
+      this.lastPauseReason = lastPauseReason;
+
+      if (profileTiming && typeof profileTiming === 'object') {
+        profileTiming.pausedMs = (profileTiming.pausedMs || 0) + ms;
+        profileTiming.minimizedPausedMs = (profileTiming.minimizedPausedMs || 0) + (meta?.reason === 'occlusion_suspected' ? 0 : ms);
+        profileTiming.occlusionPausedMs = (profileTiming.occlusionPausedMs || 0) + (meta?.reason === 'occlusion_suspected' ? (meta.durationMs || 0) : 0);
+        profileTiming.prePauseStallExcludedMs = (profileTiming.prePauseStallExcludedMs || 0) + (meta?.prePauseStallMs || 0);
+        profileTiming.minimizedPauseCount = (profileTiming.minimizedPauseCount || 0) + (meta?.reason === 'occlusion_suspected' ? 0 : 1);
+        profileTiming.occlusionPauseCount = (profileTiming.occlusionPauseCount || 0) + (meta?.reason === 'occlusion_suspected' ? 1 : 0);
+        if (didResume) {
+          profileTiming.resumeCount = (profileTiming.resumeCount || 0) + 1;
+        }
+        profileTiming.lastPauseReason = lastPauseReason;
+        if (Array.isArray(profileTiming.pauseEvents) && meta) {
+          profileTiming.pauseEvents.push(meta);
+        }
+      }
+    }
+  };
+
+  const getActiveScrollElapsedMs = () => Math.max(0, (Date.now() - scrollStartTs) - scrollPausedMs);
+  const getRemainingBudgetMs = () => {
+    const remPhase = scrollPhaseTimeoutMs - getActiveScrollElapsedMs();
+    const remProfile =
+      profileTiming && typeof profileTiming.getRemainingMs === 'function'
+        ? profileTiming.getRemainingMs()
+        : Infinity;
+    return Math.min(remPhase, remProfile);
+  };
+  const getBudgetExitReason = () => {
+    if (profileTiming && typeof profileTiming.getRemainingMs === 'function' && profileTiming.getRemainingMs() <= 0) {
+      return 'profile_deadline_reached';
+    }
+    return 'phase_timeout';
+  };
+
   let scrollRounds = 0;
   let stableRounds = 0;
   let zeroRounds = 0;
+  let loadingGraceRounds = 0;
+  let occludedStallRounds = 0;
+  let unfocusedStallRounds = 0;
+  let occludedStallStreakStartTs = null;
+  let recoveryBounceAttempted = false;
+  let uniqueReelCount = 0;
   let allDiscovered = [];
+  let lastLoadingSpinner = false;
+  let lastDocVisibility = 'unknown';
+  let exitReason = 'max_scrolls_reached';
 
   const targetValidCounts = 15;
-  const maxScrolls = 16;
-  const maxStableRounds = 5; // Bounded adaptive pagination: allow up to 5 stable rounds for background tab lazy loading
+  const maxScrolls = 20;
+  const maxStableRounds = 8; // Increased from 5 to 8 for background occluded hydration resilience
+  const maxZeroRounds = 8;   // Increased from 5 to 8 to avoid premature empty-page termination
+  const maxLoadingGraceRounds = 3; // Bounded grace when loading indicator is active; never keeps scraper running indefinitely
 
+  const resetStallCounters = () => {
+    stableRounds = 0;
+    zeroRounds = 0;
+    loadingGraceRounds = 0;
+    occludedStallRounds = 0;
+    unfocusedStallRounds = 0;
+    occludedStallStreakStartTs = null;
+  };
+
+  let thrownScrollError = null;
+  try {
   while (scrollRounds < maxScrolls) {
-    // Check companion window state before scroll round: pause if minimized
-    await handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, 'scrollUntilEnoughReels');
+    // 1. Check companion window state before scroll round: pause if genuinely minimized.
+    // Paused duration is tracked in scrollPausedMs and excluded from active phase/profile timeouts.
+    const wasPaused = await handleCompanionWindowPauseIfNeeded(
+      normalizedUser,
+      sender,
+      payload,
+      'scrollUntilEnoughReels',
+      igTabId,
+      scrollTimingTracker
+    );
+    if (wasPaused) {
+      // Explicitly reset stall counters when resuming from a pause so pause duration never causes premature plateau!
+      resetStallCounters();
+    }
+
+    const roundStartTs = Date.now();
+
+    // 2. Check active (non-paused) scroll-phase and overall profile budget
+    if (getRemainingBudgetMs() <= 0) {
+      exitReason = getBudgetExitReason();
+      console.warn(`[scrollUntilEnoughReels] Bounded timeout (${exitReason}, activeElapsed=${getActiveScrollElapsedMs()}ms, paused=${scrollPausedMs}ms) reached for @${normalizedUser}.`);
+      break;
+    }
 
     const currentBatch = await discoverReelLinks(igTabId, normalizedUser);
     const previousUniqueCount = uniqueReelCount;
+    let newUrlsFoundThisRound = 0;
 
     // Deduplicate and update view counts if previously missed
     const urlMap = new Map(allDiscovered.map(r => [r.url, r]));
@@ -1199,6 +1756,7 @@ async function scrollUntilEnoughReels(igTabId, sender, payload) {
       if (!urlMap.has(reel.url)) {
         allDiscovered.push(reel);
         urlMap.set(reel.url, reel);
+        newUrlsFoundThisRound++;
       } else {
         const existing = urlMap.get(reel.url);
         if (existing.viewCount === null && reel.viewCount !== null) {
@@ -1216,26 +1774,169 @@ async function scrollUntilEnoughReels(igTabId, sender, payload) {
     sendEventToSender(sender, 'REELS_DISCOVERED', {
       ...payload,
       discovered: uniqueReelCount,
-      validViews: validNonPinnedCount
+      validViews: validNonPinnedCount,
+      newDiscovered: newUrlsFoundThisRound,
+      scrollRound: scrollRounds,
+      stableRounds,
+      zeroRounds,
+      elapsedMs: getActiveScrollElapsedMs(),
+      pausedMs: scrollPausedMs
     });
 
     if (validNonPinnedCount >= targetValidCounts) {
+      exitReason = 'target_reels_reached';
       break;
     }
 
-    if (uniqueReelCount === previousUniqueCount && uniqueReelCount > 0) {
-      stableRounds++;
-      if (stableRounds >= maxStableRounds) {
-        console.log(`[scrollUntilEnoughReels] Plateau confirmed after ${stableRounds} stable rounds for @${normalizedUser} (${uniqueReelCount} discovered, ${validNonPinnedCount} valid non-pinned).`);
-        break; // Plateau reached after bounded adaptive attempts
+    // Active loading indicator acts as a supporting signal with strictly bounded grace rounds
+    const isLoadingActive = lastLoadingSpinner && loadingGraceRounds < maxLoadingGraceRounds;
+
+    if (uniqueReelCount > previousUniqueCount) {
+      // Observable DOM progress: reset all plateau and occlusion stall counters
+      resetStallCounters();
+      recoveryBounceAttempted = false;
+    } else {
+      // No new reels discovered this round
+      if (isLoadingActive) {
+        loadingGraceRounds++;
+        occludedStallRounds = 0;
+        unfocusedStallRounds = 0;
+        occludedStallStreakStartTs = null;
+        console.log(`[scrollUntilEnoughReels] Active loading indicator detected for @${normalizedUser} at ${uniqueReelCount} reels (grace round ${loadingGraceRounds}/${maxLoadingGraceRounds}). Deferring stall increment...`);
+      } else {
+        if (uniqueReelCount > 0) {
+          stableRounds++;
+        } else {
+          zeroRounds++;
+        }
+
+        // Evaluate multi-signal occlusion state for this stalled round
+        let roundWinStatus = { valid: true, state: 'normal', focused: true };
+        try {
+          roundWinStatus = await checkCompanionWindowState();
+        } catch (e) {}
+
+        if (lastDocVisibility === 'unknown' && igTabId) {
+          try {
+            const tabVis = await checkTabVisibility(igTabId);
+            if (tabVis && tabVis.visibilityState) {
+              lastDocVisibility = tabVis.visibilityState;
+            }
+          } catch (e) {}
+        }
+
+        const isUnminimizedAndUnfocused =
+          roundWinStatus.valid &&
+          !isCompanionWindowMinimized(roundWinStatus) &&
+          !roundWinStatus.focused;
+        const isConfirmedHiddenOcclusion =
+          isUnminimizedAndUnfocused && lastDocVisibility === 'hidden';
+
+        if (isConfirmedHiddenOcclusion) {
+          if (occludedStallRounds === 0 || occludedStallStreakStartTs === null) {
+            occludedStallStreakStartTs = roundStartTs;
+          }
+          occludedStallRounds++;
+          unfocusedStallRounds++;
+        } else if (isUnminimizedAndUnfocused && lastDocVisibility === 'unknown') {
+          if (unfocusedStallRounds === 0 || occludedStallStreakStartTs === null) {
+            occludedStallStreakStartTs = roundStartTs;
+          }
+          unfocusedStallRounds++;
+          occludedStallRounds = 0;
+        } else {
+          // Window is visible or focused: ordinary slow-loading/pagination delay must NOT be excluded from active time
+          occludedStallRounds = 0;
+          unfocusedStallRounds = 0;
+          occludedStallStreakStartTs = null;
+        }
+
+        const shouldTriggerOcclusionPause =
+          isOcclusionAutoPauseEnabled(payload) &&
+          (occludedStallRounds >= OCCLUSION_STALL_ROUNDS_HIDDEN ||
+           (unfocusedStallRounds >= OCCLUSION_STALL_ROUNDS_FALLBACK && recoveryBounceAttempted));
+
+        if (shouldTriggerOcclusionPause) {
+          const confirmedPrePauseStallMs =
+            occludedStallStreakStartTs !== null
+              ? Math.max(0, Date.now() - occludedStallStreakStartTs)
+              : 0;
+          const stalledRoundsToRefund = Math.max(occludedStallRounds, unfocusedStallRounds);
+          // Clear streak start before pausing so it can never be double-counted
+          occludedStallStreakStartTs = null;
+
+          const pausedForOcclusion = await handleCompanionOcclusionPauseIfNeeded(
+            normalizedUser,
+            sender,
+            payload,
+            'scrollUntilEnoughReels:occlusion_stall',
+            igTabId,
+            scrollTimingTracker,
+            confirmedPrePauseStallMs
+          );
+          if (pausedForOcclusion) {
+            resetStallCounters();
+            recoveryBounceAttempted = false;
+            scrollRounds = Math.max(0, scrollRounds - Math.max(0, stalledRoundsToRefund - 1));
+            continue;
+          }
+        }
       }
-    } else if (uniqueReelCount > previousUniqueCount) {
-      stableRounds = 0; // Reset plateau on observable DOM progress
-    } else if (uniqueReelCount === 0) {
-      zeroRounds++;
-      if (zeroRounds >= 5) {
-        console.log(`[scrollUntilEnoughReels] 0 reels remaining after ${zeroRounds} attempts for @${normalizedUser}.`);
-        break; // If 0 reels remain after 5 attempts, stop scrolling empty page
+
+      if (uniqueReelCount > 0 && stableRounds >= maxStableRounds) {
+        // If we have not reached targetValidCounts, attempt adaptive recovery bounce before declaring plateau
+        const remRecoveryBudget = getRemainingBudgetMs();
+        if (uniqueReelCount < targetValidCounts && remRecoveryBudget > 0) {
+          console.log(`[scrollUntilEnoughReels] Plateau encountered (${stableRounds} rounds) at ${uniqueReelCount} reels for @${normalizedUser}. Attempting adaptive recovery bounce...`);
+          recoveryBounceAttempted = true;
+          try {
+            await injectScript(igTabId, () => {
+              window.scrollBy(0, -400);
+              window.scrollBy(0, 600);
+              window.dispatchEvent(new Event('scroll', { bubbles: true }));
+              window.dispatchEvent(new Event('resize', { bubbles: true }));
+              window.dispatchEvent(new WheelEvent('wheel', { deltaY: 500, bubbles: true }));
+            });
+            const recoveryWaitMs = Math.max(0, Math.min(3500, getRemainingBudgetMs()));
+            if (recoveryWaitMs > 0) {
+              await new Promise(r => setTimeout(r, recoveryWaitMs));
+            }
+            const pausedInRecovery = await handleCompanionWindowPauseIfNeeded(
+              normalizedUser,
+              sender,
+              payload,
+              'scrollUntilEnoughReels:recovery_bounce',
+              igTabId,
+              scrollTimingTracker
+            );
+            if (pausedInRecovery) {
+              resetStallCounters();
+              continue;
+            }
+            const recoveryBatch = await discoverReelLinks(igTabId, normalizedUser);
+            if (recoveryBatch.length > currentBatch.length || recoveryBatch.some(r => !urlMap.has(r.url))) {
+              resetStallCounters();
+              continue;
+            }
+          } catch (e) {}
+        }
+        // If the window became occluded during earlier visible slow-loading and hasn't yet reached 4 occluded rounds,
+        // allow it to reach the occlusion pause threshold instead of exiting prematurely as Partial
+        if (isOcclusionAutoPauseEnabled(payload) && occludedStallRounds > 0 && occludedStallRounds < OCCLUSION_STALL_ROUNDS_HIDDEN && getRemainingBudgetMs() > 0) {
+          console.log(`[scrollUntilEnoughReels] Deferring plateau exit while occlusion stall confirmation is in progress (${occludedStallRounds}/${OCCLUSION_STALL_ROUNDS_HIDDEN})...`);
+        } else {
+          exitReason = getRemainingBudgetMs() <= 0 ? getBudgetExitReason() : 'plateau_reached';
+          console.log(`[scrollUntilEnoughReels] Plateau confirmed (${exitReason}) after ${stableRounds} stable rounds for @${normalizedUser} (${uniqueReelCount} discovered, ${validNonPinnedCount} valid non-pinned).`);
+          break; // Plateau reached after bounded adaptive attempts
+        }
+      } else if (uniqueReelCount === 0 && zeroRounds >= maxZeroRounds) {
+        if (isOcclusionAutoPauseEnabled(payload) && occludedStallRounds > 0 && occludedStallRounds < OCCLUSION_STALL_ROUNDS_HIDDEN && getRemainingBudgetMs() > 0) {
+          console.log(`[scrollUntilEnoughReels] Deferring zero_reels exit while occlusion stall confirmation is in progress (${occludedStallRounds}/${OCCLUSION_STALL_ROUNDS_HIDDEN})...`);
+        } else {
+          exitReason = 'zero_reels';
+          console.log(`[scrollUntilEnoughReels] 0 reels remaining after ${zeroRounds} attempts for @${normalizedUser}.`);
+          break; // If 0 reels remain after bounded attempts, stop scrolling empty page
+        }
       }
     }
 
@@ -1286,9 +1987,21 @@ async function scrollUntilEnoughReels(igTabId, sender, payload) {
           window.scrollBy(0, 200);
         }
         window.dispatchEvent(new Event('scroll', { bubbles: true }));
+        window.dispatchEvent(new WheelEvent('wheel', { deltaY: 300, bubbles: true }));
 
-        const isLoadingSpinner = !!doc.querySelector('svg[aria-label="Loading..."], div[role="progressbar"], div[aria-label="Loading..."]');
-        return { scrollHeight, isLoadingSpinner };
+        // Multi-selector loading indicator detection: SVG spinner, ARIA progressbar, skeleton placeholder
+        const isLoadingSpinner = !!(
+          doc.querySelector('svg[aria-label*="Loading" i], svg[aria-label*="Loading..."], div[aria-label*="Loading" i]') ||
+          doc.querySelector('div[role="progressbar"], [aria-busy="true"]') ||
+          doc.querySelector('div[class*="Skeleton" i], div[class*="skeleton" i], div[class*="spinner" i], div[class*="loading" i]')
+        );
+
+        return {
+          scrollHeight,
+          isLoadingSpinner,
+          docVisibility: doc.visibilityState || 'unknown',
+          docHidden: !!doc.hidden
+        };
       }, [stableRounds >= 2]);
     } catch (err) {
       if (isTabInvalidError(err)) {
@@ -1297,11 +2010,109 @@ async function scrollUntilEnoughReels(igTabId, sender, payload) {
       }
     }
 
+    lastLoadingSpinner = !!scrollDiag?.isLoadingSpinner;
+    if (scrollDiag?.docVisibility) {
+      lastDocVisibility = scrollDiag.docVisibility;
+      if (lastDocVisibility === 'visible') {
+        occludedStallRounds = 0;
+        occludedStallStreakStartTs = null;
+      }
+    }
     scrollRounds++;
 
-    // If Instagram is actively displaying a loading spinner, give it extra time to complete network fetch
-    const waitTime = scrollDiag?.isLoadingSpinner ? 3500 : 2500;
-    await new Promise(r => setTimeout(r, waitTime));
+    // Clamp per-round wait to remaining phase/profile budget so sleeps never overshoot the deadline
+    const desiredWaitMs = lastLoadingSpinner ? 3500 : 2500;
+    const remainingBeforeSleep = getRemainingBudgetMs();
+    if (remainingBeforeSleep <= 0) {
+      exitReason = getBudgetExitReason();
+      console.warn(`[scrollUntilEnoughReels] Bounded timeout (${exitReason}, activeElapsed=${getActiveScrollElapsedMs()}ms, paused=${scrollPausedMs}ms) reached before round sleep for @${normalizedUser}.`);
+      break;
+    }
+    const clampedWaitMs = Math.max(0, Math.min(desiredWaitMs, remainingBeforeSleep));
+    await new Promise(r => setTimeout(r, clampedWaitMs));
+
+    // Check pause state immediately after round sleep so minimization during the final round sleep is caught before exit
+    const pausedAfterSleep = await handleCompanionWindowPauseIfNeeded(
+      normalizedUser,
+      sender,
+      payload,
+      'scrollUntilEnoughReels:post_sleep',
+      igTabId,
+      scrollTimingTracker
+    );
+    if (pausedAfterSleep) {
+      resetStallCounters();
+    }
+  }
+  } catch (scrollErr) {
+    thrownScrollError = scrollErr;
+    const errMsg = String(scrollErr?.message || scrollErr || '');
+    if (errMsg.includes('COMPANION_WINDOW_INACTIVITY_TIMEOUT') || errMsg.includes('COMPANION_WINDOW_MINIMIZED_TIMEOUT')) {
+      exitReason = 'pause_inactivity_timeout';
+    } else if (errMsg.includes('COMPANION_WINDOW_CLOSED')) {
+      exitReason = 'companion_window_closed';
+    } else {
+      exitReason = 'scroll_error';
+    }
+  }
+
+  let finalWinState = 'unknown';
+  let finalWinFocused = false;
+  try {
+    const winStatus = await checkCompanionWindowState();
+    finalWinState = winStatus.valid ? (winStatus.state || 'normal') : 'closed';
+    finalWinFocused = !!winStatus.focused;
+  } catch (e) {}
+
+  if (lastDocVisibility === 'unknown' && igTabId) {
+    try {
+      const tabVis = await checkTabVisibility(igTabId);
+      if (tabVis && tabVis.visibilityState) {
+        lastDocVisibility = tabVis.visibilityState;
+      }
+    } catch (e) {}
+  }
+
+  const activeElapsedMs = getActiveScrollElapsedMs();
+  const validViewsCount = allDiscovered.filter(r => !r.isPinned && typeof r.viewCount === 'number' && r.viewCount >= 0).length;
+  const finalScrollDiag = {
+    exitReason,
+    elapsedMs: activeElapsedMs,
+    wallElapsedMs: Date.now() - scrollStartTs,
+    pausedMs: scrollPausedMs,
+    minimizedPausedMs,
+    occlusionPausedMs,
+    prePauseStallExcludedMs,
+    minimizedPauseCount,
+    occlusionPauseCount,
+    resumeCount,
+    lastPauseReason,
+    pauseEvents,
+    scrollRounds,
+    stableRounds,
+    zeroRounds,
+    loadingGraceRounds,
+    totalDiscovered: uniqueReelCount,
+    validViews: validViewsCount,
+    lastLoadingIndicator: lastLoadingSpinner,
+    docVisibility: lastDocVisibility,
+    winState: finalWinState,
+    winFocused: finalWinFocused
+  };
+
+  allDiscovered.scrollDiag = finalScrollDiag;
+  if (typeof options?.onScrollDiag === 'function') {
+    try {
+      options.onScrollDiag(finalScrollDiag);
+    } catch (e) {}
+  }
+  logBoundedDiag('scroll_phase_complete', normalizedUser, finalScrollDiag);
+
+  console.log(`[scrollUntilEnoughReels] Completed for @${normalizedUser}: exitReason="${exitReason}", discovered=${uniqueReelCount}, validViews=${validViewsCount}, rounds=${scrollRounds}, activeElapsed=${activeElapsedMs}ms, paused=${scrollPausedMs}ms, vis=${lastDocVisibility}, win=${finalWinState}.`);
+
+  if (thrownScrollError) {
+    thrownScrollError.scrollDiag = finalScrollDiag;
+    throw thrownScrollError;
   }
 
   return allDiscovered;
@@ -1427,7 +2238,7 @@ function processDiscoveredReels(discoveredArray, sender, payload) {
   };
 }
 
-async function waitForReelsPage(igTabId, normalizedUser, timeoutMs = 15000, sender = null, payload = null) {
+async function waitForReelsPage(igTabId, normalizedUser, timeoutMs = 15000, sender = null, payload = null, timingTracker = null) {
   const targetReelsUrl = `https://www.instagram.com/${normalizedUser}/reels/`;
   logTabOp('waitForReelsPage:start', normalizedUser, igTabId, targetReelsUrl);
 
@@ -1441,10 +2252,14 @@ async function waitForReelsPage(igTabId, normalizedUser, timeoutMs = 15000, send
 
   while (elapsed < timeoutMs) {
     // Check companion window state: pause countdown if minimized
-    await handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, 'waitForReelsPage');
+    await handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, 'waitForReelsPage', igTabId, timingTracker);
+    if (timingTracker && typeof timingTracker.getRemainingMs === 'function' && timingTracker.getRemainingMs() <= 0) {
+      break;
+    }
 
-    await new Promise(r => setTimeout(r, interval));
-    elapsed += interval;
+    const waited = await sleepBounded(interval, timingTracker);
+    if (waited <= 0) break;
+    elapsed += waited;
 
     try {
       const pageInfo = await injectScript(igTabId, (targetUser) => {
@@ -1702,9 +2517,49 @@ async function waitForReelsPage(igTabId, normalizedUser, timeoutMs = 15000, send
   };
 }
 
-async function executeProfileResearchOnTab(payload, sender, normalizedUser, startTs, forceNewTab = false) {
+function formatScrollDiagSummary(diag, label = 'ScrollDiag') {
+  if (!diag || typeof diag !== 'object') return '';
+  return `[${label}: exit=${diag.exitReason}, elapsed=${diag.elapsedMs}ms, paused=${diag.pausedMs || 0}ms(min=${diag.minimizedPausedMs || 0}ms,occ=${diag.occlusionPausedMs || 0}ms,preStall=${diag.prePauseStallExcludedMs || 0}ms,resumes=${diag.resumeCount || 0}), rounds=${diag.scrollRounds}, stable=${diag.stableRounds}, zero=${diag.zeroRounds}, grace=${diag.loadingGraceRounds}, discovered=${diag.totalDiscovered}, validViews=${diag.validViews}, spinner=${diag.lastLoadingIndicator}, vis=${diag.docVisibility}, win=${diag.winState}(focused=${diag.winFocused})]`;
+}
+
+function createProfileTimingTracker(startTs, payload = null) {
+  const PROFILE_ACTIVE_DEADLINE_MS =
+    typeof payload?.profileActiveDeadlineMs === 'number' && payload.profileActiveDeadlineMs > 0
+      ? payload.profileActiveDeadlineMs
+      : 95000;
+  return {
+    startTs,
+    pausedMs: 0,
+    minimizedPausedMs: 0,
+    occlusionPausedMs: 0,
+    prePauseStallExcludedMs: 0,
+    minimizedPauseCount: 0,
+    occlusionPauseCount: 0,
+    resumeCount: 0,
+    lastPauseReason: null,
+    pauseEvents: [],
+    deadlineMs: PROFILE_ACTIVE_DEADLINE_MS,
+    getActiveElapsedMs() {
+      return Math.max(0, (Date.now() - this.startTs) - this.pausedMs);
+    },
+    getRemainingMs() {
+      return Math.max(0, this.deadlineMs - this.getActiveElapsedMs());
+    }
+  };
+}
+
+async function executeProfileResearchOnTab(payload, sender, normalizedUser, startTs, forceNewTab = false, researchContext = null) {
   const { jobId, influencerCode, username } = payload;
   const targetReelsUrl = `https://www.instagram.com/${normalizedUser}/reels/`;
+
+  // Use shared profileTiming from researchContext (preserving active time & pausedMs across tab recovery retries)
+  const profileTiming = researchContext?.profileTiming || createProfileTimingTracker(startTs, payload);
+  if (researchContext && !researchContext.profileTiming) {
+    researchContext.profileTiming = profileTiming;
+  }
+
+  // 0. Check companion window state before starting research on profile: pause safely if minimized
+  await handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, 'profile_start', null, profileTiming);
 
   // 1. Acquire a verified, live Instagram tab (or create one if none exists)
   const selectedTab = await acquireOrCreateInstagramTab(normalizedUser, 'startProfileResearch', forceNewTab);
@@ -1729,15 +2584,15 @@ async function executeProfileResearchOnTab(payload, sender, normalizedUser, star
   const alreadyOnReels = (currentUrl || '').toLowerCase().includes(`/${normalizedUser.toLowerCase()}/reels`);
   if (!alreadyOnReels) {
     igTabId = await updateInstagramTabUrl(igTabId, targetReelsUrl, normalizedUser, 'startProfileResearch:initial_nav');
-    // Give browser 1200ms to begin loading the new profile and unmount stale DOM
-    await new Promise(r => setTimeout(r, 1200));
+    // Give browser up to 1200ms (clamped to remaining profile budget) to begin loading the new profile
+    await sleepBounded(1200, profileTiming);
   } else {
     // If already on Reels route, scroll to top so profile header and stats are mounted in the DOM
     try {
       await injectScript(igTabId, () => {
         window.scrollTo({ top: 0, behavior: 'instant' });
       });
-      await new Promise(r => setTimeout(r, 400));
+      await sleepBounded(400, profileTiming);
     } catch (e) {}
   }
 
@@ -1745,7 +2600,8 @@ async function executeProfileResearchOnTab(payload, sender, normalizedUser, star
   let followerDisplay = null;
   let followerExtractionDiag = null;
   try {
-    followerDisplay = await verifyProfile(igTabId, normalizedUser, 15000, sender, payload);
+    const verifyTimeoutMs = Math.min(15000, profileTiming.getRemainingMs());
+    followerDisplay = await verifyProfile(igTabId, normalizedUser, verifyTimeoutMs, sender, payload, profileTiming);
   } catch (verifyErr) {
     if (isTabInvalidError(verifyErr) || String(verifyErr?.message || '').includes('COMPANION_WINDOW_CLOSED')) {
       throw verifyErr;
@@ -1761,13 +2617,16 @@ async function executeProfileResearchOnTab(payload, sender, normalizedUser, star
   }
 
   // Safe bounded retry for follower extraction when page was already open/scrolled
-  if (!followerDisplay) {
+  if (!followerDisplay && profileTiming.getRemainingMs() >= 2000) {
     try {
       await injectScript(igTabId, () => {
         window.scrollTo({ top: 0, behavior: 'instant' });
       });
-      await new Promise(r => setTimeout(r, 800));
-      followerDisplay = await verifyProfile(igTabId, normalizedUser, 4000, sender, payload);
+      await sleepBounded(800, profileTiming);
+      const retryVerifyTimeoutMs = Math.min(4000, profileTiming.getRemainingMs());
+      if (retryVerifyTimeoutMs > 0) {
+        followerDisplay = await verifyProfile(igTabId, normalizedUser, retryVerifyTimeoutMs, sender, payload, profileTiming);
+      }
       if (followerDisplay) {
         logTabOp('verifyProfile:retry_success', normalizedUser, igTabId, null, `Extracted followers on retry: ${followerDisplay}`);
       }
@@ -1782,9 +2641,10 @@ async function executeProfileResearchOnTab(payload, sender, normalizedUser, star
 
   sendEventToSender(sender, 'PROFILE_DATA_FOUND', payload);
 
-  // 4. Milestone 2: Reel Discovery with bounded wait
+  // 4. Milestone 2: Reel Discovery with bounded wait (strictly clamped to remaining active budget)
   sendEventToSender(sender, 'REELS_PAGE_OPENING', payload);
-  let pageState = await waitForReelsPage(igTabId, normalizedUser, 15000, sender, payload);
+  const initialWaitTimeoutMs = Math.min(15000, profileTiming.getRemainingMs());
+  let pageState = await waitForReelsPage(igTabId, normalizedUser, initialWaitTimeoutMs, sender, payload, profileTiming);
 
   // Exact moment extraction begins: log and verify DOM evidence
   let extractionMoment = {
@@ -1808,115 +2668,190 @@ async function executeProfileResearchOnTab(payload, sender, normalizedUser, star
     extractionMoment
   });
 
-  let discovered = await scrollUntilEnoughReels(igTabId, sender, payload);
+  const primaryPhaseTimeoutMs = Math.min(60000, profileTiming.getRemainingMs());
+  let discovered = await scrollUntilEnoughReels(igTabId, sender, payload, {
+    phaseTimeoutMs: primaryPhaseTimeoutMs,
+    profileTiming,
+    onScrollDiag: (diag) => {
+      if (researchContext) researchContext.primaryScrollDiag = diag;
+    }
+  });
+  const primaryScrollDiag = discovered.scrollDiag || null;
+  let retryScrollDiag = null;
+  let retrySkippedReason = null;
+  if (researchContext) {
+    researchContext.primaryScrollDiag = primaryScrollDiag;
+  }
+
   let reelResults = processDiscoveredReels(discovered, sender, payload);
 
-  // 5. Retry once ONLY if 0 reels were discovered and page was not confirmed empty
+  // 5. Retry once ONLY if 0 reels were discovered, page was not confirmed empty, and sufficient active profile budget remains
+  const MIN_RETRY_BUDGET_MS = 8000;
   if (reelResults.selectedReelCount === 0 && !pageState.noReelsConfirmed) {
-    console.warn(`[startProfileResearch] 0 reels found on first pass for @${normalizedUser}. Retrying via profile root -> Reels tab hydration...`);
-    sendEventToSender(sender, 'RESEARCH_RETRYING', payload);
-
-    // Navigate to profile root first so Instagram hydrates PolarisProfilePageContentQuery cleanly,
-    // and check if reels are available directly on the main profile grid
-    const profileRootUrl = `https://www.instagram.com/${normalizedUser}/`;
-    igTabId = await updateInstagramTabUrl(igTabId, profileRootUrl, normalizedUser, 'startProfileResearch:retry_profile_root');
-    await new Promise(r => setTimeout(r, 2000));
-
-    // First check: Are reels discoverable directly on the main profile grid WITH valid view counts?
-    const profileGridDiscovered = await discoverReelLinks(igTabId, normalizedUser);
-    const profileGridResults = processDiscoveredReels(profileGridDiscovered, sender, payload);
-    if (profileGridResults.selectedReelCount > 0 && profileGridResults.validViewCountsCount > 0) {
-      console.log(`[startProfileResearch] Discovered ${profileGridResults.selectedReelCount} Reels with views directly on profile feed for @${normalizedUser}. Continuing scroll...`);
-      const retryDiscovered = await scrollUntilEnoughReels(igTabId, sender, payload);
-      const retryResults = processDiscoveredReels(retryDiscovered, sender, payload);
-      if (retryResults.selectedReelCount > 0) {
-        reelResults = retryResults;
-      }
+    if (profileTiming.getRemainingMs() < MIN_RETRY_BUDGET_MS) {
+      retrySkippedReason = `profile_deadline_reached (remaining=${profileTiming.getRemainingMs()}ms)`;
+      if (researchContext) researchContext.retrySkippedReason = retrySkippedReason;
+      console.warn(`[startProfileResearch] Skipping retry for @${normalizedUser}: remaining active budget (${profileTiming.getRemainingMs()}ms) is below ${MIN_RETRY_BUDGET_MS}ms.`);
     } else {
-      // Second check: Try in-page SPA transition by clicking the profile's Reels tab
-      let tabClicked = false;
-      try {
-        tabClicked = await injectScript(igTabId, (u) => {
-          const userLower = u.toLowerCase();
-          const tablist = document.querySelector('main div[role="tablist"], div[role="tablist"], main nav');
-          const allTabs = Array.from(document.querySelectorAll('a[href]'));
-          const reelsTab =
-            (tablist && (
-              tablist.querySelector('a[href*="/reels/"]') ||
-              tablist.querySelector('a[role="tab"][href*="/reels/"]') ||
-              Array.from(tablist.querySelectorAll('a[href]')).find(a => {
+      console.warn(`[startProfileResearch] 0 reels found on first pass for @${normalizedUser} (remainingBudget=${profileTiming.getRemainingMs()}ms). Retrying via profile root -> Reels tab hydration...`);
+      sendEventToSender(sender, 'RESEARCH_RETRYING', payload);
+
+      // Navigate to profile root first so Instagram hydrates PolarisProfilePageContentQuery cleanly,
+      // and check if reels are available directly on the main profile grid
+      const profileRootUrl = `https://www.instagram.com/${normalizedUser}/`;
+      igTabId = await updateInstagramTabUrl(igTabId, profileRootUrl, normalizedUser, 'startProfileResearch:retry_profile_root');
+      await sleepBounded(2000, profileTiming);
+      await handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, 'retry_profile_root', igTabId, profileTiming);
+
+      // First check: Are reels discoverable directly on the main profile grid?
+      const profileGridDiscovered = await discoverReelLinks(igTabId, normalizedUser);
+      const profileGridResults = processDiscoveredReels(profileGridDiscovered, sender, payload);
+
+      let preservedProfileFeedResults = null;
+      let preservedProfileFeedDiscovered = null;
+      if (profileGridResults.selectedReelCount > 0) {
+        console.log(`[startProfileResearch] Found ${profileGridResults.selectedReelCount} Reel candidate(s) on profile root for @${normalizedUser}. Preserving as fallback while attempting /reels/ tab for view counts...`);
+        preservedProfileFeedResults = profileGridResults;
+        preservedProfileFeedDiscovered = profileGridDiscovered;
+      }
+
+      if (profileTiming.getRemainingMs() >= 3000) {
+        // Attempt in-page SPA transition by clicking the profile's Reels tab
+        let tabClicked = false;
+        try {
+          tabClicked = await injectScript(igTabId, (u) => {
+            const userLower = u.toLowerCase();
+            const tablist = document.querySelector('main div[role="tablist"], div[role="tablist"], main nav');
+            const allTabs = Array.from(document.querySelectorAll('a[href]'));
+            const reelsTab =
+              (tablist && (
+                tablist.querySelector('a[href*="/reels/"]') ||
+                tablist.querySelector('a[role="tab"][href*="/reels/"]') ||
+                Array.from(tablist.querySelectorAll('a[href]')).find(a => {
+                  const h = (a.getAttribute('href') || '').toLowerCase();
+                  return (h.includes(`/${userLower}/reels`) || h.endsWith('/reels/')) &&
+                         !h.endsWith('.com/reels/') && h !== '/reels/' && !h.startsWith('/reels?');
+                })
+              )) ||
+              allTabs.find(a => {
                 const h = (a.getAttribute('href') || '').toLowerCase();
                 return (h.includes(`/${userLower}/reels`) || h.endsWith('/reels/')) &&
                        !h.endsWith('.com/reels/') && h !== '/reels/' && !h.startsWith('/reels?');
-              })
-            )) ||
-            allTabs.find(a => {
-              const h = (a.getAttribute('href') || '').toLowerCase();
-              return (h.includes(`/${userLower}/reels`) || h.endsWith('/reels/')) &&
-                     !h.endsWith('.com/reels/') && h !== '/reels/' && !h.startsWith('/reels?');
-            });
-          if (reelsTab) {
-            ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(evt => {
-              reelsTab.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
-            });
-            reelsTab.click();
-            window.dispatchEvent(new Event('resize'));
-            window.dispatchEvent(new Event('scroll'));
-            return true;
+              });
+            if (reelsTab) {
+              ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(evt => {
+                reelsTab.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+              });
+              reelsTab.click();
+              window.dispatchEvent(new Event('resize'));
+              window.dispatchEvent(new Event('scroll'));
+              return true;
+            }
+            return false;
+          }, [normalizedUser]);
+        } catch (e) {}
+
+        if (!tabClicked) {
+          igTabId = await updateInstagramTabUrl(igTabId, targetReelsUrl, normalizedUser, 'startProfileResearch:retry_reels_nav');
+          await sleepBounded(1200, profileTiming);
+        } else {
+          await sleepBounded(1500, profileTiming);
+        }
+        await handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, 'retry_reels_nav', igTabId, profileTiming);
+
+        const retryWaitTimeoutMs = Math.min(12000, Math.floor(profileTiming.getRemainingMs() * 0.35));
+        pageState = await waitForReelsPage(igTabId, normalizedUser, retryWaitTimeoutMs, sender, payload, profileTiming);
+        extractionMoment = {
+          actualUrl: pageState.url,
+          finalUrl: pageState.url,
+          normalizedUser,
+          navigationSuccess: (!pageState.timedOut || pageState.reelCount > 0) && pageState.url.toLowerCase().includes(`/${normalizedUser.toLowerCase()}/reels`),
+          pageReadiness: pageState.ready ? 'complete' : (pageState.readyState || 'unknown'),
+          reelAnchorsCount: pageState.reelCount || 0,
+          postAnchorsCount: pageState.postCount || 0,
+          mediaCount: pageState.mediaCount || 0,
+          gridElementCount: pageState.gridElementCount || 0,
+          timedOut: !!pageState.timedOut,
+          elapsedMs: pageState.elapsed || 0
+        };
+
+        const retryScrollTimeoutMs = Math.min(60000, profileTiming.getRemainingMs());
+        const retryDiscovered = await scrollUntilEnoughReels(igTabId, sender, payload, {
+          phaseTimeoutMs: retryScrollTimeoutMs,
+          profileTiming,
+          onScrollDiag: (diag) => {
+            if (researchContext) researchContext.retryScrollDiag = diag;
           }
-          return false;
-        }, [normalizedUser]);
-      } catch (e) {}
+        });
+        retryScrollDiag = retryDiscovered.scrollDiag || null;
+        if (researchContext) researchContext.retryScrollDiag = retryScrollDiag;
+        const retryResults = processDiscoveredReels(retryDiscovered, sender, payload);
 
-      if (!tabClicked) {
-        igTabId = await updateInstagramTabUrl(igTabId, targetReelsUrl, normalizedUser, 'startProfileResearch:retry_reels_nav');
-        await new Promise(r => setTimeout(r, 1200));
+        if (retryResults.selectedReelCount > 0) {
+          if (preservedProfileFeedDiscovered && preservedProfileFeedDiscovered.length > 0) {
+            // Merge preserved feed reels with retryResults from /reels/ tab without losing view badges
+            const mergedMap = new Map();
+            // Priority 1: retryResults from /reels/ tab (they may carry view badges)
+            (retryDiscovered || []).forEach(r => {
+              mergedMap.set(r.url, { ...r });
+            });
+            // Priority 2: preserved feed reels (if not already found on /reels/ tab)
+            (preservedProfileFeedDiscovered || []).forEach(r => {
+              if (!mergedMap.has(r.url)) {
+                mergedMap.set(r.url, { ...r });
+              } else {
+                const existing = mergedMap.get(r.url);
+                if (existing.viewCount === null && typeof r.viewCount === 'number') {
+                  existing.viewCount = r.viewCount;
+                  existing.rawViewText = r.rawViewText;
+                  existing.viewIconLocation = r.viewIconLocation;
+                  existing.viewIconFound = r.viewIconFound;
+                }
+              }
+            });
+            reelResults = processDiscoveredReels(Array.from(mergedMap.values()), sender, payload);
+          } else {
+            reelResults = retryResults;
+          }
+        } else if (preservedProfileFeedResults && preservedProfileFeedResults.selectedReelCount > 0) {
+          console.log(`[startProfileResearch] /reels/ tab returned 0 reels for @${normalizedUser}; falling back to ${preservedProfileFeedResults.selectedReelCount} Reel candidates discovered on profile root.`);
+          reelResults = preservedProfileFeedResults;
+        }
+      } else if (preservedProfileFeedResults && preservedProfileFeedResults.selectedReelCount > 0) {
+        retrySkippedReason = `profile_deadline_reached_after_root_check (remaining=${profileTiming.getRemainingMs()}ms)`;
+        if (researchContext) researchContext.retrySkippedReason = retrySkippedReason;
+        reelResults = preservedProfileFeedResults;
       } else {
-        await new Promise(r => setTimeout(r, 1500));
-      }
-
-      pageState = await waitForReelsPage(igTabId, normalizedUser, 15000, sender, payload);
-      extractionMoment = {
-        actualUrl: pageState.url,
-        finalUrl: pageState.url,
-        normalizedUser,
-        navigationSuccess: (!pageState.timedOut || pageState.reelCount > 0) && pageState.url.toLowerCase().includes(`/${normalizedUser.toLowerCase()}/reels`),
-        pageReadiness: pageState.ready ? 'complete' : (pageState.readyState || 'unknown'),
-        reelAnchorsCount: pageState.reelCount || 0,
-        postAnchorsCount: pageState.postCount || 0,
-        mediaCount: pageState.mediaCount || 0,
-        gridElementCount: pageState.gridElementCount || 0,
-        timedOut: !!pageState.timedOut,
-        elapsedMs: pageState.elapsed || 0
-      };
-
-      const retryDiscovered = await scrollUntilEnoughReels(igTabId, sender, payload);
-      const retryResults = processDiscoveredReels(retryDiscovered, sender, payload);
-
-      if (retryResults.selectedReelCount > reelResults.selectedReelCount || retryResults.reelsDiscovered > reelResults.reelsDiscovered) {
-        reelResults = retryResults;
+        retrySkippedReason = `profile_deadline_reached_after_root_check (remaining=${profileTiming.getRemainingMs()}ms)`;
+        if (researchContext) researchContext.retrySkippedReason = retrySkippedReason;
       }
     }
   }
 
-  // 6. Bounded Individual Reel-page metric fallback (only if grid extraction still misses counts)
+  // 6. Bounded Individual Reel-page metric fallback (only if grid extraction still misses counts and active budget remains)
   // Strictly bounded to at most 3 reels per profile to preserve speed and avoid repeated navigation
   const missingCountReels = (reelResults.selectedReels || []).filter(
     r => typeof r.viewCount !== 'number' && !r.isPinned
   );
 
-  if (missingCountReels.length > 0 && reelResults.validViewCountsCount < 15) {
+  if (missingCountReels.length > 0 && reelResults.validViewCountsCount < 15 && profileTiming.getRemainingMs() >= 4500) {
     const MAX_FALLBACK_PER_PROFILE = 3;
     const reelsToInspect = missingCountReels.slice(0, MAX_FALLBACK_PER_PROFILE);
     console.log(`[startProfileResearch] Bounded individual Reel fallback: inspecting ${reelsToInspect.length} Reel(s) with missing view counts for @${normalizedUser}...`);
 
     let anyViewUpdated = false;
     for (const reel of reelsToInspect) {
+      if (profileTiming.getRemainingMs() < 3500) {
+        console.warn(`[startProfileResearch] Stopping individual Reel fallback early for @${normalizedUser}: remaining active budget (${profileTiming.getRemainingMs()}ms) is low.`);
+        break;
+      }
       try {
-        await handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, 'reel_metric_fallback');
+        await handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, 'reel_metric_fallback', igTabId, profileTiming);
+        if (profileTiming.getRemainingMs() < 3500) break;
         logTabOp('reel_metric_fallback:nav', normalizedUser, igTabId, reel.reelUrl);
         igTabId = await updateInstagramTabUrl(igTabId, reel.reelUrl, normalizedUser, 'startProfileResearch:reel_metric_fallback');
-        await new Promise(r => setTimeout(r, 1800));
+        await sleepBounded(1800, profileTiming);
+        await handleCompanionWindowPauseIfNeeded(normalizedUser, sender, payload, 'reel_metric_fallback:post_wait', igTabId, profileTiming);
 
         const extracted = await injectScript(igTabId, () => {
           function parseCount(raw) {
@@ -1996,7 +2931,7 @@ async function executeProfileResearchOnTab(payload, sender, normalizedUser, star
     // Always restore companion tab safely back to targetReelsUrl
     try {
       igTabId = await updateInstagramTabUrl(igTabId, targetReelsUrl, normalizedUser, 'startProfileResearch:return_from_fallback');
-      await new Promise(r => setTimeout(r, 1200));
+      await sleepBounded(1200, profileTiming);
     } catch (e) {}
 
     // If any view counts were updated, re-process metrics
@@ -2012,6 +2947,22 @@ async function executeProfileResearchOnTab(payload, sender, normalizedUser, star
     }
   }
 
+  const diagSummaryParts = [
+    formatScrollDiagSummary(primaryScrollDiag, 'ScrollDiag'),
+    retryScrollDiag ? formatScrollDiagSummary(retryScrollDiag, 'RetryScrollDiag') : '',
+    retrySkippedReason ? `[RetrySkipped: ${retrySkippedReason}]` : ''
+  ].filter(Boolean);
+  const diagSuffix = diagSummaryParts.length > 0 ? ` ${diagSummaryParts.join(' ')}` : '';
+
+  extractionMoment = {
+    ...extractionMoment,
+    scrollDiag: primaryScrollDiag,
+    retryScrollDiag: retryScrollDiag || undefined,
+    retrySkippedReason: retrySkippedReason || undefined,
+    activeElapsedMs: profileTiming.getActiveElapsedMs(),
+    pausedDurationMs: profileTiming.pausedMs
+  };
+
   // Stage determination and failure classification
   let finalStatus = 'completed';
   let failureStage = null;
@@ -2021,13 +2972,13 @@ async function executeProfileResearchOnTab(payload, sender, normalizedUser, star
     finalStatus = 'reels_not_found';
     if (pageState.noReelsConfirmed) {
       failureStage = 'no_reels';
-      failureReason = `Profile @${normalizedUser} has no reels posted.`;
+      failureReason = `Profile @${normalizedUser} has no reels posted.${diagSuffix}`;
     } else if (reelResults.reelsDiscovered === 0) {
       failureStage = 'zero_reels';
-      failureReason = `Zero Reel anchors (a[href*="/reel/"]) were discovered on ${targetReelsUrl}. (Page readiness: ${extractionMoment.pageReadiness}, Posts: ${extractionMoment.postAnchorsCount}, Media: ${extractionMoment.mediaCount}, Grid elements: ${extractionMoment.gridElementCount}, Wait: ${extractionMoment.elapsedMs}ms)`;
+      failureReason = `Zero Reel anchors (a[href*="/reel/"]) were discovered on ${targetReelsUrl}. (Page readiness: ${extractionMoment.pageReadiness}, Posts: ${extractionMoment.postAnchorsCount}, Media: ${extractionMoment.mediaCount}, Grid elements: ${extractionMoment.gridElementCount}, Wait: ${extractionMoment.elapsedMs}ms)${diagSuffix}`;
     } else {
       failureStage = 'all_pinned';
-      failureReason = `Discovered ${reelResults.reelsDiscovered} reels, but all ${reelResults.pinnedReelsExcluded} were pinned posts.`;
+      failureReason = `Discovered ${reelResults.reelsDiscovered} reels, but all ${reelResults.pinnedReelsExcluded} were pinned posts.${diagSuffix}`;
     }
   } else if (reelResults.validViewCountsCount < 15) {
     finalStatus = 'partial';
@@ -2037,10 +2988,10 @@ async function executeProfileResearchOnTab(payload, sender, normalizedUser, star
       const failedDetails = failedAnchors
         .map(f => `${f.reelUrl} (${f.viewIconLocation || 'no_icon'}${f.missingDiag?.anchorText ? `: "${f.missingDiag.anchorText}"` : ''})`)
         .join(', ');
-      failureReason = `Collected ${reelResults.validViewCountsCount}/15 valid view counts from ${reelResults.selectedReelCount} non-pinned Reels (${reelResults.pinnedReelsExcluded} pinned excluded). ${failedAnchors.length} discovered Reel anchor(s) failed view-count extraction: ${failedDetails}.`;
+      failureReason = `Collected ${reelResults.validViewCountsCount}/15 valid view counts from ${reelResults.selectedReelCount} non-pinned Reels (${reelResults.pinnedReelsExcluded} pinned excluded). ${failedAnchors.length} discovered Reel anchor(s) failed view-count extraction: ${failedDetails}.${diagSuffix}`;
     } else {
       failureStage = 'partial_reel_discovery';
-      failureReason = `Collected ${reelResults.validViewCountsCount}/15 valid view counts: all ${reelResults.selectedReelCount} discovered non-pinned Reels had valid view counts (${reelResults.pinnedReelsExcluded} pinned excluded; 0 failed view-count extraction; only ${reelResults.selectedReelCount} non-pinned Reels were available on the profile).`;
+      failureReason = `Collected ${reelResults.validViewCountsCount}/15 valid view counts: all ${reelResults.selectedReelCount} discovered non-pinned Reels had valid view counts (${reelResults.pinnedReelsExcluded} pinned excluded; 0 failed view-count extraction; only ${reelResults.selectedReelCount} non-pinned Reels were available on the profile).${diagSuffix}`;
     }
   }
 
@@ -2057,6 +3008,11 @@ async function executeProfileResearchOnTab(payload, sender, normalizedUser, star
     followerCount: followerDisplay ? parseViews(followerDisplay) : 0,
     followerExtractionDiag: followerExtractionDiag || undefined,
     ...reelResults,
+    scrollDiag: primaryScrollDiag,
+    retryScrollDiag: retryScrollDiag || undefined,
+    retrySkippedReason: retrySkippedReason || undefined,
+    activeElapsedMs: profileTiming.getActiveElapsedMs(),
+    pausedDurationMs: profileTiming.pausedMs,
     status: finalStatus,
     failureStage,
     failureReason,
@@ -2075,17 +3031,28 @@ async function startProfileResearch(payload, sender) {
 
   if (!normalizedUser) throw new Error('Invalid or missing username');
 
-  if (companionWindowClosedByUser) {
-    const closedReason = 'Instagram research companion window was closed. Please keep the companion window open during batch research.';
-    logBoundedDiag('research_failed_window_closed_early', normalizedUser, { error: closedReason });
+  const researchContext = {
+    profileTiming: createProfileTimingTracker(startTs, payload),
+    primaryScrollDiag: null,
+    retryScrollDiag: null,
+    retrySkippedReason: null
+  };
+
+  const buildFailedResult = (pageReadiness, failureStage, baseReason, finalUrl = targetReelsUrl) => {
+    const diagParts = [
+      formatScrollDiagSummary(researchContext.primaryScrollDiag, 'ScrollDiag'),
+      researchContext.retryScrollDiag ? formatScrollDiagSummary(researchContext.retryScrollDiag, 'RetryScrollDiag') : '',
+      researchContext.retrySkippedReason ? `[RetrySkipped: ${researchContext.retrySkippedReason}]` : ''
+    ].filter(Boolean);
+    const fullReason = diagParts.length > 0 ? `${baseReason} ${diagParts.join(' ')}` : baseReason;
     return {
       jobId,
       influencerCode,
       requestedUsername: username,
       verifiedUsername: normalizedUser,
-      finalUrl: targetReelsUrl,
+      finalUrl,
       navigationSuccess: false,
-      pageReadiness: 'companion_window_closed',
+      pageReadiness,
       reelAnchorsAtStart: 0,
       followerDisplay: null,
       followerCount: 0,
@@ -2097,118 +3064,54 @@ async function startProfileResearch(payload, sender) {
       averageViews: 0,
       rawViewCounts: [],
       missingViewCountsCount: 15,
+      scrollDiag: researchContext.primaryScrollDiag,
+      retryScrollDiag: researchContext.retryScrollDiag || undefined,
+      retrySkippedReason: researchContext.retrySkippedReason || undefined,
+      activeElapsedMs: researchContext.profileTiming.getActiveElapsedMs(),
+      pausedDurationMs: researchContext.profileTiming.pausedMs,
       status: 'failed',
-      failureStage: 'companion_window_closed',
-      failureReason: closedReason,
-      error: closedReason,
+      failureStage,
+      failureReason: fullReason,
+      error: fullReason,
       startedAt: startTs,
       completedAt: Date.now()
     };
+  };
+
+  if (companionWindowClosedByUser) {
+    const closedReason = 'Instagram research companion window was closed. Please keep the companion window open during batch research.';
+    logBoundedDiag('research_failed_window_closed_early', normalizedUser, { error: closedReason });
+    return buildFailedResult('companion_window_closed', 'companion_window_closed', closedReason);
   }
 
   sendEventToSender(sender, 'PROFILE_OPENING', payload);
 
   try {
-    return await executeProfileResearchOnTab(payload, sender, normalizedUser, startTs, false);
+    return await executeProfileResearchOnTab(payload, sender, normalizedUser, startTs, false, researchContext);
   } catch (err) {
     if (err && String(err.message || '').includes('COMPANION_WINDOW_CLOSED')) {
       const closedReason = 'Instagram research companion window was closed. Please keep the companion window open during batch research.';
       logBoundedDiag('research_failed_window_closed', normalizedUser, { error: closedReason });
-      return {
-        jobId,
-        influencerCode,
-        requestedUsername: username,
-        verifiedUsername: normalizedUser,
-        finalUrl: targetReelsUrl,
-        navigationSuccess: false,
-        pageReadiness: 'companion_window_closed',
-        reelAnchorsAtStart: 0,
-        followerDisplay: null,
-        followerCount: 0,
-        reelsDiscovered: 0,
-        pinnedReelsExcluded: 0,
-        selectedReelCount: 0,
-        selectedReels: [],
-        validViewCountsCount: 0,
-        averageViews: 0,
-        rawViewCounts: [],
-        missingViewCountsCount: 15,
-        status: 'failed',
-        failureStage: 'companion_window_closed',
-        failureReason: closedReason,
-        error: closedReason,
-        startedAt: startTs,
-        completedAt: Date.now()
-      };
+      return buildFailedResult('companion_window_closed', 'companion_window_closed', closedReason);
     }
 
-    if (err && String(err.message || '').includes('COMPANION_WINDOW_MINIMIZED_TIMEOUT')) {
-      const timeoutReason = 'Instagram research companion window was minimized for over 35 seconds. Please keep the companion window open during batch research.';
-      logBoundedDiag('research_failed_window_minimized_timeout', normalizedUser, { error: timeoutReason });
-      return {
-        jobId,
-        influencerCode,
-        requestedUsername: username,
-        verifiedUsername: normalizedUser,
-        finalUrl: targetReelsUrl,
-        navigationSuccess: false,
-        pageReadiness: 'companion_window_minimized_timeout',
-        reelAnchorsAtStart: 0,
-        followerDisplay: null,
-        followerCount: 0,
-        reelsDiscovered: 0,
-        pinnedReelsExcluded: 0,
-        selectedReelCount: 0,
-        selectedReels: [],
-        validViewCountsCount: 0,
-        averageViews: 0,
-        rawViewCounts: [],
-        missingViewCountsCount: 15,
-        status: 'failed',
-        failureStage: 'companion_window_minimized_timeout',
-        failureReason: timeoutReason,
-        error: timeoutReason,
-        startedAt: startTs,
-        completedAt: Date.now()
-      };
+    if (err && (String(err.message || '').includes('COMPANION_WINDOW_MINIMIZED_TIMEOUT') || String(err.message || '').includes('COMPANION_WINDOW_INACTIVITY_TIMEOUT'))) {
+      const timeoutReason = 'Instagram research companion window was inactive for an extended period. Please keep the companion window open during batch research.';
+      logBoundedDiag('research_failed_window_inactive_timeout', normalizedUser, { error: timeoutReason });
+      return buildFailedResult('companion_window_inactive_timeout', 'companion_window_inactive_timeout', timeoutReason);
     }
 
     if (err && String(err.message || '').includes('COMPANION_WINDOW_CREATION_FAILED')) {
       const creationReason = String(err.message);
       logBoundedDiag('research_failed_creation', normalizedUser, { error: creationReason });
-      return {
-        jobId,
-        influencerCode,
-        requestedUsername: username,
-        verifiedUsername: normalizedUser,
-        finalUrl: targetReelsUrl,
-        navigationSuccess: false,
-        pageReadiness: 'companion_window_creation_failed',
-        reelAnchorsAtStart: 0,
-        followerDisplay: null,
-        followerCount: 0,
-        reelsDiscovered: 0,
-        pinnedReelsExcluded: 0,
-        selectedReelCount: 0,
-        selectedReels: [],
-        validViewCountsCount: 0,
-        averageViews: 0,
-        rawViewCounts: [],
-        missingViewCountsCount: 15,
-        status: 'failed',
-        failureStage: 'companion_window_creation_failed',
-        failureReason: creationReason,
-        error: creationReason,
-        startedAt: startTs,
-        completedAt: Date.now()
-      };
+      return buildFailedResult('companion_window_creation_failed', 'companion_window_creation_failed', creationReason);
     }
 
-    if (isTabInvalidError(err)) {
+    if (isTabInvalidError(err) && researchContext.profileTiming.getRemainingMs() >= 8000) {
       logTabOp('startProfileResearch:tab_recovery_retry', normalizedUser, lastUsedIgTabId, null, `Recovering from invalid tab error: ${err.message}`);
       lastUsedIgTabId = null;
       sendEventToSender(sender, 'RESEARCH_RETRYING', payload);
-      return await executeProfileResearchOnTab(payload, sender, normalizedUser, startTs, true);
+      return await executeProfileResearchOnTab(payload, sender, normalizedUser, startTs, true, researchContext);
     }
 
     // If navigation was rejected even after updateInstagramTabUrl's 1 safe retry,
@@ -2229,32 +3132,8 @@ async function startProfileResearch(payload, sender) {
         `Current Tab URL: ${diag.currentTabUrl || 'unknown'} | Original Chrome Error: ${diag.originalChromeError}`;
       console.error(`[startProfileResearch] ${detailedReason}`);
 
-      return {
-        jobId,
-        influencerCode,
-        requestedUsername: username,
-        verifiedUsername: normalizedUser,
-        finalUrl: diag.currentTabUrl && diag.currentTabUrl !== 'unknown' ? diag.currentTabUrl : targetReelsUrl,
-        navigationSuccess: false,
-        pageReadiness: 'navigation_rejected',
-        reelAnchorsAtStart: 0,
-        followerDisplay: null,
-        followerCount: 0,
-        reelsDiscovered: 0,
-        pinnedReelsExcluded: 0,
-        selectedReelCount: 0,
-        selectedReels: [],
-        validViewCountsCount: 0,
-        averageViews: 0,
-        rawViewCounts: [],
-        missingViewCountsCount: 15,
-        status: 'failed',
-        failureStage: diag.stage || 'navigation_rejected',
-        failureReason: detailedReason,
-        error: detailedReason,
-        startedAt: startTs,
-        completedAt: Date.now()
-      };
+      const resolvedUrl = diag.currentTabUrl && diag.currentTabUrl !== 'unknown' ? diag.currentTabUrl : targetReelsUrl;
+      return buildFailedResult('navigation_rejected', diag.stage || 'navigation_rejected', detailedReason, resolvedUrl);
     }
 
     throw err;

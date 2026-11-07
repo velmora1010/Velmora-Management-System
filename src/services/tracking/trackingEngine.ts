@@ -1,6 +1,10 @@
 import db from '../../lib/db';
+import { supabase } from '../../lib/supabase';
 import { CourierAdapterFactory } from './adapters/CourierAdapterFactory';
 import type { LogisticsOrder } from '../../types/logistics';
+import type { TrackingResult } from './adapters/CourierAdapter';
+import { cleanOrderId } from '../unifiedLogisticsService';
+import { normalizeCourier } from '../../config/courierConfig';
 
 export interface BulkSyncSummary {
   Amazon: { success: number; unsupported: number };
@@ -11,6 +15,27 @@ export interface BulkSyncSummary {
 }
 
 export const trackingEngine = {
+  /**
+   * Tracks a single AWB directly via the appropriate courier adapter.
+   */
+  async trackSingle(
+    courier: string,
+    awbNumber: string,
+    timeoutMs?: number
+  ): Promise<TrackingResult> {
+    try {
+      const adapter = CourierAdapterFactory.getAdapter(courier);
+      return await adapter.track(awbNumber, timeoutMs);
+    } catch (err: any) {
+      return {
+        success: false,
+        status: 'Tracking API not connected',
+        error: err.message || String(err),
+        supported: true
+      };
+    }
+  },
+
   /**
    * Syncs a single order's tracking status with retries, logging, and progress reporting.
    */
@@ -129,7 +154,15 @@ export const trackingEngine = {
     }
 
     if (result && result.success) {
-      const finalStatus = result.status || 'In Transit';
+      let finalStatus = result.status || 'In Transit';
+
+      // Status Transition Protection: Never downgrade Delivered or RTO Delivered
+      const curStatus = order.status || '';
+      if ((curStatus === 'Delivered' || curStatus === 'RTO Delivered to Seller') && finalStatus !== curStatus && !finalStatus.includes('RTO')) {
+        console.warn(`[TRANSITION PROTECTION] Preserving ${curStatus} for order #${order.orderId}, rejecting incoming status: ${finalStatus}`);
+        finalStatus = curStatus;
+      }
+
       const updatePayload: Partial<LogisticsOrder> = {
         status: finalStatus,
         syncedAt: new Date().toLocaleString(),
@@ -151,6 +184,38 @@ export const trackingEngine = {
       if (order.courier === 'ST Courier' || order.courier === 'Delhivery') {
         console.log(`[${order.courier} TRACKING] Previous DB Status: ${prevStatusLog} -> New: ${finalStatus}`);
       }
+
+      // Sync to Supabase customer_tracking_shipments and sales_orders
+      const cleanOid = cleanOrderId(order.orderId || order.orderNumber || '');
+      if (cleanOid) {
+        try {
+          const normCourier = normalizeCourier(order.courier) || order.courier || 'Delhivery';
+          await supabase.from('customer_tracking_shipments').upsert({
+            order_id: cleanOid,
+            display_order_id: `#${cleanOid}`,
+            awb_number: order.awbNumber,
+            courier: normCourier,
+            status: finalStatus,
+            raw_status: result.rawStatus || finalStatus,
+            remarks: result.remarks || null,
+            delivered_date: result.deliveredDate || null,
+            estimated_delivery_date: result.estimatedDeliveryDate || null,
+            last_location: result.location || null,
+            last_synced_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'courier,awb_number' });
+
+          if (finalStatus.toLowerCase().includes('delivered') || finalStatus.toLowerCase().includes('transit')) {
+            await supabase.from('sales_orders').update({
+              dispatch_status: finalStatus.toLowerCase().includes('delivered') ? 'DELIVERED' : 'DISPATCHED',
+              updated_at: new Date().toISOString()
+            }).eq('order_id', cleanOid);
+          }
+        } catch (sbErr) {
+          console.warn('[TRACKING ENGINE] Supabase sync note:', sbErr);
+        }
+      }
+
       return { success: true, status: finalStatus };
     } else {
       const finalError = (result && result.error) || 'Failed to fetch status from tracking API';

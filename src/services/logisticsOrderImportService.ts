@@ -211,7 +211,8 @@ export const parseAndValidateCustomerOrders = async (
 
   for (const row of rawRows) {
     const rawId = findHeaderValue(row, [
-      'Name', 'Order', 'Order ID', 'Order Number', 'order_id', 'Invoice No', 'order_number', 'order'
+      'Name', 'Order', 'Order ID', 'Order Number', 'order_id', 'Invoice No', 'order_number', 'order',
+      'Reference No.', 'Reference No', 'Reference Number', 'Ref No', 'Ref. No.', 'Ref_No', 'Reference', 'Order/Ref'
     ]);
     const cleanId = cleanOrderId(rawId);
     if (!cleanId) {
@@ -246,7 +247,8 @@ export const parseAndValidateCustomerOrders = async (
 
   for (const [lowerId, rows] of groupedRows.entries()) {
     const orderId = cleanOrderId(findHeaderValueFromRows(rows, [
-      'Name', 'Order', 'Order ID', 'Order Number', 'order_id', 'Invoice No', 'order_number'
+      'Name', 'Order', 'Order ID', 'Order Number', 'order_id', 'Invoice No', 'order_number',
+      'Reference No.', 'Reference No', 'Reference Number', 'Ref No', 'Ref. No.', 'Ref_No', 'Reference', 'Order/Ref'
     ]));
 
     // Check for intra-file conflicts (different names or phones for same Order ID in the file)
@@ -377,12 +379,16 @@ export const parseAndValidateCustomerOrders = async (
 
     // AWB & Courier
     const rawAwb = findHeaderValueFromRows(rows, [
-      'Tracking number', 'Tracking Number', 'AWB', 'Waybill', 'Consignment No'
+      'Tracking number', 'Tracking Number', 'AWB', 'Waybill', 'Waybill Number', 'awb_number', 'Consignment No', 'Consignment Number', 'Article Number', 'Barcode'
     ]);
     const rawCourier = findHeaderValueFromRows(rows, [
       'Carrier', 'Courier', 'Shipping Company', 'Courier Partner'
     ]);
-    const courier = rawCourier ? normalizeCourier(String(rawCourier)) : undefined;
+    let courier = rawCourier ? normalizeCourier(String(rawCourier)) : undefined;
+    if (!courier && rawAwb) {
+      const detected = detectCourier(String(rawAwb));
+      if (detected !== 'Unknown') courier = detected;
+    }
 
     // Order Date
     const rawDate = findHeaderValueFromRows(rows, [
@@ -488,11 +494,15 @@ export const parseAndValidateCustomerOrders = async (
       let hasShipmentConflict = false;
       let conflictDescription = '';
 
-      // Check shipment conflict: new file has different AWB/courier than existing dispatched order
+      // Check shipment reconciliation: if file provides an authoritative AWB different from existing
       if (inDispatchOrTracking && parsedOrder.awbNumber && existing.awbNumber && parsedOrder.awbNumber !== existing.awbNumber) {
-        hasShipmentConflict = true;
-        conflictDescription = `Incoming AWB (${parsedOrder.awbNumber}) conflicts with existing shipment AWB (${existing.awbNumber}). Existing shipment stage & tracking preserved.`;
-        conflictingOrders.push({ orderId, reason: conflictDescription });
+        hasShipmentConflict = false; // Reconcile safely
+        patch.awbNumber = parsedOrder.awbNumber;
+        patch.courier = parsedOrder.courier || existing.courier || 'Delhivery';
+        patch.stage = 'tracking';
+        patch.status = 'In Transit';
+        changedFields.push('AWB Number (Reconciled)');
+        changedFields.push('Courier (Reconciled)');
       }
 
       // Detect safe changes without overwriting valid data with empty/blank
@@ -501,7 +511,7 @@ export const parseAndValidateCustomerOrders = async (
       // If existing is still unfulfilled in active/pending and newly has an AWB, update it
       if (!inDispatchOrTracking && parsedOrder.awbNumber && !existing.awbNumber) {
         patch.awbNumber = parsedOrder.awbNumber;
-        patch.courier = parsedOrder.courier || existing.courier;
+        patch.courier = parsedOrder.courier || existing.courier || 'Delhivery';
         patch.stage = 'dispatched';
         patch.status = 'Awaiting Tracking Update';
         changedFields.push('AWB Number');
@@ -746,6 +756,46 @@ export const commitCustomerOrdersImport = async (
     }
   } catch (syncErr) {
     console.warn('[Logistics Import] Non-blocking sales sync warning:', syncErr);
+  }
+
+  // 3. Synchronize any orders with AWBs into customer_tracking_shipments
+  const ordersWithAwbs = [
+    ...result.newOrders.filter(o => o.awbNumber),
+    ...result.updatePlans.map(p => p.incoming).filter(o => o.awbNumber)
+  ];
+  if (ordersWithAwbs.length > 0) {
+    try {
+      const nowIso = new Date().toISOString();
+      const trackingRows = ordersWithAwbs.map(o => ({
+        order_id: cleanOrderId(o.orderId),
+        display_order_id: `#${cleanOrderId(o.orderId)}`,
+        awb_number: o.awbNumber!,
+        courier: o.courier || 'Delhivery',
+        status: o.fulfillmentStatus === 'Fulfilled' ? 'Delivered' : 'In Transit',
+        raw_status: 'DISPATCHED',
+        status_source: 'LOGISTICS_ORDER_IMPORT',
+        source_type: 'CUSTOMER_ORDER',
+        dispatch_date: o.fulfilledDate || o.orderDate || nowIso.slice(0, 10),
+        customer_name: o.customerName,
+        phone_number: o.phoneNumber,
+        address: o.address,
+        state: o.state,
+        city: o.city,
+        pincode: o.pincode,
+        order_type: o.orderType || 'Prepaid',
+        amount: parseOrderAmount(o.amount) || 0,
+        updated_at: nowIso
+      }));
+
+      for (let i = 0; i < trackingRows.length; i += 100) {
+        const slice = trackingRows.slice(i, i + 100);
+        await supabase
+          .from('customer_tracking_shipments')
+          .upsert(slice, { onConflict: 'courier,awb_number' });
+      }
+    } catch (trackSyncErr) {
+      console.warn('[Logistics Import] Tracking sync warning:', trackSyncErr);
+    }
   }
 
   const inserted = insertedActive + insertedFulfilled + insertedPending + insertedTracking;

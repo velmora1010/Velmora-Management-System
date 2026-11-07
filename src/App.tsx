@@ -7,6 +7,7 @@ import { InventoryLayout } from './layouts/InventoryLayout';
 import { ErrorBoundary } from './components/system/ErrorBoundary';
 import { AuthProvider } from './contexts/AuthContext';
 import { RBACProvider } from './contexts/RBACContext';
+import { RnDProvider } from './modules/marketing/rnd/context/RnDContext';
 import { ProtectedRoute } from './components/system/ProtectedRoute';
 import { LoginPage } from './pages/LoginPage';
 import { HomePage } from './pages/HomePage';
@@ -82,6 +83,7 @@ function App() {
       <AuthProvider>
         <RBACProvider>
           <BrowserRouter>
+            <RnDProvider>
           <Toaster position="bottom-right" toastOptions={{
             style: {
               background: '#1e293b',
@@ -185,6 +187,7 @@ function App() {
               </Route>
             </Routes>
           </Suspense>
+            </RnDProvider>
           </BrowserRouter>
         </RBACProvider>
       </AuthProvider>

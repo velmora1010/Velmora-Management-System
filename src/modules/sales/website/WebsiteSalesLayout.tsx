@@ -5,13 +5,17 @@ import {
   LayoutDashboard, 
   UploadCloud, 
   BarChart3,
-  ShoppingBag
+  ShoppingBag,
+  RotateCcw,
+  History as HistoryIcon
 } from 'lucide-react';
 import { WebsiteDashboard } from './WebsiteDashboard';
 import { WebsiteOrders } from './WebsiteOrders';
 import { WebsiteUpload } from './WebsiteUpload';
 import { WebsiteFiles } from './WebsiteFiles';
 import { WebsiteAnalytics } from './WebsiteAnalytics';
+import { SalesHistoryView } from './components/SalesHistoryView';
+import { RtoReturnsHistoryView } from './components/RtoReturnsHistoryView';
 import { WebsiteSalesDateRangeProvider } from './context/WebsiteSalesDateRangeContext';
 import { WebsiteOrderFilesModal } from './components/WebsiteOrderFilesModal';
 import { WebsiteUploadChoiceModal } from './components/WebsiteUploadChoiceModal';
@@ -28,7 +32,8 @@ export const WebsiteSalesLayout: React.FC = () => {
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', path: '/sales/website/dashboard', icon: LayoutDashboard },
     { id: 'orders', label: 'Orders', path: '/sales/website/orders', icon: ShoppingBag },
-    { id: 'analytics', label: 'Analytics', path: '/sales/website/analytics', icon: BarChart3 }
+    { id: 'analytics', label: 'Analytics', path: '/sales/website/analytics', icon: BarChart3 },
+    { id: 'history', label: 'History', path: '/sales/website/history', icon: HistoryIcon }
   ];
 
   // Global listener to open upload selector modal from dashboard or anywhere in website sales
@@ -122,6 +127,8 @@ export const WebsiteSalesLayout: React.FC = () => {
           <Route path="raw-data" element={<Navigate to="/sales/website/files?view=raw" replace />} />
           <Route path="updated-data" element={<Navigate to="/sales/website/files?view=updated" replace />} />
           <Route path="analytics" element={<WebsiteAnalytics />} />
+          <Route path="history" element={<SalesHistoryView />} />
+          <Route path="rto-returns" element={<Navigate to="/sales/website/history" replace />} />
           <Route path="*" element={<Navigate to="dashboard" replace />} />
         </Routes>
 

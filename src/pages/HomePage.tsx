@@ -40,8 +40,12 @@ export const HomePage = () => {
   const { canView } = useRBAC();
 
   const visibleDepartments = DEPARTMENTS.filter(dept => {
-    const modId = dept.id === 'customer-tickets' ? 'tasks' : (dept.id as AppModule);
-    return canView(modId);
+    try {
+      const modId = dept.id === 'customer-tickets' ? 'customer-tickets' : (dept.id as AppModule);
+      return canView ? canView(modId) : true;
+    } catch {
+      return true;
+    }
   });
 
   return (

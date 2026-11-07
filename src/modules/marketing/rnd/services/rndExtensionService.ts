@@ -11,6 +11,8 @@ interface PendingRequestItem {
   resolve: (val: any) => void;
   reject: (err: any) => void;
   timeoutId?: ReturnType<typeof setTimeout>;
+  type: ExtensionCommandType;
+  timeoutMs: number;
 }
 
 class RndExtensionService {
@@ -25,6 +27,44 @@ class RndExtensionService {
 
   public handleIncomingMessage(data: any) {
     if (data?.source === VELMORA_RND_EXTENSION) {
+      // Pause / resume & heartbeat lifecycle handling for pending research requests
+      if (data.type === 'RESEARCH_PAUSED') {
+        // Freeze/clear timeout timer while paused so client does not reject prematurely
+        this.pendingRequests.forEach((item) => {
+          if (item.timeoutId) {
+            clearTimeout(item.timeoutId);
+            item.timeoutId = undefined;
+          }
+        });
+      } else if (data.type === 'RESEARCH_RESUMED') {
+        // Restart timeout timer with a full fresh window upon resume
+        this.pendingRequests.forEach((item, id) => {
+          if (!item.timeoutId) {
+            item.timeoutId = setTimeout(() => {
+              if (this.pendingRequests.has(id)) {
+                this.pendingRequests.delete(id);
+                item.reject(new Error(`Extension request timeout for ${item.type}`));
+              }
+            }, item.timeoutMs);
+          }
+        });
+      } else if (typeof data.type === 'string' && (data.type.startsWith('REELS_') || data.type.startsWith('PROFILE_'))) {
+        // Live progress heartbeat: refresh timeout for active research so working scrapers never time out
+        this.pendingRequests.forEach((item, id) => {
+          if (item.type === 'START_PROFILE_RESEARCH') {
+            if (item.timeoutId) {
+              clearTimeout(item.timeoutId);
+            }
+            item.timeoutId = setTimeout(() => {
+              if (this.pendingRequests.has(id)) {
+                this.pendingRequests.delete(id);
+                item.reject(new Error(`Extension request timeout for ${item.type}`));
+              }
+            }, item.timeoutMs);
+          }
+        });
+      }
+
       // Handle responses to specific requests
       if (data.id && this.pendingRequests.has(data.id)) {
         const promiseControls = this.pendingRequests.get(data.id)!;
@@ -72,7 +112,7 @@ class RndExtensionService {
         }
       }, timeoutMs);
 
-      this.pendingRequests.set(id, { resolve, reject, timeoutId });
+      this.pendingRequests.set(id, { resolve, reject, timeoutId, type, timeoutMs });
       if (typeof window !== 'undefined') {
         window.postMessage(message, '*');
       }
@@ -137,6 +177,26 @@ class RndExtensionService {
       throw new Error(response.error || 'Unknown error occurred during research');
     } catch (err: any) {
       throw err;
+    }
+  }
+
+  public async cancelResearch(): Promise<void> {
+    this.pendingRequests.forEach((item, id) => {
+      if (item.type === 'START_PROFILE_RESEARCH') {
+        if (item.timeoutId) {
+          clearTimeout(item.timeoutId);
+        }
+        this.pendingRequests.delete(id);
+        item.reject(new Error('RESEARCH_STOPPED_BY_USER'));
+      }
+    });
+
+    if (typeof window !== 'undefined') {
+      try {
+        await this.sendMessage('CANCEL_RESEARCH', undefined, 1500);
+      } catch {
+        // Ignore if extension is not connected or already idle
+      }
     }
   }
 

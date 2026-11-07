@@ -85,4 +85,49 @@ export interface ProfileResearchResult {
   failureStage?: string | null;
   failureReason?: string | null;
   extractionMoment?: any;
+  scrollDiag?: ScrollPhaseDiagnostics | null;
+  retryScrollDiag?: ScrollPhaseDiagnostics | null;
+  retrySkippedReason?: string | null;
+  activeElapsedMs?: number;
+  pausedDurationMs?: number;
+}
+
+export interface ScrollPauseEventDiagnostic {
+  reason: 'companion_window_minimized' | 'occlusion_suspected' | string;
+  stage: string;
+  startedAt: number;
+  endedAt: number;
+  durationMs: number;
+  prePauseStallMs?: number;
+  totalExcludedMs?: number;
+  winStateAtStart: string;
+  docVisAtStart: string;
+  winStateAtResume: string;
+  docVisAtResume: string;
+  timedOut?: boolean;
+}
+
+export interface ScrollPhaseDiagnostics {
+  exitReason: string;
+  elapsedMs: number;
+  wallElapsedMs?: number;
+  pausedMs?: number;
+  minimizedPausedMs?: number;
+  occlusionPausedMs?: number;
+  prePauseStallExcludedMs?: number;
+  minimizedPauseCount?: number;
+  occlusionPauseCount?: number;
+  resumeCount?: number;
+  lastPauseReason?: 'companion_window_minimized' | 'occlusion_suspected' | string | null;
+  pauseEvents?: ScrollPauseEventDiagnostic[];
+  scrollRounds: number;
+  stableRounds: number;
+  zeroRounds: number;
+  loadingGraceRounds: number;
+  totalDiscovered: number;
+  validViews: number;
+  lastLoadingIndicator: boolean;
+  docVisibility: string;
+  winState: string;
+  winFocused?: boolean;
 }

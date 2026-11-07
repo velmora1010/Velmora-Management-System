@@ -1,7 +1,7 @@
 {
   "rewrites": [
     {
-      "source": "/((?!api/|r/).*)",
+      "source": "/((?!api/|r/|downloads/).*)",
       "has": [
         {
           "type": "host",
@@ -11,7 +11,7 @@
       "destination": "/api/r?slug=$1"
     },
     {
-      "source": "/((?!api/|r/).*)",
+      "source": "/((?!api/|r/|downloads/).*)",
       "has": [
         {
           "type": "host",
@@ -21,7 +21,7 @@
       "destination": "/api/r?slug=$1"
     },
     {
-      "source": "/((?!api/|r/).*)",
+      "source": "/((?!api/|r/|downloads/).*)",
       "has": [
         {
           "type": "host",
@@ -31,7 +31,7 @@
       "destination": "/api/r?slug=$1"
     },
     {
-      "source": "/((?!api/|r/).*)",
+      "source": "/((?!api/|r/|downloads/).*)",
       "has": [
         {
           "type": "host",
@@ -53,7 +53,7 @@
       "destination": "/api/$1"
     },
     {
-      "source": "/((?!api/|r/).*)",
+      "source": "/((?!api/|r/|downloads/).*)",
       "destination": "/index.html"
     }
   ]
