@@ -1445,79 +1445,19 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
   const handleSyncOrder = async (order: UnifiedLogisticsOrder) => {
     if (!order.rawId || !order.awbNumber) {
-      toast.error('Cannot sync order without raw ID or AWB number');
+      toast.error('Cannot inspect order without raw ID or AWB number');
       return;
     }
-
-    setSyncingOrderIds(prev => new Set(prev).add(order.rawId!));
-
-    try {
-      const courier = order.courier || 'Delhivery';
-      const result = await trackingEngine.trackSingle(courier, order.awbNumber);
-
-      if (result.success && result.status && result.status !== 'Unknown') {
-        await db.logistics_orders.update(order.rawId, {
-          status: result.status,
-          currentLocation: result.location || order.shippingCity || '',
-          remarks: result.remarks || order.remarks || '',
-          deliveredDate: result.deliveredDate || order.deliveredDate,
-          estimatedDeliveryDate: result.estimatedDeliveryDate,
-          syncedAt: new Date().toISOString()
-        });
-
-        // Sync to Supabase
-        const cleanOid = cleanOrderId(order.orderId || order.displayOrderId || '');
-        if (cleanOid) {
-          try {
-            await supabase.from('customer_tracking_shipments').upsert({
-              order_id: cleanOid,
-              display_order_id: `#${cleanOid}`,
-              awb_number: order.awbNumber,
-              courier: normalizeCourier(order.courier) || order.courier || 'Delhivery',
-              status: result.status,
-              raw_status: result.rawStatus || result.status,
-              remarks: result.remarks || null,
-              delivered_date: result.deliveredDate || null,
-              estimated_delivery_date: result.estimatedDeliveryDate || null,
-              last_location: result.location || null,
-              last_synced_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            }, { onConflict: 'courier,awb_number' });
-          } catch (sbErr) {
-            console.warn('[TRACKING SYNC] Supabase note:', sbErr);
-          }
-        }
-
-        toast.success(`Synced #${order.displayOrderId}: ${result.status}`);
-      } else {
-        toast(`No new updates for #${order.displayOrderId}: ${result.status || result.error || 'Up to date'}`, { icon: 'ℹ️' });
-      }
-    } catch (err: any) {
-      toast.error(`Sync failed for #${order.displayOrderId}: ${err.message}`);
-    } finally {
-      setSyncingOrderIds(prev => {
-        const next = new Set(prev);
-        next.delete(order.rawId!);
-        return next;
-      });
-    }
+    toast(`Order #${order.displayOrderId} tracking status is managed via uploaded courier reports.`, {
+      icon: '📋'
+    });
   };
 
 
 
-  // Complete Bulk Tracking Sync for ALL eligible AWBs across Supabase and Dexie
+  // View Report Synchronization Summary and Health
   const handleBulkSyncAll = async () => {
     setIsBulkSyncModalOpen(true);
-    if (bulkTrackingSyncService.getState().status !== 'running') {
-      bulkTrackingSyncService.startBulkSync({
-        providedOrders: stageShipments,
-        fallbackCount: trackingMetrics.delhiveryCount || trackingMetrics.totalWithAwb || 1314
-      }).then(() => {
-        handleRefresh();
-      }).catch(err => {
-        console.error('[BULK SYNC ERROR]', err);
-      });
-    }
   };
 
 
@@ -2513,7 +2453,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
                 className="h-9 px-3 bg-[#0e1626] hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-xl transition-colors text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
 
-                title="Sync live tracking status"
+                title="View report synchronization status"
 
               >
 
@@ -2935,7 +2875,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                 <div className="text-lg font-bold font-mono text-rose-200 mt-0.5">
                   {trackingMetrics.delhiveryCount.toLocaleString()}
                 </div>
-                <div className="text-[10px] text-rose-400/60 truncate">API Integrated</div>
+                <div className="text-[10px] text-rose-400/60 truncate">Report-Based Tracking</div>
               </div>
 
               {/* 3. ST Courier */}
@@ -2954,7 +2894,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                 <div className="text-lg font-bold font-mono text-sky-200 mt-0.5">
                   {trackingMetrics.stCourierCount.toLocaleString()}
                 </div>
-                <div className="text-[10px] text-sky-400/60 truncate">Web Tracking</div>
+                <div className="text-[10px] text-sky-400/60 truncate">Report-Based Tracking</div>
               </div>
 
               {/* 4. In Transit */}
@@ -3095,7 +3035,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
               {/* 11. Last Synced */}
               <div 
                 onClick={handleBulkSyncAll}
-                title="Click to sync live tracking for active shipments"
+                title="Click to view courier report synchronization status"
                 className="p-2.5 rounded-xl border border-slate-800/80 bg-[#0b1220] hover:border-purple-500/60 transition-all cursor-pointer group"
               >
                 <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium">
@@ -3106,7 +3046,7 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                   {trackingMetrics.lastSynced}
                 </div>
                 <div className="text-[10px] text-purple-400/80 flex items-center gap-1">
-                  <span>{isBulkSyncing ? 'Syncing...' : 'Sync Now'}</span>
+                  <span>Report Sync</span>
                 </div>
               </div>
             </div>
@@ -3781,21 +3721,10 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         isOpen={isBulkSyncModalOpen}
         onClose={() => setIsBulkSyncModalOpen(false)}
         onRefreshView={handleRefresh}
+        onOpenUploadModal={() => setIsCourierTrackingModalOpen(true)}
         providedOrders={stageShipments}
         expectedCount={trackingMetrics.delhiveryCount || trackingMetrics.totalWithAwb || 1314}
       />
-
-      {/* Floating Background Sync Progress Pill */}
-      {bulkSyncState.status === 'running' && !isBulkSyncModalOpen && (
-        <button
-          type="button"
-          onClick={() => setIsBulkSyncModalOpen(true)}
-          className="fixed bottom-6 right-6 z-40 px-4 py-2.5 bg-purple-950/95 hover:bg-purple-900 text-white rounded-full border border-purple-500/60 shadow-2xl shadow-purple-950/80 flex items-center gap-2.5 text-xs font-bold transition-all hover:scale-105 cursor-pointer backdrop-blur-md"
-        >
-          <RefreshCw size={14} className="animate-spin text-purple-400" />
-          <span>Syncing AWBs: {bulkSyncState.progress}% ({bulkSyncState.processed}/{bulkSyncState.totalCandidates})</span>
-        </button>
-      )}
 
     </div>
 

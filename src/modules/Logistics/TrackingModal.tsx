@@ -8,7 +8,6 @@ import { X, Search, Barcode, CheckCircle, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import type { LogisticsOrder } from '../../types/logistics';
-import { trackingEngine } from '../../services/tracking/trackingEngine';
 
 interface TrackingModalProps {
   order: LogisticsOrder;
@@ -176,19 +175,7 @@ export const TrackingModal: React.FC<TrackingModalProps> = ({ order, onClose, on
         onClose();
       }
 
-      // 7. Background status sync
-      if (recordId) {
-        (async () => {
-          try {
-            const syncResult = await trackingEngine.syncOrder(recordId);
-            if (syncResult && syncResult.success) {
-              toast.success(`Tracking synced: ${syncResult.status}`);
-            }
-          } catch (syncErr) {
-            console.warn('Background tracking sync note:', syncErr);
-          }
-        })();
-      }
+      // Status will be synchronized via uploaded courier tracking reports
     } catch (err: any) {
       console.error('Error saving tracking:', err);
       toast.error(`Error saving tracking: ${err.message || String(err)}`);

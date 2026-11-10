@@ -25,13 +25,15 @@ import { CONFIGURED_COURIERS } from '../../../config/courierConfig';
 interface CourierTrackingImportModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSyncSuccess: () => void;
+  onSyncSuccess?: () => void;
+  onImportSuccess?: () => void;
 }
 
 export const CourierTrackingImportModal: React.FC<CourierTrackingImportModalProps> = ({
   isOpen,
   onClose,
-  onSyncSuccess
+  onSyncSuccess,
+  onImportSuccess
 }) => {
   if (!isOpen) return null;
 
@@ -80,7 +82,8 @@ export const CourierTrackingImportModal: React.FC<CourierTrackingImportModalProp
       const res = await commitCourierTrackingUpdates(analysisResult.previewItems);
       if (res.errors.length === 0) {
         toast.success(`Successfully updated ${res.updatedCount} shipments in Dexie & Supabase!`);
-        onSyncSuccess();
+        if (onSyncSuccess) onSyncSuccess();
+        if (onImportSuccess) onImportSuccess();
         onClose();
       } else {
         toast.error('Partial error: ' + res.errors.join(', '));

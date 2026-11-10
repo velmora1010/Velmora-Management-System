@@ -34,6 +34,7 @@ export interface TrackingFilePreviewItem {
   dispatchDate?: string;
   amount?: number;
   paymentMode?: string;
+  currentLocation?: string;
   classification: TrackingMatchClassification;
   isMatched: boolean;
   requiresReview: boolean;
@@ -56,26 +57,214 @@ export interface TrackingFileAnalysisResult {
   previewItems: TrackingFilePreviewItem[];
 }
 
-const normalizeKey = (str: string): string => {
+export interface LastReportSyncSummary {
+  timestamp: string;
+  displayTime: string;
+  courier: string;
+  totalRows: number;
+  updatedCount: number;
+  unmatchedCount: number;
+  duplicateCount: number;
+  invalidCount: number;
+  fileName?: string;
+}
+
+export const LAST_REPORT_SUMMARY_STORAGE_KEY = 'velmora_last_report_sync_summary';
+
+export const getLastReportSyncSummary = (): LastReportSyncSummary | null => {
+  try {
+    const raw = localStorage.getItem(LAST_REPORT_SUMMARY_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+export const saveLastReportSyncSummary = (summary: LastReportSyncSummary) => {
+  try {
+    localStorage.setItem(LAST_REPORT_SUMMARY_STORAGE_KEY, JSON.stringify(summary));
+  } catch (e) {
+    console.warn('Failed to save last report sync summary to localStorage', e);
+  }
+};
+
+export const normalizeKey = (str: string): string => {
   return String(str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 };
 
-const normalizeTrackingStatus = (raw?: string | null): string => {
+/**
+ * Normalizes AWB / Waybill string:
+ * - Preserves leading zeros
+ * - Prevents Excel scientific notation parsing loss (e.g. 5.72514E+13)
+ * - Trims whitespace and strips non-alphanumeric noise
+ */
+export const normalizeAwb = (val: any): string => {
+  if (val === null || val === undefined) return '';
+  let str = String(val).trim();
+  if (!str) return '';
+
+  if (/^[0-9.]+[eE][+-]?[0-9]+$/.test(str)) {
+    try {
+      const num = Number(val);
+      if (!isNaN(num)) {
+        str = BigInt(Math.round(num)).toString();
+      }
+    } catch {
+      // fallback to original str
+    }
+  }
+
+  // Strip trailing float artifacts (.0 or .00)
+  str = str.replace(/\.0+$/, '');
+
+  // Keep alphanumeric characters and hyphens
+  return str.replace(/[^a-zA-Z0-9-]/g, '').trim();
+};
+
+/**
+ * Normalizes courier status from report into canonical internal status:
+ * | Uploaded Status         | Internal Status           |
+ * |-------------------------|---------------------------|
+ * | Delivered               | Delivered                 |
+ * | In Transit              | In Transit                |
+ * | Out for Delivery        | Out for Delivery          |
+ * | Undelivered / Failed    | Failed Attempt            |
+ * | RTO Return              | RTO - In Transit / Seller |
+ * | Pickup Scheduled        | Pickup Scheduled          |
+ * | Ready for Pickup        | Ready for Pickup          |
+ * | Manifested / Booked     | Info Received             |
+ * | Exception / Hold        | Delivery Exception        |
+ */
+export const normalizeTrackingStatus = (raw?: string | null): string => {
   if (!raw) return 'In Transit';
   const s = raw.toLowerCase().trim();
-  if (s.includes('delivered to consignee') || s === 'delivered' || s.includes('delivered')) return 'Delivered';
-  if (s.includes('out for delivery') || s.includes('out_for_delivery')) return 'Out for Delivery';
-  if (s.includes('rto delivered') || s.includes('returned to origin') || s.includes('returned_to_origin')) return 'RTO Delivered to Seller';
-  if (s.includes('rto in transit') || s.includes('returning to origin') || s.includes('returning_to_origin') || s.includes('rto')) return 'RTO - In Transit';
-  if (s.includes('failed attempt') || s.includes('undelivered') || s.includes('refused')) return 'Failed Attempt';
-  if (s.includes('exception') || s.includes('delay') || s.includes('hold') || s.includes('sla')) return 'Delivery Exception';
-  if (s.includes('in transit') || s.includes('transit') || s.includes('shipped') || s.includes('dispatched') || s.includes('pickup scheduled') || s.includes('waiting_pickup')) return 'In Transit';
-  if (s.includes('manifest') || s.includes('booked') || s.includes('info received') || s.includes('picked')) return 'Info Received';
+
+  // 1. Delivered
+  if (
+    s.includes('delivered to consignee') ||
+    s === 'delivered' ||
+    s.includes('delivery complete') ||
+    s.includes('successfully delivered') ||
+    s.startsWith('dlv')
+  ) {
+    return 'Delivered';
+  }
+
+  // 2. Out for Delivery
+  if (
+    s.includes('out for delivery') ||
+    s.includes('out_for_delivery') ||
+    s.includes('dispatched for delivery') ||
+    s.includes('run sheet created') ||
+    s.includes('with delivery courier')
+  ) {
+    return 'Out for Delivery';
+  }
+
+  // 3. RTO Delivered
+  if (
+    s.includes('rto delivered') ||
+    s.includes('returned to origin') ||
+    s.includes('returned to seller') ||
+    s.includes('return delivered') ||
+    s.includes('rto complete')
+  ) {
+    return 'RTO Delivered to Seller';
+  }
+
+  // 4. RTO In Transit
+  if (
+    s.includes('rto in transit') ||
+    s.includes('returning to origin') ||
+    s.includes('rto initiated') ||
+    s.includes('return to origin') ||
+    s.includes('rto - in transit') ||
+    (s.includes('rto') && !s.includes('delivered'))
+  ) {
+    return 'RTO - In Transit';
+  }
+
+  // 5. Undelivered / Failed Attempt
+  if (
+    s.includes('undelivered') ||
+    s.includes('failed attempt') ||
+    s.includes('consignee unavailable') ||
+    s.includes('delivery attempt failed') ||
+    s.includes('refused') ||
+    s.includes('customer not available') ||
+    s.includes('unattempted') ||
+    s.includes('door closed') ||
+    s.includes('address incomplete')
+  ) {
+    return 'Failed Attempt';
+  }
+
+  // 6. Exception / Hold
+  if (
+    s.includes('exception') ||
+    s.includes('delay') ||
+    s.includes('hold') ||
+    s.includes('embargo') ||
+    s.includes('damage') ||
+    s.includes('lost') ||
+    s.includes('sla breach') ||
+    s.includes('audit hold')
+  ) {
+    return 'Delivery Exception';
+  }
+
+  // 7. Pickup Scheduled
+  if (
+    s.includes('pickup scheduled') ||
+    s.includes('scheduled for pickup') ||
+    s.includes('pickup arranged') ||
+    s.includes('pickup planned')
+  ) {
+    return 'Pickup Scheduled';
+  }
+
+  // 8. Ready for Pickup
+  if (
+    s.includes('ready for pickup') ||
+    s.includes('waiting pickup') ||
+    s.includes('ready to ship')
+  ) {
+    return 'Ready for Pickup';
+  }
+
+  // 9. Pending Manifest / Info Received
+  if (
+    s.includes('manifest') ||
+    s.includes('pending manifest') ||
+    s.includes('info received') ||
+    s.includes('booked') ||
+    s.includes('data received') ||
+    s.includes('order created')
+  ) {
+    return 'Info Received';
+  }
+
+  // 10. In Transit
+  if (
+    s.includes('in transit') ||
+    s.includes('transit') ||
+    s.includes('dispatched') ||
+    s.includes('shipped') ||
+    s.includes('departed') ||
+    s.includes('arrived at facility') ||
+    s.includes('bag received') ||
+    s.includes('reached facility')
+  ) {
+    return 'In Transit';
+  }
+
+  // Safe fallback without inventing arbitrary status
   return 'In Transit';
 };
 
 /**
- * Detects appropriate column headers from courier report using normalized header matching
+ * Detects appropriate column headers dynamically for both Delhivery and ST Courier
  */
 export const detectTrackingColumns = (headers: string[]) => {
   const normHeaders = headers.map(normalizeKey);
@@ -85,44 +274,47 @@ export const detectTrackingColumns = (headers: string[]) => {
     return normHeaders.findIndex(h => normCandidates.some(c => h === c || (c.length >= 4 && h.includes(c))));
   };
 
-  // Order ID / Reference column (Delhivery uses "Reference No.")
+  // Order ID / Reference column (Delhivery uses "Reference No.", ST Courier uses "Ref No" or "Order No")
   const orderIdIdx = findIdx([
-    'referenceno', 'referencenumber', 'reference', 'refno', 
-    'orderid', 'ordernumber', 'order', 'order_id', 'invoiceno', 'invoicenumber'
+    'referenceno', 'referencenumber', 'reference', 'refno', 'ref_no', 'ref',
+    'orderid', 'ordernumber', 'order_id', 'orderno', 'order',
+    'invoiceno', 'invoicenumber', 'customerno', 'consigneeref', 'bookingref'
   ]);
 
-  // AWB / Waybill Column
+  // AWB / Waybill Column (Delhivery uses "Waybill", ST Courier uses "Awb" or "Consignment No")
   const awbIdx = findIdx([
-    'waybill', 'waybillnumber', 'awb', 'awbnumber', 'awbno', 
-    'trackingnumber', 'trackingno', 'consignmentnumber', 'consignmentno', 
-    'articlenumber', 'barcode', 'trackingid'
+    'waybill', 'waybillnumber', 'waybillno', 'awb', 'awbnumber', 'awbno', 'awb_no',
+    'trackingnumber', 'trackingno', 'consignmentnumber', 'consignmentno', 'cnno',
+    'articlenumber', 'barcode', 'trackingid', 'docketno', 'podno'
   ]);
 
   // Status Column
   const statusIdx = findIdx([
     'currentstatus', 'status', 'statustype', 'shipmentstatus', 
-    'orderstatus', 'deliverystatus', 'eventstatus'
+    'orderstatus', 'deliverystatus', 'eventstatus', 'delivery_status', 'latest_status', 'pending_return'
   ]);
 
   // Remarks / Latest Event Column
   const remarksIdx = findIdx([
     'remarks', 'pendingreturnedremarks', 'pendingremarks', 'latestevent', 
-    'instructions', 'eventdescription', 'scandetails', 'reason', 'activity', 'lastscan'
+    'instructions', 'eventdescription', 'scandetails', 'reason', 'activity', 
+    'lastscan', 'ndrstatus', 'ndrremarks', 'exceptionreason', 'pendingreason'
   ]);
 
   // Delivery Date Column
   const deliveryDateIdx = findIdx([
-    'delivereddate', 'deliverydate', 'orderdelivereddate', 'deliveredon', 'scandate'
+    'delivereddate', 'deliverydate', 'orderdelivereddate', 'deliveredon', 
+    'scandate', 'actualdeliverydate', 'delivery_time', 'delivered_time'
   ]);
 
   // Estimated Delivery Date Column
   const estimatedDeliveryDateIdx = findIdx([
-    'estimateddeliverydate', 'promiseddeliverydate', 'expecteddeliverydate', 'edd'
+    'estimateddeliverydate', 'promiseddeliverydate', 'expecteddeliverydate', 'edd', 'promise_date'
   ]);
 
   // Pickup / Dispatch Date Column
   const pickupDateIdx = findIdx([
-    'pickupdate', 'pickup_date', 'dispatchdate', 'shippeddate'
+    'pickupdate', 'pickup_date', 'dispatchdate', 'dispatch_date', 'shippeddate', 'manifestdate', 'manifest_date', 'bookingdate'
   ]);
 
   // Courier Column
@@ -132,17 +324,22 @@ export const detectTrackingColumns = (headers: string[]) => {
 
   // Consignee / Customer Column
   const customerIdx = findIdx([
-    'consigneename', 'customername', 'buyername', 'clientname', 'name'
+    'consigneename', 'customername', 'buyername', 'clientname', 'name', 'consignee'
   ]);
 
   // Amount Column
   const amountIdx = findIdx([
-    'orderamount', 'amount', 'totalamount', 'invoicevalue', 'value'
+    'orderamount', 'amount', 'totalamount', 'invoicevalue', 'value', 'collectableamount'
   ]);
 
   // Payment Mode Column
   const paymentModeIdx = findIdx([
-    'paymentmode', 'type', 'paymentmethod'
+    'paymentmode', 'type', 'paymentmethod', 'payment_type'
+  ]);
+
+  // Location / Origin Center Column
+  const locationIdx = findIdx([
+    'origincenter', 'origin_center', 'currentlocation', 'location', 'lastlocation', 'destination', 'scancenter', 'hub'
   ]);
 
   return {
@@ -156,7 +353,8 @@ export const detectTrackingColumns = (headers: string[]) => {
     courierIdx,
     customerIdx,
     amountIdx,
-    paymentModeIdx
+    paymentModeIdx,
+    locationIdx
   };
 };
 
@@ -174,7 +372,8 @@ const parseRowDate = (val?: any): string | undefined => {
 
 /**
  * Analyzes courier tracking spreadsheet against existing database shipments with
- * authoritative Order ID matching and AWB reconciliation.
+ * authoritative primary AWB matching and secondary Order Reference validation.
+ * Supports large reports with zero pagination truncations.
  */
 export const analyzeCourierTrackingFile = async (
   rawRows: any[][],
@@ -204,12 +403,19 @@ export const analyzeCourierTrackingFile = async (
   // File-level courier identity inference
   let fileLevelCourier = selectedCourier || '';
   const headerKeysLower = rawHeaders.map(h => h.toLowerCase());
+  
   const isDelhiveryFormat = 
     headerKeysLower.includes('waybill') && 
-    (headerKeysLower.includes('reference no.') || headerKeysLower.includes('reference no') || headerKeysLower.includes('client') || headerKeysLower.includes('pickup location name'));
+    (headerKeysLower.includes('reference no.') || headerKeysLower.includes('reference no') || headerKeysLower.includes('client') || headerKeysLower.includes('pickup location name') || headerKeysLower.includes('origin center'));
+
+  const isSTCourierFormat = 
+    (headerKeysLower.includes('consignment no') || headerKeysLower.includes('consignment number') || headerKeysLower.includes('st courier')) ||
+    (headerKeysLower.includes('ref no') && !headerKeysLower.includes('waybill'));
 
   if (isDelhiveryFormat) {
     fileLevelCourier = 'Delhivery';
+  } else if (isSTCourierFormat) {
+    fileLevelCourier = 'ST Courier';
   }
 
   // Load all existing database orders and shipments for reconciliation
@@ -223,7 +429,8 @@ export const analyzeCourierTrackingFile = async (
       if (cleanOid) orderIdMap.set(cleanOid, ord);
     }
     if (ord.awbNumber && ord.awbNumber.trim()) {
-      awbMap.set(ord.awbNumber.trim().toLowerCase(), ord);
+      const normAwb = normalizeAwb(ord.awbNumber).toLowerCase();
+      if (normAwb) awbMap.set(normAwb, ord);
     }
   });
 
@@ -243,7 +450,7 @@ export const analyzeCourierTrackingFile = async (
     const row = dataRows[idx];
     const rowNumber = idx + 2;
 
-    const rawAwb = cols.awbIdx !== -1 ? String(row[cols.awbIdx] || '').trim() : '';
+    const rawAwb = cols.awbIdx !== -1 ? normalizeAwb(row[cols.awbIdx]) : '';
     const rawRef = cols.orderIdIdx !== -1 ? String(row[cols.orderIdIdx] || '').trim() : '';
     const cleanOid = cleanOrderId(rawRef);
 
@@ -252,10 +459,10 @@ export const analyzeCourierTrackingFile = async (
       continue;
     }
 
-    if (rawAwb && seenAwbsInFile.has(rawAwb)) {
+    if (rawAwb && seenAwbsInFile.has(rawAwb.toLowerCase())) {
       duplicateAwbCount++;
     } else if (rawAwb) {
-      seenAwbsInFile.add(rawAwb);
+      seenAwbsInFile.add(rawAwb.toLowerCase());
     }
 
     const rawStatus = cols.statusIdx !== -1 ? String(row[cols.statusIdx] || '').trim() : '';
@@ -267,6 +474,7 @@ export const analyzeCourierTrackingFile = async (
     const rawCustomer = cols.customerIdx !== -1 ? String(row[cols.customerIdx] || '').trim() : undefined;
     const rawAmount = cols.amountIdx !== -1 ? Number(String(row[cols.amountIdx] || '').replace(/[^0-9.-]+/g, '')) || undefined : undefined;
     const rawPayment = cols.paymentModeIdx !== -1 ? String(row[cols.paymentModeIdx] || '').trim() : undefined;
+    const rawLocation = cols.locationIdx !== -1 ? String(row[cols.locationIdx] || '').trim() : undefined;
 
     // Determine authoritative courier for this row
     let rowDetectedCourier = rowCourier 
@@ -279,20 +487,20 @@ export const analyzeCourierTrackingFile = async (
 
     const normalizedStatus = normalizeTrackingStatus(rawStatus);
 
-    // Primary matching strategy: Match by exact Order ID
+    // Primary matching strategy: Match by AWB / Waybill number
     let existing: LogisticsOrder | undefined;
-    if (cleanOid) {
-      existing = orderIdMap.get(cleanOid.toLowerCase());
+    if (rawAwb) {
+      existing = awbMap.get(rawAwb.toLowerCase());
     }
 
-    // Secondary fallback: Match by AWB if Order ID was not present or not found
-    if (!existing && rawAwb) {
-      existing = awbMap.get(rawAwb.toLowerCase());
+    // Secondary validation strategy: Fallback to Order ID if not matched by AWB
+    if (!existing && cleanOid) {
+      existing = orderIdMap.get(cleanOid.toLowerCase());
     }
 
     if (existing) {
       matchedCount++;
-      const existingAwb = (existing.awbNumber || '').trim();
+      const existingAwb = normalizeAwb(existing.awbNumber || '');
       const existingCourier = normalizeCourier(existing.courier) || '';
 
       let classification: TrackingMatchClassification = 'CORRECT_MATCH';
@@ -305,23 +513,21 @@ export const analyzeCourierTrackingFile = async (
 
       if (isAwbMismatch && isCourierMismatch) {
         classification = 'BOTH_MISMATCH';
-        bothMismatchHandling: {
-          requiresReview = false; // Authoritative courier file resolves the mismatch
-          reviewReason = `Order #${existing.orderId} currently has AWB ${existingAwb} (${existingCourier}). Updating to verified source AWB ${rawAwb} (${rowDetectedCourier}).`;
-        }
+        requiresReview = false; // Authoritative courier file resolves the mismatch
+        reviewReason = `Order #${existing.orderId} currently has AWB ${existingAwb} (${existingCourier}). Updating to verified report AWB ${rawAwb} (${rowDetectedCourier}).`;
         awbMismatchCount++;
         courierMismatchCount++;
       } else if (isAwbMismatch) {
         classification = 'AWB_MISMATCH';
-        reviewReason = `Existing AWB was ${existingAwb}. Correcting to verified file AWB: ${rawAwb}.`;
+        reviewReason = `Existing AWB was ${existingAwb}. Updating to verified report AWB: ${rawAwb}.`;
         awbMismatchCount++;
       } else if (isCourierMismatch) {
         classification = 'COURIER_MISMATCH';
-        reviewReason = `Existing courier was ${existingCourier}. Correcting to verified file courier: ${rowDetectedCourier}.`;
+        reviewReason = `Existing courier was ${existingCourier}. Updating to verified report courier: ${rowDetectedCourier}.`;
         courierMismatchCount++;
       } else if (isNewAwb) {
         classification = 'NEW_ASSIGNMENT';
-        reviewReason = `Assigning new AWB ${rawAwb} to unassigned Order #${existing.orderId}.`;
+        reviewReason = `Assigning verified report AWB ${rawAwb} to unassigned Order #${existing.orderId}.`;
         newAssignmentCount++;
       } else {
         classification = 'CORRECT_MATCH';
@@ -345,6 +551,7 @@ export const analyzeCourierTrackingFile = async (
         dispatchDate: rawDispatchDate || existing.dispatchDate,
         amount: rawAmount ?? (Number(existing.amount) || undefined),
         paymentMode: rawPayment || existing.orderType,
+        currentLocation: rawLocation || existing.currentLocation,
         classification,
         isMatched: true,
         requiresReview,
@@ -368,6 +575,7 @@ export const analyzeCourierTrackingFile = async (
         dispatchDate: rawDispatchDate,
         amount: rawAmount,
         paymentMode: rawPayment,
+        currentLocation: rawLocation,
         classification: 'NOT_IN_SYSTEM',
         isMatched: false,
         requiresReview: true,
@@ -398,6 +606,11 @@ export const analyzeCourierTrackingFile = async (
  * 2. Supabase customer_tracking_shipments (reconciling old conflicting rows)
  * 3. Supabase sales_orders
  * 4. Dexie tracking_logs
+ * 
+ * Enforces status overwrite protections:
+ * - Never downgrades Delivered to In Transit
+ * - Preserves confirmed delivery from older report overwrites
+ * - Records full audit history and status source
  */
 export const commitCourierTrackingUpdates = async (
   items: TrackingFilePreviewItem[]
@@ -408,7 +621,14 @@ export const commitCourierTrackingUpdates = async (
 
   try {
     const nowIso = new Date().toISOString();
-    const nowLocale = new Date().toLocaleString();
+    const nowLocale = new Date().toLocaleString('en-US', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    }).replace(/,/g, '').replace(/(\d{4})\s/, '$1 • ');
 
     await db.transaction('rw', [db.logistics_orders, db.tracking_logs], async () => {
       for (const item of matched) {
@@ -417,19 +637,22 @@ export const commitCourierTrackingUpdates = async (
         if (!ord) continue;
 
         let finalStatus = item.newStatus;
-        const curStatus = ord.status || '';
-        if ((curStatus === 'Delivered' || curStatus === 'RTO Delivered to Seller') && finalStatus !== curStatus && !finalStatus.includes('RTO')) {
-          console.warn(`[FILE IMPORT PROTECTION] Preserving ${curStatus} for order #${ord.orderId}, ignoring file status: ${finalStatus}`);
+        const curStatus = (ord.status || '').trim();
+
+        // Status Protection: Never downgrade Delivered or RTO Delivered
+        const isCurrentlyDelivered = curStatus === 'Delivered' || curStatus === 'RTO Delivered to Seller';
+        if (isCurrentlyDelivered && finalStatus !== curStatus && !finalStatus.includes('RTO')) {
+          console.warn(`[REPORT IMPORT PROTECTION] Preserving ${curStatus} for order #${ord.orderId}; ignoring older/intermediate file status: ${finalStatus}`);
           finalStatus = curStatus;
         }
 
         const isDelivered = finalStatus === 'Delivered';
-        const isRto = finalStatus.includes('RTO') || finalStatus.includes('Return');
 
         const updatePayload: Partial<LogisticsOrder> = {
           awbNumber: item.awbNumber,
           courier: item.courier,
           status: finalStatus,
+          rawStatus: item.rawStatus || item.newStatus,
           stage: isDelivered ? 'fulfilled' : 'tracking',
           syncedAt: nowLocale
         };
@@ -445,6 +668,9 @@ export const commitCourierTrackingUpdates = async (
         }
         if (item.dispatchDate) {
           updatePayload.dispatchDate = item.dispatchDate;
+        }
+        if (item.currentLocation) {
+          updatePayload.currentLocation = item.currentLocation;
         }
 
         await db.logistics_orders.update(item.matchedRawId, updatePayload);
@@ -515,6 +741,19 @@ export const commitCourierTrackingUpdates = async (
         console.warn(`Supabase sync note for order #${cleanOid}:`, sbErr);
       }
     }
+
+    // 3. Save Report Sync Summary to localStorage for Sync button modal
+    const summary: LastReportSyncSummary = {
+      timestamp: nowIso,
+      displayTime: nowLocale,
+      courier: matched[0]?.courier || 'Report Upload',
+      totalRows: items.length,
+      updatedCount,
+      unmatchedCount: items.filter(it => !it.isMatched).length,
+      duplicateCount: items.filter(it => it.classification === 'DUPLICATE_AWB').length,
+      invalidCount: items.filter(it => it.classification === 'INVALID_DATA').length
+    };
+    saveLastReportSyncSummary(summary);
 
     return { updatedCount, errors };
   } catch (err: any) {

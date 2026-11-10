@@ -7,7 +7,6 @@ import { TrackingStatus } from './TrackingStatus';
 import { LogisticsAnalytics } from './LogisticsAnalytics';
 import { CodTrash } from './CodTrash';
 import { UnifiedLogisticsWorkspace } from './UnifiedLogisticsWorkspace';
-import { scheduledTrackingBot } from '../../services/tracking/scheduledTrackingBot';
 import { Database, FileSpreadsheet, Recycle, Truck, LayoutDashboard, BarChart3, Layers } from 'lucide-react';
 
 export const LogisticsPage: React.FC = () => {
@@ -178,8 +177,6 @@ export const LogisticsPage: React.FC = () => {
       }
     };
     migrateTemporaryStatuses();
-    // Initialize automatic scheduled tracking synchronization bot (4-hour background cycle)
-    scheduledTrackingBot.init();
   }, []);
 
   const handleNavigateTab = (tabId: 'import' | 'data' | 'tracking' | 'trash', fileId?: number | null) => {
