@@ -16,6 +16,11 @@ import {
   PaymentFrequency,
   PaymentMethod,
   ScheduleAuditEntry,
+  EmployeeFile,
+  EmployeeFileCategory,
+  FileUploaderRole,
+  FileSubmissionSource,
+  FileVerificationStatus,
 } from '../types/hrms';
 import {
   INITIAL_SETTINGS,
@@ -26,6 +31,7 @@ import {
   INITIAL_LEAVE_REQUESTS,
   INITIAL_PAYROLL,
   INITIAL_PAYROLL_SCHEDULES,
+  INITIAL_EMPLOYEE_FILES,
   INITIAL_ACTIVITY_LOGS,
   INITIAL_NOTIFICATIONS,
 } from '../data/initialData';
@@ -41,6 +47,12 @@ import { findLinkedEmployee, doesLeaveBelongToEmployee, isSameEmployeeRecord } f
 import {
   fetchEmployeesFromSupabase,
   upsertEmployeeInSupabase,
+  bulkUpsertEmployeesInSupabase,
+  fetchEmployeeFilesFromSupabase,
+  insertEmployeeFileInSupabase,
+  deleteEmployeeFileFromSupabase,
+  deleteEmployeeFileFromStorage,
+  uploadEmployeeFileToStorage,
   deleteEmployeeFromSupabase,
   fetchAttendanceFromSupabase,
   upsertAttendanceInSupabase,
@@ -87,9 +99,23 @@ interface HRMSContextType {
 
   // Employee Operations
   addEmployee: (employee: Omit<Employee, 'id' | 'employeeCode'>) => Employee;
+  addBulkEmployees: (employeesData: Array<Partial<Employee> & { firstName: string; lastName?: string; email: string }>) => Promise<Employee[]>;
   updateEmployee: (id: string, updates: Partial<Employee>) => void;
   deleteEmployee: (id: string) => void;
   getEmployeeById: (id: string) => Employee | undefined;
+
+  // Employee Files / Documents
+  employeeFiles: EmployeeFile[];
+  uploadEmployeeFile: (params: {
+    employeeId: string;
+    file: File;
+    category: EmployeeFileCategory;
+    uploaderRole?: FileUploaderRole;
+    submissionSource?: FileSubmissionSource;
+    uploadedBy?: string;
+    verificationStatus?: FileVerificationStatus;
+  }) => Promise<EmployeeFile>;
+  deleteEmployeeFile: (fileId: string) => Promise<boolean>;
 
   // Department Operations
   addDepartment: (department: Omit<Department, 'id' | 'createdAt'>) => Department;
@@ -172,11 +198,12 @@ const LOCAL_STORAGE_KEYS = {
   NOTIFS: 'hrms_notifications_v3',
   SETTINGS: 'hrms_settings_v3',
   DESIGNATIONS: 'hrms_designations_v3',
+  FILES: 'hrms_employee_files_v1',
 };
 
 export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { showToast } = useToast();
-  const { currentUser, canManageEmployees, canApproveLeave, canApplyLeave, refreshUsers } = useAuth();
+  const { currentUser, canManageEmployees, canApproveLeave, canApplyLeave, refreshUsers, activeHRAccountType } = useAuth();
 
   // 1. Employees State
   const [employees, setEmployees] = useState<Employee[]>(() => {
@@ -358,6 +385,57 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   });
 
+  // 11. Employee Files State
+  const [employeeFiles, setEmployeeFiles] = useState<EmployeeFile[]>(() => {
+    const saved = safeGetItem(LOCAL_STORAGE_KEYS.FILES);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const normalized = parsed.map((file: any) => {
+            const isDhesanDemo =
+              file.id === 'doc-1001' ||
+              file.fileName === 'Dhesan_Govt_ID_Proof.pdf' ||
+              file.id === 'doc-1002' ||
+              file.fileName === 'Dhesan_Offer_Letter_Signed.pdf';
+
+            const isEmp =
+              isDhesanDemo ||
+              file.uploaderRole === 'employee' ||
+              file.submissionSource === 'employee';
+
+            const isHr =
+              !isDhesanDemo &&
+              (file.uploaderRole === 'hr_admin' || file.submissionSource === 'hr');
+
+            const effectiveRole = isEmp ? 'employee' : 'hr_admin';
+            const effectiveSource = isEmp ? 'employee' : isHr ? 'hr' : 'employee';
+            const effectiveUploader = isEmp
+              ? file.uploadedBy && file.uploadedBy !== 'HR Administrator'
+                ? file.uploadedBy
+                : file.employeeName || 'Dhesan M'
+              : isHr
+                ? file.uploadedBy || 'HR Administrator'
+                : file.uploadedBy || 'Unknown Uploader';
+
+            return {
+              ...file,
+              uploaderRole: effectiveRole,
+              submissionSource: effectiveSource,
+              verificationStatus:
+                file.verificationStatus ||
+                (file.uploadStatus === 'Verified' ? 'verified' : isEmp ? 'pending_review' : 'verified'),
+              uploadedBy: effectiveUploader,
+            };
+          });
+          safeSetItem(LOCAL_STORAGE_KEYS.FILES, JSON.stringify(normalized));
+          return normalized;
+        }
+      } catch {}
+    }
+    return INITIAL_EMPLOYEE_FILES;
+  });
+
   // Dashboard Filters
   const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
   const [selectedDate, setSelectedDate] = useState<string>(() => {
@@ -440,6 +518,13 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
 
+    fetchEmployeeFilesFromSupabase().then((remoteFiles) => {
+      if (active && remoteFiles && remoteFiles.length > 0) {
+        setEmployeeFiles(remoteFiles);
+        safeSetItem(LOCAL_STORAGE_KEYS.FILES, JSON.stringify(remoteFiles));
+      }
+    });
+
     return () => {
       active = false;
     };
@@ -498,6 +583,10 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     safeSetItem(LOCAL_STORAGE_KEYS.DESIGNATIONS, JSON.stringify(designations));
   }, [designations]);
 
+  useEffect(() => {
+    safeSetItem(LOCAL_STORAGE_KEYS.FILES, JSON.stringify(employeeFiles));
+  }, [employeeFiles]);
+
   const addDesignation = useCallback((desig: Omit<DesignationItem, 'id'>): DesignationItem => {
     const newDesig: DesignationItem = {
       ...desig,
@@ -522,6 +611,244 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     setActivityLogs((prev) => [newLog, ...prev.slice(0, 49)]);
   }, []);
+
+  // BULK EMPLOYEE ADD
+  const addBulkEmployees = async (
+    rawList: Array<Partial<Employee> & { firstName: string; lastName?: string; email: string }>
+  ): Promise<Employee[]> => {
+    if (!canManageEmployees) {
+      showToast('Only HR/Admin users are authorized to add employees.', 'error');
+      throw new Error('Unauthorized');
+    }
+
+    let maxNum = employees.reduce((max, emp) => {
+      const m = (emp.employeeCode || emp.id || '').match(/(\d+)/);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        const normalized = n < 1000 ? 1000 + n : n;
+        return Math.max(max, normalized);
+      }
+      return max;
+    }, 1000);
+
+    const newlyCreated: Employee[] = [];
+
+    for (const empData of rawList) {
+      let code = empData.employeeCode?.trim();
+      if (!code) {
+        maxNum += 1;
+        code = `EMP-${maxNum}`;
+      } else {
+        const m = code.match(/(\d+)/);
+        if (m) {
+          const n = parseInt(m[1], 10);
+          maxNum = Math.max(maxNum, n);
+        }
+      }
+
+      const id = empData.id || `emp-${code.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`;
+      const fullName = (empData.fullName || `${empData.firstName} ${empData.lastName || ''}`).trim();
+      const avatar = empData.avatar && empData.avatar.trim()
+        ? empData.avatar
+        : getInitialsAvatar(fullName);
+
+      const dept = departments.find(
+        (d) => d.id === empData.departmentId || d.name.toLowerCase() === (empData.departmentName || '').toLowerCase()
+      );
+      const shift = shiftTemplates.find(
+        (s) => s.id === empData.shiftId || s.name.toLowerCase() === (empData.shiftName || '').toLowerCase()
+      );
+
+      const createdEmp: Employee = {
+        id,
+        employeeCode: code,
+        firstName: empData.firstName.trim(),
+        lastName: (empData.lastName || '').trim(),
+        fullName,
+        email: empData.email.trim(),
+        phone: (empData.phone || '').trim(),
+        avatar,
+        gender: (empData.gender as any) || 'male',
+        dateOfBirth: empData.dateOfBirth || '1995-01-01',
+        joiningDate: empData.joiningDate || new Date().toISOString().split('T')[0],
+        departmentId: dept?.id || empData.departmentId || 'dept-eng',
+        departmentName: dept?.name || empData.departmentName || 'Software Development',
+        designation: empData.designation?.trim() || 'Software Developer',
+        status: empData.status || 'active',
+        employmentType: empData.employmentType || 'full_time',
+        shiftId: shift?.id || empData.shiftId || 'shift-morning',
+        shiftName: shift?.name || empData.shiftName || 'Morning Shift',
+        workLocation: empData.workLocation || 'On-site',
+        baseSalary: empData.baseSalary !== undefined ? Number(empData.baseSalary) : 10000,
+        currency: empData.currency || 'INR',
+        bankName: empData.bankName || '',
+        accountNumber: empData.accountNumber || '',
+        ifscCode: empData.ifscCode || '',
+        taxId: empData.taxId || '',
+        emergencyContactName: empData.emergencyContactName || '',
+        emergencyContactRelation: empData.emergencyContactRelation || '',
+        emergencyContactPhone: empData.emergencyContactPhone || '',
+        address: empData.address || '',
+        city: empData.city || '',
+        country: empData.country || '',
+        bio: empData.bio || '',
+      };
+
+      newlyCreated.push(createdEmp);
+    }
+
+    setEmployees((prev) => {
+      const merged = [...newlyCreated, ...prev];
+      safeSetItem(LOCAL_STORAGE_KEYS.EMPLOYEES, JSON.stringify(merged));
+      return merged;
+    });
+
+    bulkUpsertEmployeesInSupabase(newlyCreated).catch((err) => {
+      console.warn('[Supabase HR] Failed to sync bulk employees:', err);
+    });
+
+    logActivity('bulk imported employees', `Added ${newlyCreated.length} employees`, 'employee', '#2563EB');
+    showToast(`Successfully added ${newlyCreated.length} employees!`, 'success', 'Bulk Import Complete');
+    return newlyCreated;
+  };
+
+  // EMPLOYEE FILES CRUD
+  const uploadEmployeeFile = async ({
+    employeeId,
+    file,
+    category,
+    uploaderRole,
+    submissionSource,
+    uploadedBy,
+    verificationStatus,
+  }: {
+    employeeId: string;
+    file: File;
+    category: EmployeeFileCategory;
+    uploaderRole?: FileUploaderRole;
+    submissionSource?: FileSubmissionSource;
+    uploadedBy?: string;
+    verificationStatus?: FileVerificationStatus;
+  }): Promise<EmployeeFile> => {
+    const emp = employees.find((e) => e.id === employeeId || e.employeeCode === employeeId);
+    const empCode = emp?.employeeCode || employeeId;
+    const empName = emp?.fullName || 'Employee';
+
+    // Storage upload
+    const { publicUrl, storagePath } = await uploadEmployeeFileToStorage(file, empCode);
+
+    const formattedSize =
+      file.size < 1024 * 1024
+        ? `${Math.round(file.size / 1024)} KB`
+        : `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+
+    // Strictly determine uploader role and submission source
+    const isEmployeeUploader =
+      uploaderRole === 'employee' ||
+      submissionSource === 'employee' ||
+      currentUser?.role === 'employee' ||
+      activeHRAccountType === 'employee';
+
+    const isHrUploader =
+      uploaderRole === 'hr_admin' ||
+      submissionSource === 'hr' ||
+      currentUser?.role === 'admin' ||
+      canManageEmployees;
+
+    const effectiveRole: FileUploaderRole = isEmployeeUploader
+      ? 'employee'
+      : isHrUploader
+        ? 'hr_admin'
+        : 'employee';
+
+    const effectiveSource: FileSubmissionSource = isEmployeeUploader
+      ? 'employee'
+      : isHrUploader
+        ? 'hr'
+        : 'employee';
+
+    const effectiveStatus: 'Uploaded' | 'Verified' | 'Pending' =
+      effectiveSource === 'employee' ? 'Pending' : 'Uploaded';
+
+    const effectiveVerification: FileVerificationStatus =
+      verificationStatus || (effectiveSource === 'employee' ? 'pending_review' : 'verified');
+
+    const effectiveUploadedBy =
+      uploadedBy ||
+      (effectiveSource === 'employee'
+        ? currentUser?.name || empName || 'Employee'
+        : isHrUploader
+          ? currentUser?.name || 'HR Administrator'
+          : 'Unknown Uploader');
+
+    const newFile: EmployeeFile = {
+      id: `doc-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      employeeId: emp?.id || employeeId,
+      employeeCode: empCode,
+      employeeName: empName,
+      fileName: file.name,
+      fileType: file.type || 'application/octet-stream',
+      fileSize: formattedSize,
+      fileSizeBytes: file.size,
+      storagePath,
+      publicUrl,
+      category,
+      uploadStatus: effectiveStatus,
+      verificationStatus: effectiveVerification,
+      uploadedBy: effectiveUploadedBy,
+      uploaderRole: effectiveRole,
+      submissionSource: effectiveSource,
+      uploadedAt: new Date().toLocaleString(),
+    };
+
+    setEmployeeFiles((prev) => {
+      const updated = [newFile, ...prev];
+      safeSetItem(LOCAL_STORAGE_KEYS.FILES, JSON.stringify(updated));
+      return updated;
+    });
+
+    insertEmployeeFileInSupabase(newFile).catch((err) => {
+      console.warn('[Supabase HR] Failed to insert file record:', err);
+    });
+
+    logActivity(
+      effectiveSource === 'employee' ? 'submitted employee document' : 'uploaded employee document',
+      `${file.name} for ${empName}`,
+      'employee',
+      '#3B82F6'
+    );
+    showToast(
+      effectiveSource === 'employee'
+        ? `Document "${file.name}" submitted successfully for HR review!`
+        : `Document "${file.name}" uploaded successfully!`,
+      'success',
+      'File Uploaded'
+    );
+    return newFile;
+  };
+
+  const deleteEmployeeFile = async (fileId: string): Promise<boolean> => {
+    if (!fileId) return false;
+    const targetFile = employeeFiles.find((f) => f.id === fileId);
+    setEmployeeFiles((prev) => {
+      const updated = prev.filter((f) => f.id !== fileId);
+      safeSetItem(LOCAL_STORAGE_KEYS.FILES, JSON.stringify(updated));
+      return updated;
+    });
+
+    if (targetFile?.storagePath) {
+      deleteEmployeeFileFromStorage(targetFile.storagePath).catch((err) => {
+        console.warn('[Supabase Storage] Failed to delete file from storage:', err);
+      });
+    }
+
+    deleteEmployeeFileFromSupabase(fileId, targetFile?.storagePath).catch((err) => {
+      console.warn('[Supabase HR] Failed to delete file record:', err);
+    });
+
+    showToast('Document deleted successfully.', 'success', 'File Deleted');
+    return true;
+  };
 
   // EMPLOYEE CRUD
   const addEmployee = (empData: Omit<Employee, 'id' | 'employeeCode'>): Employee => {
@@ -1837,6 +2164,7 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setShiftTemplates(INITIAL_SHIFTS);
     setPayrollRecords(INITIAL_PAYROLL);
     setPayrollSchedules(INITIAL_PAYROLL_SCHEDULES);
+    setEmployeeFiles(INITIAL_EMPLOYEE_FILES);
     setActivityLogs(INITIAL_ACTIVITY_LOGS);
     setNotifications(INITIAL_NOTIFICATIONS);
     setSettings(INITIAL_SETTINGS);
@@ -1941,9 +2269,14 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setSelectedDate,
 
         addEmployee,
+        addBulkEmployees,
         updateEmployee,
         deleteEmployee,
         getEmployeeById,
+
+        employeeFiles,
+        uploadEmployeeFile,
+        deleteEmployeeFile,
 
         addDepartment,
         updateDepartment,

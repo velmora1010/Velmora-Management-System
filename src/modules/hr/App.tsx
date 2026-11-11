@@ -6,6 +6,7 @@ import { HRMSProvider, useHRMS } from './context/HRMSContext';
 import { Sidebar, NavigationTab } from './components/layout/Sidebar';
 import { TopNav } from './components/layout/TopNav';
 import { findLinkedEmployee } from './utils/employeeIdentity';
+import { WORK_ASSIGNMENT_ENABLED } from './config/hrModuleConfig';
 
 // Modules
 import { HRDashboard } from './components/modules/dashboard/HRDashboard';
@@ -55,8 +56,7 @@ const VALID_TABS: NavigationTab[] = [
   'departments',
   'leave',
   'shifts',
-  'work-assignment',
-  'assigned-works',
+  ...(WORK_ASSIGNMENT_ENABLED ? (['work-assignment', 'assigned-works'] as NavigationTab[]) : []),
   'employee-welfare',
   'payroll',
   'reports',
@@ -77,6 +77,9 @@ const getTabFromLocation = (): NavigationTab => {
 };
 
 const resolveRolePermittedTab = (tab: NavigationTab, canManageEmployees: boolean): NavigationTab => {
+  if (!WORK_ASSIGNMENT_ENABLED && (tab === 'work-assignment' || tab === 'assigned-works')) {
+    return 'dashboard';
+  }
   if (canManageEmployees && tab === 'assigned-works') {
     return 'work-assignment';
   }
@@ -179,6 +182,10 @@ const HRMSAppContent: React.FC = () => {
 
   const handleNavigateTab = useCallback(
     (tab: NavigationTab) => {
+      if (!WORK_ASSIGNMENT_ENABLED && (tab === 'work-assignment' || tab === 'assigned-works')) {
+        setCurrentTab('dashboard');
+        return;
+      }
       if (tab === 'employee-welfare' && !canManageEmployees) {
         setCurrentTab('employees');
         handleOpenMyProfileProductSelect();
@@ -321,9 +328,9 @@ const HRMSAppContent: React.FC = () => {
             />
           )}
 
-          {effectiveTab === 'work-assignment' && canManageEmployees && <WorkAssignmentModule />}
+          {WORK_ASSIGNMENT_ENABLED && effectiveTab === 'work-assignment' && canManageEmployees && <WorkAssignmentModule />}
 
-          {effectiveTab === 'assigned-works' && !canManageEmployees && <AssignedWorksModule />}
+          {WORK_ASSIGNMENT_ENABLED && effectiveTab === 'assigned-works' && !canManageEmployees && <AssignedWorksModule />}
 
           {effectiveTab === 'employee-welfare' && canManageEmployees && <EmployeeWelfareModule />}
 

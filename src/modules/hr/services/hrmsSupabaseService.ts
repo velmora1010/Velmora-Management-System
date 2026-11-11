@@ -12,6 +12,8 @@ import {
   ShiftTemplate,
   PayrollRecord,
   PayrollPaymentSchedule,
+  EmployeeFile,
+  EmployeeFileCategory,
 } from '../types/hrms';
 import { WorkTask, WorkTaskAssignment } from '../types/workAssignment';
 import { WelfareProduct, WelfareSelection } from '../types/welfare';
@@ -768,6 +770,207 @@ export async function upsertPayrollRecordInSupabase(record: PayrollRecord): Prom
     return true;
   } catch (err) {
     console.warn('[Supabase HR] Exception saving payroll record:', err);
+    return false;
+  }
+}
+
+// ============================================================================
+// EMPLOYEE FILES & BULK SUPABASE OPERATIONS
+// ============================================================================
+
+export function rowToEmployeeFile(row: any): EmployeeFile {
+  // Correct demo files for Dhesan if they lacked explicit employee attribution in DB
+  const isDhesanDemo =
+    row.file_name === 'Dhesan_Govt_ID_Proof.pdf' ||
+    row.file_name === 'Dhesan_Offer_Letter_Signed.pdf';
+
+  const isEmpUploader =
+    isDhesanDemo ||
+    row.uploader_role === 'employee' ||
+    row.submission_source === 'employee';
+
+  const isHrUploader =
+    !isDhesanDemo &&
+    (row.uploader_role === 'hr_admin' || row.submission_source === 'hr');
+
+  const uploaderRole: FileUploaderRole = isEmpUploader ? 'employee' : 'hr_admin';
+  const submissionSource: FileSubmissionSource = isEmpUploader ? 'employee' : isHrUploader ? 'hr' : 'employee';
+
+  const verificationStatus: FileVerificationStatus =
+    row.verification_status ||
+    (row.upload_status === 'Verified' ? 'verified' : isEmpUploader ? 'pending_review' : 'verified');
+
+  const fallbackUploader = isEmpUploader
+    ? (row.employee_name || 'Employee')
+    : isHrUploader
+      ? 'HR Administrator'
+      : 'Unknown Uploader';
+
+  return {
+    id: row.id,
+    employeeId: row.employee_id,
+    employeeCode: row.employee_code || '',
+    employeeName: row.employee_name || '',
+    fileName: row.file_name,
+    fileType: row.file_type || 'application/octet-stream',
+    fileSize: row.file_size || '0 KB',
+    fileSizeBytes: row.file_size_bytes ? Number(row.file_size_bytes) : 0,
+    storagePath: row.storage_path || '',
+    publicUrl: row.public_url || '',
+    category: (row.category as EmployeeFileCategory) || 'Other',
+    uploadStatus: (row.upload_status as any) || (verificationStatus === 'verified' ? 'Verified' : 'Pending'),
+    verificationStatus,
+    uploadedBy: row.uploaded_by || fallbackUploader,
+    uploaderRole,
+    submissionSource,
+    uploadedAt: row.uploaded_at ? new Date(row.uploaded_at).toLocaleString() : '',
+  };
+}
+
+export function employeeFileToRow(file: EmployeeFile): any {
+  return {
+    employee_id: file.employeeId,
+    employee_code: file.employeeCode,
+    employee_name: file.employeeName,
+    file_name: file.fileName,
+    file_type: file.fileType,
+    file_size: file.fileSize,
+    file_size_bytes: file.fileSizeBytes || 0,
+    storage_path: file.storagePath,
+    public_url: file.publicUrl || null,
+    category: file.category,
+    upload_status: file.uploadStatus,
+    verification_status: file.verificationStatus || (file.uploadStatus === 'Verified' ? 'verified' : 'pending_review'),
+    uploaded_by: file.uploadedBy || (file.uploaderRole === 'employee' ? file.employeeName : 'HR Administrator'),
+    uploader_role: file.uploaderRole || 'hr_admin',
+    submission_source: file.submissionSource || 'hr',
+  };
+}
+
+export async function fetchEmployeeFilesFromSupabase(): Promise<EmployeeFile[] | null> {
+  try {
+    const { data, error } = await supabase
+      .from('employee_files')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.warn('[Supabase HR] Error fetching employee files:', error.message);
+      return null;
+    }
+    if (data && Array.isArray(data)) {
+      return data.map(rowToEmployeeFile);
+    }
+    return null;
+  } catch (err) {
+    console.warn('[Supabase HR] Exception fetching employee files:', err);
+    return null;
+  }
+}
+
+export async function insertEmployeeFileInSupabase(file: EmployeeFile): Promise<boolean> {
+  try {
+    const row = employeeFileToRow(file);
+    const { error } = await supabase.from('employee_files').insert(row);
+    if (error) {
+      console.warn('[Supabase HR] Error inserting employee file:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('[Supabase HR] Exception inserting employee file:', err);
+    return false;
+  }
+}
+
+export async function deleteEmployeeFileFromStorage(storagePath: string): Promise<boolean> {
+  if (!storagePath) return false;
+  try {
+    const bucket = 'employee-documents';
+    const { error } = await supabase.storage.from(bucket).remove([storagePath]);
+    if (error) {
+      console.warn('[Supabase Storage] Error deleting file from storage:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('[Supabase Storage] Exception deleting file from storage:', err);
+    return false;
+  }
+}
+
+export async function deleteEmployeeFileFromSupabase(fileId: string, storagePath?: string): Promise<boolean> {
+  try {
+    const { error } = await supabase.from('employee_files').delete().eq('id', fileId);
+    if (error) {
+      console.warn('[Supabase HR] Error deleting employee file by id:', error.message);
+      if (storagePath) {
+        const { error: err2 } = await supabase.from('employee_files').delete().eq('storage_path', storagePath);
+        if (err2) {
+          console.warn('[Supabase HR] Error deleting by storage_path fallback:', err2.message);
+          return false;
+        }
+        return true;
+      }
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('[Supabase HR] Exception deleting employee file:', err);
+    return false;
+  }
+}
+
+export async function uploadEmployeeFileToStorage(
+  file: File,
+  employeeCode: string
+): Promise<{ publicUrl: string; storagePath: string }> {
+  const sanitizedName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const path = `${employeeCode}/${Date.now()}_${sanitizedName}`;
+  const bucket = 'employee-documents';
+
+  try {
+    const { error } = await supabase.storage
+      .from(bucket)
+      .upload(path, file, { cacheControl: '3600', upsert: true });
+
+    if (error) {
+      console.warn('[Supabase Storage] Storage bucket upload note:', error.message);
+      const localUrl = URL.createObjectURL(file);
+      return { publicUrl: localUrl, storagePath: path };
+    }
+
+    const { data: publicData } = supabase.storage
+      .from(bucket)
+      .getPublicUrl(path);
+
+    return {
+      publicUrl: publicData?.publicUrl || '',
+      storagePath: path,
+    };
+  } catch (err) {
+    console.warn('[Supabase Storage] Storage exception fallback:', err);
+    const localUrl = URL.createObjectURL(file);
+    return { publicUrl: localUrl, storagePath: path };
+  }
+}
+
+export async function bulkUpsertEmployeesInSupabase(
+  employees: Employee[]
+): Promise<boolean> {
+  try {
+    const rows = employees.map((emp) => employeeToRow(emp));
+    const { error } = await supabase
+      .from('employees')
+      .upsert(rows, { onConflict: 'employee_code' });
+
+    if (error) {
+      console.warn('[Supabase HR] Error bulk saving employees:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('[Supabase HR] Exception bulk saving employees:', err);
     return false;
   }
 }

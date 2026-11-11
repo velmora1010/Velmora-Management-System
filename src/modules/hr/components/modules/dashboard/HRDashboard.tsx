@@ -33,6 +33,7 @@ interface HRDashboardProps {
   onOpenCheckIn: () => void;
   onAddEmployee?: () => void;
   onAddShift?: () => void;
+  onOpenMyProfile?: () => void;
 }
 
 export const HRDashboard: React.FC<HRDashboardProps> = ({
@@ -42,6 +43,7 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({
   onOpenCheckIn,
   onAddEmployee,
   onAddShift,
+  onOpenMyProfile,
 }) => {
   const {
     departments,
@@ -61,6 +63,7 @@ export const HRDashboard: React.FC<HRDashboardProps> = ({
         onNavigateTab={onNavigateTab}
         onSelectLeave={onSelectLeave}
         onOpenCheckIn={onOpenCheckIn}
+        onOpenMyProfile={onOpenMyProfile}
       />
     );
   }

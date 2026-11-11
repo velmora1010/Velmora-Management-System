@@ -8,6 +8,7 @@ import {
   DollarSign,
   Phone,
   Shield,
+  Lock,
   UploadCloud,
   Upload,
   Trash2,
@@ -130,6 +131,26 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
   const [address, setAddress] = useState('');
   const [country, setCountry] = useState('');
   const [bio, setBio] = useState('');
+
+  // Derived read-only display values for Salary & Bank identification
+  const employeeDisplayName = useMemo(() => {
+    const fromInputs = `${firstName || ''} ${lastName || ''}`.trim();
+    if (fromInputs) return fromInputs;
+    if (activeEmployee) {
+      if (activeEmployee.fullName) return activeEmployee.fullName.trim();
+      const combined = `${activeEmployee.firstName || ''} ${activeEmployee.lastName || ''}`.trim();
+      if (combined) return combined;
+    }
+    return '';
+  }, [firstName, lastName, activeEmployee]);
+
+  const employeeDisplayCode = useMemo(() => {
+    return (
+      activeEmployee?.employeeCode ||
+      employeeToEdit?.employeeCode ||
+      (employeeToEdit?.id ? `EMP-${employeeToEdit.id}` : 'Auto-Generated on Save')
+    );
+  }, [activeEmployee, employeeToEdit]);
 
   // Close designation dropdown when clicking outside
   useEffect(() => {
@@ -1341,6 +1362,45 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               <span>
                 Confidential financial fields are protected by role-based access control and encrypted.
               </span>
+            </div>
+
+            {/* Top Row: Employee Identification (Read-Only) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-white uppercase mb-1 flex items-center justify-between">
+                  <span>Employee Name</span>
+                  <span className="text-[10px] text-slate-400 font-normal lowercase tracking-normal flex items-center gap-1">
+                    <Lock className="w-2.5 h-2.5 text-slate-400" />
+                    <span>read-only</span>
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  readOnly
+                  tabIndex={-1}
+                  value={employeeDisplayName}
+                  className="w-full px-3 py-2 text-sm rounded-xl font-medium cursor-not-allowed select-none opacity-90 focus:outline-hidden"
+                  placeholder="Enter employee name in Personal Info"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-white uppercase mb-1 flex items-center justify-between">
+                  <span>Employee ID</span>
+                  <span className="text-[10px] text-slate-400 font-normal lowercase tracking-normal flex items-center gap-1">
+                    <Lock className="w-2.5 h-2.5 text-slate-400" />
+                    <span>read-only</span>
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  readOnly
+                  tabIndex={-1}
+                  value={employeeDisplayCode}
+                  className="w-full px-3 py-2 text-sm rounded-xl font-mono cursor-not-allowed select-none opacity-90 text-slate-300 focus:outline-hidden"
+                  placeholder="Auto-generated on save"
+                />
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

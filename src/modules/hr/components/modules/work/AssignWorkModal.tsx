@@ -690,15 +690,6 @@ export const AssignWorkModal: React.FC<AssignWorkModalProps> = ({
 
             <button
               type="button"
-              onClick={handleAddAnotherTask}
-              className="px-4 py-2.5 rounded-xl border border-[#2563EB]/60 hover:border-[#3B82F6] text-xs font-bold text-[#60A5FA] hover:text-white bg-[#2563EB]/10 hover:bg-[#2563EB]/25 transition-colors flex items-center gap-1.5 cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Another Task</span>
-            </button>
-
-            <button
-              type="button"
               onClick={handleSaveAndConfirm}
               className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#2563EB] to-[#4F46E5] hover:from-[#1D4ED8] hover:to-[#4338CA] text-white text-xs font-bold shadow-md shadow-blue-950/40 hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer"
             >
