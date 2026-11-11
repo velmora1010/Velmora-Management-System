@@ -20,6 +20,7 @@ import { useHRMS } from '../../context/HRMSContext';
 import { useAuth } from '../../context/AuthContext';
 import { useWorkAssignment } from '../../context/WorkAssignmentContext';
 import { findLinkedEmployee, doesAssignmentBelongToEmployee } from '../../utils/employeeIdentity';
+import { WORK_ASSIGNMENT_ENABLED } from '../../config/hrModuleConfig';
 
 export type NavigationTab =
   | 'dashboard'
@@ -57,7 +58,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const pendingLeaves = leaveRequests.filter((l) => l.status === 'pending').length;
 
   const assignedWorksBadge = React.useMemo(() => {
-    if (canManageEmployees) {
+    if (!WORK_ASSIGNMENT_ENABLED || canManageEmployees) {
       return null;
     }
     const ownEmp = findLinkedEmployee(currentUser, employees);
@@ -160,6 +161,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // Employee login: Show Assigned Works; Hide Work Assignment & standalone Employee Welfare.
   const visibleNavItems = navItems.filter(
     (item) =>
+      (WORK_ASSIGNMENT_ENABLED || (item.id !== 'work-assignment' && item.id !== 'assigned-works')) &&
       (item.id !== 'employee-welfare' || canManageEmployees) &&
       (item.id !== 'work-assignment' || canManageEmployees) &&
       (item.id !== 'assigned-works' || !canManageEmployees)

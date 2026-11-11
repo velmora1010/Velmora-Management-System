@@ -1,6 +1,5 @@
-import React, { useState, useRef, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
-  UploadCloud,
   FileText,
   Image as ImageIcon,
   FileCode,
@@ -15,12 +14,8 @@ import {
   Loader2,
   ArrowLeft,
   ChevronRight,
-  ShieldCheck,
-  Plus,
   X,
-  XCircle,
   UserCheck,
-  User,
 } from 'lucide-react';
 import { Employee, EmployeeFile, EmployeeFileCategory } from '../../../types/hrms';
 import { Avatar } from '../../common/Avatar';
@@ -28,7 +23,7 @@ import { Avatar } from '../../common/Avatar';
 interface EmployeeFilesSectionProps {
   employees?: Employee[];
   employeeFiles?: EmployeeFile[];
-  onUploadFile: (params: {
+  onUploadFile?: (params: {
     employeeId: string;
     file: File;
     category: EmployeeFileCategory;
@@ -40,34 +35,12 @@ interface EmployeeFilesSectionProps {
   canManage: boolean;
 }
 
-interface SelectedUploadFile {
-  id: string;
-  file: File;
-}
-
-const CATEGORIES: EmployeeFileCategory[] = [
-  'ID Proof',
-  'Offer Letter',
-  'Resume',
-  'Contract',
-  'Other',
-];
-
-const ALLOWED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx'];
-const MAX_FILE_SIZE_MB = 15;
-
 export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
   employees = [],
   employeeFiles = [],
-  onUploadFile,
   onDeleteFile,
   canManage,
 }) => {
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>(
-    employees[0]?.id || ''
-  );
-  const [selectedCategory, setSelectedCategory] = useState<EmployeeFileCategory>('ID Proof');
-
   // Currently focused employee for dedicated document details view (null = show employee table)
   const [activeEmployeeId, setActiveEmployeeId] = useState<string | null>(null);
 
@@ -76,49 +49,19 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
   const [filterDepartment, setFilterDepartment] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all'); // 'all' | 'verified' | 'submitted' | 'pending'
 
-  // Selected files queue before submission
-  const [selectedFiles, setSelectedFiles] = useState<SelectedUploadFile[]>([]);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
+  // Delete confirmation modal state
+  const [documentToDelete, setDocumentToDelete] = useState<EmployeeFile | null>(null);
+  const [isDeletingDoc, setIsDeletingDoc] = useState(false);
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const uploadSectionRef = useRef<HTMLDivElement | null>(null);
-
-  // Sync selectedEmployeeId if employees load asynchronously
-  useEffect(() => {
-    if (!selectedEmployeeId && employees.length > 0) {
-      setSelectedEmployeeId(employees[0].id);
-    }
-  }, [employees, selectedEmployeeId]);
-
-  // Keep upload target in sync when viewing a specific employee's document details
-  useEffect(() => {
-    if (activeEmployeeId) {
-      setSelectedEmployeeId(activeEmployeeId);
-    }
-  }, [activeEmployeeId]);
-
-  // Helper to fetch documents for a given employee
+  // Helper to fetch documents for a given employee (strictly employee-submitted documents only)
   const getEmployeeDocs = (emp: Employee): EmployeeFile[] => {
     return employeeFiles.filter((f) => {
       const matchId = f.employeeId && (f.employeeId === emp.id || f.employeeId.toLowerCase() === emp.id.toLowerCase());
       const matchCode = emp.employeeCode && f.employeeCode && f.employeeCode.toLowerCase() === emp.employeeCode.toLowerCase();
-      return Boolean(matchId || matchCode);
+      const isOwner = Boolean(matchId || matchCode);
+      const isEmployeeSubmission = f.submissionSource === 'employee' || f.uploaderRole === 'employee';
+      return isOwner && isEmployeeSubmission;
     });
-  };
-
-  // Helper to compute exact document counts separating Employee Submitted vs HR Uploaded
-  const getEmployeeDocStats = (emp: Employee) => {
-    const docs = getEmployeeDocs(emp);
-    const employeeSubmitted = docs.filter(
-      (d) => d.submissionSource === 'employee' || d.uploaderRole === 'employee'
-    ).length;
-    const hrUploaded = docs.filter(
-      (d) => d.submissionSource === 'hr' || (d.uploaderRole === 'hr_admin' && d.submissionSource !== 'employee')
-    ).length;
-    const total = employeeSubmitted + hrUploaded;
-    return { employeeSubmitted, hrUploaded, total, docs };
   };
 
   // Helper to compute submission status: Verified, Submitted, or Pending
@@ -128,28 +71,22 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
     return allVerified ? 'Verified' : 'Submitted';
   };
 
+  // Total count of employee-submitted files across all employees
+  const totalSubmittedFiles = useMemo(() => {
+    return employeeFiles.filter((f) => f.submissionSource === 'employee' || f.uploaderRole === 'employee').length;
+  }, [employeeFiles]);
+
   // Currently active employee object
   const activeEmployee = useMemo(() => {
     if (!activeEmployeeId) return null;
     return employees.find((e) => e.id === activeEmployeeId) || null;
   }, [activeEmployeeId, employees]);
 
-  // Documents of the active employee
+  // Documents of the active employee (strictly personal employee submissions)
   const activeEmployeeDocs = useMemo(() => {
     if (!activeEmployee) return [];
     return getEmployeeDocs(activeEmployee);
   }, [activeEmployee, employeeFiles]);
-
-  // Document statistics of active employee
-  const activeEmployeeStats = useMemo(() => {
-    if (!activeEmployee) return { employeeSubmitted: 0, hrUploaded: 0, total: 0, docs: [] };
-    return getEmployeeDocStats(activeEmployee);
-  }, [activeEmployee, employeeFiles]);
-
-  // Selected employee object for upload
-  const selectedEmployee = useMemo(() => {
-    return employees.find((e) => e.id === selectedEmployeeId);
-  }, [employees, selectedEmployeeId]);
 
   // Unique departments for filter
   const departmentsList = useMemo(() => {
@@ -186,98 +123,6 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
     });
   }, [employees, employeeFiles, filterDepartment, filterStatus, searchQuery]);
 
-  // Validate single file
-  const validateFile = (file: File): string | null => {
-    const ext = '.' + file.name.split('.').pop()?.toLowerCase();
-    if (!ALLOWED_EXTENSIONS.includes(ext)) {
-      return `Invalid file type "${file.name}". Only PDF, JPG, PNG, and DOC/DOCX are allowed.`;
-    }
-    if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-      return `File "${file.name}" exceeds ${MAX_FILE_SIZE_MB}MB size limit.`;
-    }
-    return null;
-  };
-
-  // Handle files selected via file picker
-  const handleFileSelect = (fileList: FileList | null) => {
-    if (!fileList || fileList.length === 0) return;
-    if (!selectedEmployeeId) {
-      setUploadError('Please select an employee before uploading documentation.');
-      return;
-    }
-
-    setUploadError(null);
-    setUploadSuccess(null);
-
-    const filesArray = Array.from(fileList);
-    const newItems: SelectedUploadFile[] = [];
-
-    for (const file of filesArray) {
-      const err = validateFile(file);
-      if (err) {
-        setUploadError(err);
-        return;
-      }
-      newItems.push({
-        id: `file-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-        file,
-      });
-    }
-
-    setSelectedFiles((prev) => [...prev, ...newItems]);
-  };
-
-  // Remove a single selected file before upload
-  const handleRemoveFile = (indexToRemove: number) => {
-    setSelectedFiles((prev) => prev.filter((_, i) => i !== indexToRemove));
-  };
-
-  // Clear all selected files
-  const handleClearSelectedFiles = () => {
-    setSelectedFiles([]);
-    setUploadError(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  // Submit all selected files
-  const handleSubmitSelectedFiles = async () => {
-    if (selectedFiles.length === 0) return;
-    if (!selectedEmployeeId) {
-      setUploadError('Please select an employee before uploading documentation.');
-      return;
-    }
-
-    setUploadError(null);
-    setUploadSuccess(null);
-    setIsUploading(true);
-
-    try {
-      for (const item of selectedFiles) {
-        await onUploadFile({
-          employeeId: selectedEmployeeId,
-          file: item.file,
-          category: selectedCategory,
-          uploaderRole: 'hr_admin',
-          submissionSource: 'hr',
-          uploadedBy: 'HR Administrator',
-        });
-      }
-
-      const emp = employees.find((e) => e.id === selectedEmployeeId);
-      const empName = emp ? emp.fullName : 'the employee';
-      const count = selectedFiles.length;
-
-      handleClearSelectedFiles();
-      setUploadSuccess(
-        `Successfully uploaded ${count} document${count > 1 ? 's' : ''} for ${empName}.`
-      );
-    } catch (err: any) {
-      setUploadError(err.message || 'Failed to upload files.');
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
   // View / preview file
   const handleViewFile = (file: EmployeeFile) => {
     if (file.publicUrl) {
@@ -309,6 +154,20 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+    }
+  };
+
+  // Confirm delete document
+  const handleConfirmDeleteDoc = async () => {
+    if (isDeletingDoc || !documentToDelete) return;
+    setIsDeletingDoc(true);
+    try {
+      await onDeleteFile(documentToDelete.id);
+      setDocumentToDelete(null);
+    } catch (err: any) {
+      console.error('Failed to delete document:', err);
+    } finally {
+      setIsDeletingDoc(false);
     }
   };
 
@@ -352,239 +211,30 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
     }
   };
 
-  // Quick upload trigger for focused employee
-  const handleQuickUploadFor = (empId: string) => {
-    setSelectedEmployeeId(empId);
-    fileInputRef.current?.click();
-  };
-
   return (
     <div className="mt-8 bg-[#1E293B] rounded-2xl border border-[#334155] p-6 shadow-card space-y-6">
       {/* SECTION HEADER */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#334155] pb-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-[#2563EB]/15 border border-[#2563EB]/30 text-[#60A5FA] flex items-center justify-center">
-            <UploadCloud className="w-5 h-5" />
+            <UserCheck className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-base font-bold text-white">Employee Documents &amp; Submissions</h3>
               <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold">
-                {employeeFiles.length} Total Files
+                {totalSubmittedFiles} Total Files
               </span>
               <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
                 {employees.length} Employees
               </span>
             </div>
             <p className="text-xs text-[#94A3B8] mt-0.5">
-              Structured column repository tracking employee verification, document counts, and compliance status.
+              Structured column repository tracking employee-submitted documentation, verification, and compliance status.
             </p>
           </div>
         </div>
       </div>
-
-      {/* UPLOAD PANEL: Button-based Controls (No large drag & drop box) */}
-      {canManage && (
-        <div
-          ref={uploadSectionRef}
-          className="bg-[#151D2B] rounded-xl border border-[#334155] p-4 sm:p-5 space-y-4"
-        >
-          {/* Top Info Banner */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#334155]/60 pb-3">
-            <div>
-              <span className="text-xs font-bold text-white tracking-wide uppercase flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-[#60A5FA]" />
-                <span>Document Submission Portal</span>
-              </span>
-              <p className="text-xs text-[#94A3B8] mt-0.5">
-                Select an employee and category, then click Upload Document to submit official records.
-              </p>
-            </div>
-            <span className="text-[11px] text-[#94A3B8] shrink-0 font-medium">
-              Supported: PDF, JPG, PNG, DOC, DOCX (Max 15MB)
-            </span>
-          </div>
-
-          {/* Controls: Select Employee + Document Category + Upload Document Button */}
-          <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5 items-end">
-            {/* Employee Selector (5 cols) */}
-            <div className="sm:col-span-5">
-              <label className="block text-xs font-semibold text-white uppercase mb-1.5">
-                Select Employee *
-              </label>
-              <select
-                value={selectedEmployeeId}
-                onChange={(e) => {
-                  setSelectedEmployeeId(e.target.value);
-                  setUploadError(null);
-                  setUploadSuccess(null);
-                }}
-                className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-[#334155] bg-[#0F172A] text-white focus:outline-hidden focus:border-[#3B82F6] transition-colors"
-              >
-                {employees.map((emp) => {
-                  const stats = getEmployeeDocStats(emp);
-                  return (
-                    <option key={emp.id} value={emp.id}>
-                      {emp.fullName} ({emp.employeeCode}) — Total: {stats.total} (Emp: {stats.employeeSubmitted}, HR: {stats.hrUploaded})
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
-
-            {/* Document Category (4 cols) */}
-            <div className="sm:col-span-4">
-              <label className="block text-xs font-semibold text-white uppercase mb-1.5">
-                Document Category *
-              </label>
-              <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value as EmployeeFileCategory)}
-                className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-[#334155] bg-[#0F172A] text-white focus:outline-hidden focus:border-[#3B82F6] transition-colors"
-              >
-                {CATEGORIES.map((cat) => (
-                  <option key={cat} value={cat}>
-                    {cat}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Upload Document Button (3 cols) */}
-            <div className="sm:col-span-3">
-              <input
-                type="file"
-                ref={fileInputRef}
-                multiple
-                accept=".pdf, .jpg, .jpeg, .png, .doc, .docx"
-                onChange={(e) => {
-                  handleFileSelect(e.target.files);
-                  if (e.target) e.target.value = '';
-                }}
-                className="hidden"
-              />
-              <button
-                type="button"
-                disabled={isUploading}
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full h-[40px] px-4 py-2 text-xs font-bold text-white bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 disabled:cursor-not-allowed rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer active:scale-[0.98]"
-                title="Choose files to upload"
-              >
-                {isUploading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Uploading...</span>
-                  </>
-                ) : (
-                  <>
-                    <UploadCloud className="w-4 h-4" />
-                    <span>Upload Document</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-
-          {/* Selected Files Preview & Confirmation Area */}
-          {selectedFiles.length > 0 && (
-            <div className="p-3.5 bg-[#0F172A] border border-[#334155] rounded-xl space-y-3">
-              <div className="flex items-center justify-between text-xs border-b border-[#334155]/60 pb-2">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-white">Selected Files</span>
-                  <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/25">
-                    {selectedFiles.length} {selectedFiles.length === 1 ? 'file' : 'files'}
-                  </span>
-                  <span className="text-[11px] text-[#94A3B8] hidden sm:inline">
-                    → Will be linked to <strong className="text-white">{selectedEmployee?.fullName}</strong> under <strong className="text-white">{selectedCategory}</strong>
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleClearSelectedFiles}
-                  disabled={isUploading}
-                  className="text-[11px] text-[#94A3B8] hover:text-rose-400 transition-colors cursor-pointer"
-                >
-                  Clear Selection
-                </button>
-              </div>
-
-              {/* Selected Files Badges / Chips with Remove Button */}
-              <div className="flex flex-wrap gap-2 max-h-[140px] overflow-y-auto pr-1">
-                {selectedFiles.map((item, idx) => (
-                  <div
-                    key={item.id}
-                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#151D2B] border border-[#334155] text-xs text-white"
-                  >
-                    {getFileIcon(item.file.name)}
-                    <div className="min-w-0">
-                      <span className="font-medium truncate max-w-[200px] block" title={item.file.name}>
-                        {item.file.name}
-                      </span>
-                      <span className="text-[10px] text-[#94A3B8]">
-                        {(item.file.size / (1024 * 1024)).toFixed(2)} MB · {selectedCategory}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveFile(idx)}
-                      disabled={isUploading}
-                      className="p-1 rounded hover:bg-rose-500/15 text-[#94A3B8] hover:text-rose-400 transition-colors ml-1 cursor-pointer"
-                      title="Remove file"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              {/* Action Buttons: Cancel or Confirm Upload */}
-              <div className="flex items-center justify-end gap-2.5 pt-1 border-t border-[#334155]/60">
-                <button
-                  type="button"
-                  onClick={handleClearSelectedFiles}
-                  disabled={isUploading}
-                  className="px-3.5 py-1.5 text-xs font-semibold text-[#CBD5E1] hover:text-white bg-[#151D2B] hover:bg-[#1E293B] border border-[#334155] rounded-xl transition-all cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSubmitSelectedFiles}
-                  disabled={isUploading || selectedFiles.length === 0}
-                  className="flex items-center gap-2 px-4 py-1.5 text-xs font-bold text-white bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-all shadow-xs cursor-pointer"
-                >
-                  {isUploading ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Uploading...</span>
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>Confirm &amp; Submit ({selectedFiles.length})</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Feedback alerts */}
-          {uploadError && (
-            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300 flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-              <span>{uploadError}</span>
-            </div>
-          )}
-
-          {uploadSuccess && (
-            <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>{uploadSuccess}</span>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* VIEW 1: DEDICATED EMPLOYEE DOCUMENT DETAILS VIEW */}
       {activeEmployeeId && activeEmployee ? (
@@ -619,53 +269,18 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2.5">
-              {/* 1. Employee Submitted Indicator */}
+            <div className="flex items-center gap-2.5">
+              {/* Employee Submitted Indicator */}
               <div
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-500/10 border border-blue-500/25 text-xs font-semibold text-blue-300"
                 title="Documents personally submitted by this employee"
               >
                 <UserCheck className="w-3.5 h-3.5 text-blue-400" />
-                <span>Employee Submitted:</span>
+                <span>Documents Submitted:</span>
                 <span className="font-bold text-white px-1.5 py-0.5 rounded-md bg-blue-500/25 border border-blue-500/30">
-                  {activeEmployeeStats.employeeSubmitted}
+                  {activeEmployeeDocs.length}
                 </span>
               </div>
-
-              {/* 2. HR Uploaded Indicator */}
-              <div
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-500/10 border border-purple-500/25 text-xs font-semibold text-purple-300"
-                title="Documents uploaded by HR Administrator"
-              >
-                <ShieldCheck className="w-3.5 h-3.5 text-purple-400" />
-                <span>HR Uploaded:</span>
-                <span className="font-bold text-white px-1.5 py-0.5 rounded-md bg-purple-500/25 border border-purple-500/30">
-                  {activeEmployeeStats.hrUploaded}
-                </span>
-              </div>
-
-              {/* 3. Total Documents Indicator */}
-              <div
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800/80 border border-slate-700 text-xs font-semibold text-slate-300"
-                title="Total documents on file for this employee"
-              >
-                <FolderOpen className="w-3.5 h-3.5 text-slate-400" />
-                <span>Total Documents:</span>
-                <span className="font-bold text-white px-1.5 py-0.5 rounded-md bg-slate-700 border border-slate-600">
-                  {activeEmployeeStats.total}
-                </span>
-              </div>
-
-              {canManage && (
-                <button
-                  type="button"
-                  onClick={() => handleQuickUploadFor(activeEmployee.id)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#2563EB] hover:bg-[#1D4ED8] rounded-xl transition-colors shadow-xs cursor-pointer ml-1"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Upload For {activeEmployee.firstName || 'Employee'}</span>
-                </button>
-              )}
             </div>
           </div>
 
@@ -678,7 +293,7 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
                   No documents submitted yet for {activeEmployee.fullName}
                 </p>
                 <p className="text-xs text-[#94A3B8] mt-1 max-w-md mx-auto">
-                  Click the Upload Document button above to upload this employee's ID Proof, Offer Letter, Resume, or Contract.
+                  This employee has not submitted any documents through their personal employee portal yet.
                 </p>
               </div>
             </div>
@@ -691,7 +306,7 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
                     <th className="py-3 px-4">Document Category</th>
                     <th className="py-3 px-4">File Type</th>
                     <th className="py-3 px-4">File Size</th>
-                    <th className="py-3 px-4">Upload Date</th>
+                    <th className="py-3 px-4">Submission Date &amp; Time</th>
                     <th className="py-3 px-4">Verification Status</th>
                     <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
@@ -699,7 +314,7 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
                 <tbody className="divide-y divide-[#334155]/60 bg-[#151D2B]">
                   {activeEmployeeDocs.map((file) => {
                     const ext = (file.fileName.split('.').pop() || 'FILE').toUpperCase();
-                    const statusLower = (file.uploadStatus || 'Verified').toLowerCase();
+                    const statusLower = (file.verificationStatus || file.uploadStatus || 'Pending').toLowerCase();
 
                     return (
                       <tr key={file.id} className="hover:bg-[#1E293B]/60 transition-colors">
@@ -748,22 +363,10 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
                             <span>{file.uploadedAt || 'Recent'}</span>
                           </div>
                           <div className="flex items-center gap-1.5 mt-1">
-                            {file.submissionSource === 'employee' || file.uploaderRole === 'employee' ? (
-                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-500/10 text-blue-300 border border-blue-500/20">
-                                <UserCheck className="w-2.5 h-2.5 text-blue-400" />
-                                <span>Submitted by {file.uploadedBy || activeEmployee.fullName}</span>
-                              </span>
-                            ) : file.submissionSource === 'hr' || file.uploaderRole === 'hr_admin' ? (
-                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-500/10 text-purple-300 border border-purple-500/20">
-                                <ShieldCheck className="w-2.5 h-2.5 text-purple-400" />
-                                <span>Uploaded by {file.uploadedBy || 'HR Administrator'}</span>
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-500/10 text-slate-300 border border-slate-500/20">
-                                <ShieldCheck className="w-2.5 h-2.5 text-slate-400" />
-                                <span>Uploaded by {file.uploadedBy || 'Unknown Uploader'}</span>
-                              </span>
-                            )}
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                              <UserCheck className="w-2.5 h-2.5 text-blue-400" />
+                              <span>Submitted by {file.uploadedBy || activeEmployee.fullName}</span>
+                            </span>
                           </div>
                         </td>
 
@@ -776,13 +379,13 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
                             </span>
                           ) : statusLower === 'rejected' ? (
                             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/25">
-                              <XCircle className="w-3 h-3" />
+                              <AlertCircle className="w-3 h-3" />
                               <span>Rejected</span>
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/25">
                               <Clock className="w-3 h-3" />
-                              <span>Pending</span>
+                              <span>Pending Review</span>
                             </span>
                           )}
                         </td>
@@ -809,17 +412,9 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
                             {canManage && (
                               <button
                                 type="button"
-                                onClick={() => {
-                                  if (
-                                    window.confirm(
-                                      `Are you sure you want to delete ${file.fileName} for ${activeEmployee.fullName}?`
-                                    )
-                                  ) {
-                                    onDeleteFile(file.id);
-                                  }
-                                }}
+                                onClick={() => setDocumentToDelete(file)}
                                 className="p-1.5 rounded-lg border border-[#334155] hover:border-rose-500 text-rose-400 hover:text-white hover:bg-rose-500/10 transition-colors cursor-pointer"
-                                title="Delete File"
+                                title="Delete Document"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -899,9 +494,7 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
                     <th className="py-3 px-4">Employee ID</th>
                     <th className="py-3 px-4">Department</th>
                     <th className="py-3 px-4">Designation</th>
-                    <th className="py-3 px-4 text-center">Employee Submitted</th>
-                    <th className="py-3 px-4 text-center">HR Uploaded</th>
-                    <th className="py-3 px-4 text-center">Total Documents</th>
+                    <th className="py-3 px-4 text-center">Documents Submitted</th>
                     <th className="py-3 px-4">Document Categories</th>
                     <th className="py-3 px-4">Submission Status</th>
                     <th className="py-3 px-4 text-right">Actions</th>
@@ -909,8 +502,7 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
                 </thead>
                 <tbody className="divide-y divide-[#334155]/60 bg-[#151D2B]">
                   {filteredEmployees.map((emp) => {
-                    const stats = getEmployeeDocStats(emp);
-                    const docs = stats.docs;
+                    const docs = getEmployeeDocs(emp);
                     const status = getSubmissionStatus(docs);
                     const categories = Array.from(new Set(docs.map((d) => d.category)));
 
@@ -952,45 +544,17 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
                           <span className="text-xs">{emp.designation}</span>
                         </td>
 
-                        {/* Employee Submitted */}
+                        {/* Documents Submitted */}
                         <td className="py-3 px-4 text-center">
                           <span
                             className={`inline-flex items-center justify-center font-bold text-xs px-2.5 py-0.5 rounded-full ${
-                              stats.employeeSubmitted > 0
+                              docs.length > 0
                                 ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
                                 : 'bg-slate-800/40 text-slate-400 border border-slate-700/60'
                             }`}
-                            title={`${stats.employeeSubmitted} document${stats.employeeSubmitted === 1 ? '' : 's'} personally submitted by employee`}
+                            title={`${docs.length} document${docs.length === 1 ? '' : 's'} submitted by employee`}
                           >
-                            {stats.employeeSubmitted}
-                          </span>
-                        </td>
-
-                        {/* HR Uploaded */}
-                        <td className="py-3 px-4 text-center">
-                          <span
-                            className={`inline-flex items-center justify-center font-bold text-xs px-2.5 py-0.5 rounded-full ${
-                              stats.hrUploaded > 0
-                                ? 'bg-purple-500/15 text-purple-400 border border-purple-500/30'
-                                : 'bg-slate-800/40 text-slate-400 border border-slate-700/60'
-                            }`}
-                            title={`${stats.hrUploaded} document${stats.hrUploaded === 1 ? '' : 's'} uploaded by HR Administrator`}
-                          >
-                            {stats.hrUploaded}
-                          </span>
-                        </td>
-
-                        {/* Total Documents */}
-                        <td className="py-3 px-4 text-center">
-                          <span
-                            className={`inline-flex items-center justify-center font-bold text-xs px-2.5 py-0.5 rounded-full ${
-                              stats.total > 0
-                                ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                                : 'bg-slate-800/40 text-slate-400 border border-slate-700/60'
-                            }`}
-                            title={`${stats.total} total documents on file`}
-                          >
-                            {stats.total}
+                            {docs.length}
                           </span>
                         </td>
 
@@ -1052,6 +616,99 @@ export const EmployeeFilesSection: React.FC<EmployeeFilesSectionProps> = ({
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {documentToDelete && (
+        <div className="fixed inset-0 z-[70] overflow-y-auto">
+          <div
+            className="fixed inset-0 bg-[#0F172A]/75 backdrop-blur-xs transition-opacity animate-fade-in"
+            onClick={() => {
+              if (!isDeletingDoc) setDocumentToDelete(null);
+            }}
+          />
+          <div className="flex min-h-full items-center justify-center p-4 text-center sm:p-0">
+            <div
+              className="relative transform overflow-hidden rounded-2xl bg-[#151D2B] text-left shadow-2xl transition-all w-full max-w-md my-8 border border-[#334155] animate-fade-in"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-[#334155] px-6 py-4 bg-[#111827]">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+                    <Trash2 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Delete Submitted Document</h3>
+                    <p className="text-[11px] text-[#94A3B8]">Confirm document removal</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={isDeletingDoc}
+                  onClick={() => setDocumentToDelete(null)}
+                  className="rounded-lg p-1 text-[#94A3B8] hover:bg-white/5 hover:text-white transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="p-6 space-y-4">
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Are you sure you want to delete <strong className="text-white font-mono bg-[#0B0F14] px-1.5 py-0.5 rounded border border-[#334155] break-all">{documentToDelete.fileName}</strong>?
+                </p>
+                <div className="p-3 rounded-lg bg-[#0F172A] border border-[#334155] space-y-1.5 text-[11px]">
+                  <div className="flex justify-between text-slate-400">
+                    <span>Category:</span>
+                    <span className="font-medium text-slate-200">{documentToDelete.category}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>File Size:</span>
+                    <span className="font-medium text-slate-200">{documentToDelete.fileSize}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Submitted By:</span>
+                    <span className="font-medium text-slate-200">{documentToDelete.uploadedBy || documentToDelete.employeeName}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Submission Date &amp; Time:</span>
+                    <span className="font-medium text-slate-200 font-mono">{documentToDelete.uploadedAt}</span>
+                  </div>
+                </div>
+                <p className="text-[11px] text-rose-400/90 flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>This action will permanently delete this employee-submitted document.</span>
+                </p>
+                <div className="flex justify-end gap-2.5 pt-4 border-t border-[#334155]">
+                  <button
+                    type="button"
+                    disabled={isDeletingDoc}
+                    onClick={() => setDocumentToDelete(null)}
+                    className="px-4 py-2 text-xs font-semibold text-[#94A3B8] hover:text-white bg-transparent border border-[#334155] hover:bg-white/5 rounded-xl disabled:opacity-50 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isDeletingDoc}
+                    onClick={handleConfirmDeleteDoc}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 active:bg-rose-800 rounded-xl shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+                  >
+                    {isDeletingDoc ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Deleting...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Confirm Delete</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

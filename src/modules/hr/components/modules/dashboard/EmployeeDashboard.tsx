@@ -22,6 +22,7 @@ import { getKolkataCurrentYearMonth } from '../../../types/welfare';
 import { loadWelfareSelections, doesSelectionMatchEmployee } from '../../../utils/welfareStorage';
 import { Badge } from '../../common/Badge';
 import { Avatar } from '../../common/Avatar';
+import { WORK_ASSIGNMENT_ENABLED } from '../../../config/hrModuleConfig';
 
 interface EmployeeDashboardProps {
   onNavigateTab: (tab: any) => void;
@@ -166,7 +167,7 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
       </div>
 
       {/* Personal Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className={`grid grid-cols-1 sm:grid-cols-2 ${WORK_ASSIGNMENT_ENABLED ? 'lg:grid-cols-5' : 'lg:grid-cols-4'} gap-4`}>
         {/* 1. Today's Punch */}
         <div
           onClick={() => onNavigateTab('attendance')}
@@ -205,23 +206,25 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
         </div>
 
         {/* 3. Assigned Work Tasks */}
-        <div
-          onClick={() => onNavigateTab('assigned-works')}
-          className="bg-card p-5 rounded-2xl border border-border shadow-velmora hover:border-slate-600 transition-all cursor-pointer flex flex-col justify-between"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-muted uppercase tracking-wider">Assigned Works</span>
-            <div className="p-2.5 rounded-xl bg-indigo-500/15 text-indigo-400 border border-indigo-500/20">
-              <ClipboardList className="w-5 h-5" />
+        {WORK_ASSIGNMENT_ENABLED && (
+          <div
+            onClick={() => onNavigateTab('assigned-works')}
+            className="bg-card p-5 rounded-2xl border border-border shadow-velmora hover:border-slate-600 transition-all cursor-pointer flex flex-col justify-between"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-muted uppercase tracking-wider">Assigned Works</span>
+              <div className="p-2.5 rounded-xl bg-indigo-500/15 text-indigo-400 border border-indigo-500/20">
+                <ClipboardList className="w-5 h-5" />
+              </div>
+            </div>
+            <div className="mt-3">
+              <div className="text-2xl font-bold text-white">{pendingTasks.length}</div>
+              <p className="text-[11px] text-muted mt-1">
+                {pendingTasks.length === 0 ? 'All tasks completed' : 'Pending work assignments'}
+              </p>
             </div>
           </div>
-          <div className="mt-3">
-            <div className="text-2xl font-bold text-white">{pendingTasks.length}</div>
-            <p className="text-[11px] text-muted mt-1">
-              {pendingTasks.length === 0 ? 'All tasks completed' : 'Pending work assignments'}
-            </p>
-          </div>
-        </div>
+        )}
 
         {/* 4. Welfare Benefit */}
         <div
@@ -269,72 +272,74 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({
       </div>
 
       {/* 2-Column Section: Active Tasks & Recent Leaves */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className={`grid grid-cols-1 ${WORK_ASSIGNMENT_ENABLED ? 'lg:grid-cols-2' : ''} gap-6`}>
         {/* Widget 1: My Active Work Assignments */}
-        <div className="bg-card p-5 rounded-2xl border border-border shadow-velmora flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between pb-3 border-b border-border mb-3">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-xl bg-indigo-500/15 text-indigo-400 border border-indigo-500/20">
-                  <ClipboardList className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white">My Assigned Tasks</h3>
-                  <p className="text-[11px] text-muted">Daily instructions & tasks from HR</p>
-                </div>
-              </div>
-              <button
-                onClick={() => onNavigateTab('assigned-works')}
-                className="text-xs font-semibold text-primary hover:underline"
-              >
-                View All ({myTasks.length})
-              </button>
-            </div>
-
-            <div className="space-y-2.5">
-              {pendingTasks.length === 0 ? (
-                <div className="py-8 text-center text-xs text-muted">
-                  No pending work assignments. You're completely up to date!
-                </div>
-              ) : (
-                pendingTasks.slice(0, 4).map((task) => (
-                  <div
-                    key={task.id}
-                    className="p-3 bg-black/20 rounded-xl border border-border flex items-center justify-between gap-3 text-xs"
-                  >
-                    <div className="truncate flex-1">
-                      <p className="font-bold text-white truncate">{task.taskTitle}</p>
-                      <p className="text-[11px] text-muted truncate mt-0.5">{task.taskBrief || 'Assigned task'}</p>
-                    </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      {!task.firstViewedAt && (
-                        <button
-                          onClick={() => acknowledgeTask(task.id, emp.id)}
-                          className="px-2.5 py-1 rounded-lg bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 text-[11px] font-semibold hover:bg-indigo-500/25 transition-colors"
-                        >
-                          Seen / OK
-                        </button>
-                      )}
-                      <button
-                        onClick={() => completeTask(task.id, emp.id)}
-                        className="px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold hover:bg-emerald-500/25 transition-colors"
-                      >
-                        Complete
-                      </button>
-                    </div>
+        {WORK_ASSIGNMENT_ENABLED && (
+          <div className="bg-card p-5 rounded-2xl border border-border shadow-velmora flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between pb-3 border-b border-border mb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-indigo-500/15 text-indigo-400 border border-indigo-500/20">
+                    <ClipboardList className="w-4 h-4" />
                   </div>
-                ))
-              )}
-            </div>
-          </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">My Assigned Tasks</h3>
+                    <p className="text-[11px] text-muted">Daily instructions & tasks from HR</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => onNavigateTab('assigned-works')}
+                  className="text-xs font-semibold text-primary hover:underline"
+                >
+                  View All ({myTasks.length})
+                </button>
+              </div>
 
-          <button
-            onClick={() => onNavigateTab('assigned-works')}
-            className="mt-3 pt-3 border-t border-border w-full flex items-center justify-center gap-1.5 text-xs font-semibold text-primary hover:text-white transition-colors"
-          >
-            Open Assigned Works Board <ChevronRight className="w-4 h-4" />
-          </button>
-        </div>
+              <div className="space-y-2.5">
+                {pendingTasks.length === 0 ? (
+                  <div className="py-8 text-center text-xs text-muted">
+                    No pending work assignments. You're completely up to date!
+                  </div>
+                ) : (
+                  pendingTasks.slice(0, 4).map((task) => (
+                    <div
+                      key={task.id}
+                      className="p-3 bg-black/20 rounded-xl border border-border flex items-center justify-between gap-3 text-xs"
+                    >
+                      <div className="truncate flex-1">
+                        <p className="font-bold text-white truncate">{task.taskTitle}</p>
+                        <p className="text-[11px] text-muted truncate mt-0.5">{task.taskBrief || 'Assigned task'}</p>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {!task.firstViewedAt && (
+                          <button
+                            onClick={() => acknowledgeTask(task.id, emp.id)}
+                            className="px-2.5 py-1 rounded-lg bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 text-[11px] font-semibold hover:bg-indigo-500/25 transition-colors"
+                          >
+                            Seen / OK
+                          </button>
+                        )}
+                        <button
+                          onClick={() => completeTask(task.id, emp.id)}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold hover:bg-emerald-500/25 transition-colors"
+                        >
+                          Complete
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <button
+              onClick={() => onNavigateTab('assigned-works')}
+              className="mt-3 pt-3 border-t border-border w-full flex items-center justify-center gap-1.5 text-xs font-semibold text-primary hover:text-white transition-colors"
+            >
+              Open Assigned Works Board <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* Widget 2: My Leave Applications */}
         <div className="bg-card p-5 rounded-2xl border border-border shadow-velmora flex flex-col justify-between">

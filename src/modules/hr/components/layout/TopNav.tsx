@@ -17,6 +17,7 @@ import { UserRole } from '../../types/hrms';
 import { findLinkedEmployee } from '../../utils/employeeIdentity';
 import { Avatar } from '../common/Avatar';
 import { supabase } from '../../../../lib/supabase';
+import { WORK_ASSIGNMENT_ENABLED } from '../../config/hrModuleConfig';
 
 interface TopNavProps {
   currentTab: NavigationTab;
@@ -85,6 +86,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   const scopedNotifications = React.useMemo(() => {
     const isAdminOrHR = currentUser.role === 'admin' || currentUser.role === 'hr_manager' || currentUser.role === 'dept_head';
     return notifications.filter((n) => {
+      if (!WORK_ASSIGNMENT_ENABLED && n.type === 'work_assigned') return false;
       if (n.targetRole === 'admin') return isAdminOrHR;
       if (n.targetRole === 'employee') {
         if (isAdminOrHR) return false;
@@ -260,7 +262,11 @@ export const TopNav: React.FC<TopNavProps> = ({
                           onNavigateTab?.('attendance');
                           setIsNotifOpen(false);
                         } else if (notif.type === 'work_assigned') {
-                          onNavigateTab?.(canManageEmployees ? 'work-assignment' : 'assigned-works');
+                          if (WORK_ASSIGNMENT_ENABLED) {
+                            onNavigateTab?.(canManageEmployees ? 'work-assignment' : 'assigned-works');
+                          } else {
+                            onNavigateTab?.('dashboard');
+                          }
                           setIsNotifOpen(false);
                         } else if (notif.type === 'welfare') {
                           if (canManageEmployees) {

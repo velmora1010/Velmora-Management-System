@@ -24,6 +24,7 @@ import { WorkAssignmentProvider, useWorkAssignment } from './context/WorkAssignm
 import { TopNav } from './components/layout/TopNav';
 import { NavigationTab } from './components/layout/Sidebar';
 import { findLinkedEmployee, doesAssignmentBelongToEmployee } from './utils/employeeIdentity';
+import { WORK_ASSIGNMENT_ENABLED } from './config/hrModuleConfig';
 
 // Modules
 import { HRDashboard } from './components/modules/dashboard/HRDashboard';
@@ -99,8 +100,8 @@ const HRLayoutContent: React.FC = () => {
         'departments',
         'leave',
         'shifts',
-        'work-assignment',
-        'assigned-works',
+        ...(WORK_ASSIGNMENT_ENABLED ? (['work-assignment', 'assigned-works'] as NavigationTab[]) : []),
+
         'employee-welfare',
         'payroll',
         'reports',
@@ -153,6 +154,10 @@ const HRLayoutContent: React.FC = () => {
 
   const handleNavigateTab = useCallback(
     (tab: NavigationTab) => {
+      if (!WORK_ASSIGNMENT_ENABLED && (tab === 'work-assignment' || tab === 'assigned-works')) {
+        navigate('/hr/dashboard');
+        return;
+      }
       if (tab === 'my-profile') {
         handleOpenMyProfile();
         return;
@@ -207,7 +212,7 @@ const HRLayoutContent: React.FC = () => {
   }, [leaveRequests]);
 
   const assignedWorksBadge = useMemo(() => {
-    if (canManageEmployees) return null;
+    if (!WORK_ASSIGNMENT_ENABLED || canManageEmployees) return null;
     const ownEmp = findLinkedEmployee(currentUser, employees);
     if (!ownEmp) return null;
     const seenTaskIds = new Set<string>();
@@ -259,6 +264,7 @@ const HRLayoutContent: React.FC = () => {
         },
         {
           id: 'assigned-works' as NavigationTab,
+
           label: 'Assigned Works',
           icon: ClipboardCheck,
           badge: assignedWorksBadge,
@@ -271,7 +277,10 @@ const HRLayoutContent: React.FC = () => {
           badge: null,
         },
       ];
-      return { row1Items: r1, row2Items: [] };
+      return {
+        row1Items: r1.filter((item) => WORK_ASSIGNMENT_ENABLED || item.id !== 'assigned-works'),
+        row2Items: [],
+      };
     }
 
     const r1 = [
@@ -351,7 +360,10 @@ const HRLayoutContent: React.FC = () => {
       },
     ];
 
-    return { row1Items: r1, row2Items: r2 };
+    return {
+      row1Items: r1.filter((item) => WORK_ASSIGNMENT_ENABLED || item.id !== 'work-assignment'),
+      row2Items: r2,
+    };
   }, [
     isEmployee,
     dashboardMetrics,
@@ -580,16 +592,30 @@ const HRLayoutContent: React.FC = () => {
           <Route
             path="work-assignment"
             element={
-              canManageEmployees ? (
-                <WorkAssignmentModule />
+              WORK_ASSIGNMENT_ENABLED ? (
+                canManageEmployees ? (
+                  <WorkAssignmentModule />
+                ) : (
+                  <Navigate to="/hr/assigned-works" replace />
+                )
               ) : (
-                <Navigate to="/hr/assigned-works" replace />
+                <Navigate to="/hr/dashboard" replace />
               )
             }
           />
           <Route
             path="assigned-works"
-            element={<AssignedWorksModule />}
+            element={
+              WORK_ASSIGNMENT_ENABLED ? (
+                <AssignedWorksModule />
+              ) : (
+                <Navigate to="/hr/dashboard" replace />
+              )
+            }
+          />
+          <Route
+            path="assigned-work"
+            element={<Navigate to="/hr/dashboard" replace />}
           />
           <Route
             path="employee-welfare"
