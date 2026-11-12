@@ -93,6 +93,8 @@ export interface ComprehensiveRepeatAnalyticsData {
   frequencyDistribution: FrequencyDistributionItem[];
   repeatTrends: RepeatTrendPoint[];
   allCustomers: TopCustomerItem[];
+  allCustomersByValue: TopCustomerItem[];
+  allRepeatCustomers: TopCustomerItem[];
   topCustomers: TopCustomerItem[];
   topCustomersByValue: TopCustomerItem[];
   topCustomersByRepeat: TopCustomerItem[];
@@ -674,8 +676,8 @@ class CustomerRepeatAnalyticsService {
       };
     });
 
-    // 7A. Top 100 Customers Ranked by Total Purchase Value (highest to lowest)
-    const topCustomersByValue: TopCustomerItem[] = [...allCustomerProfiles]
+    // 7A. All Customers Ranked by Total Purchase Value (highest to lowest) + Top 100 slice
+    const allCustomersByValue: TopCustomerItem[] = [...allCustomerProfiles]
       .sort((a, b) => {
         // Primary: totalValue desc
         if (b.totalValue !== a.totalValue) return b.totalValue - a.totalValue;
@@ -684,12 +686,13 @@ class CustomerRepeatAnalyticsService {
         // Tertiary: lastOrderDate desc
         return (b.lastOrderDate || '').localeCompare(a.lastOrderDate || '');
       })
-      .slice(0, 100)
       .map((item, index) => ({ ...item, rank: index + 1 }));
 
-    // 7B. Top 100 Repeat Customers (2+ distinct valid orders, highest to lowest)
+    const topCustomersByValue: TopCustomerItem[] = allCustomersByValue.slice(0, 100);
+
+    // 7B. All Repeat Customers (2+ distinct valid orders, highest to lowest) + Top 100 slice
     const repeatCustomerProfiles = allCustomerProfiles.filter(c => c.totalOrders >= 2);
-    const topCustomersByRepeat: TopCustomerItem[] = [...repeatCustomerProfiles]
+    const allRepeatCustomers: TopCustomerItem[] = [...repeatCustomerProfiles]
       .sort((a, b) => {
         // Primary: totalOrders desc
         if (b.totalOrders !== a.totalOrders) return b.totalOrders - a.totalOrders;
@@ -698,8 +701,9 @@ class CustomerRepeatAnalyticsService {
         // Tertiary: lastOrderDate desc
         return (b.lastOrderDate || '').localeCompare(a.lastOrderDate || '');
       })
-      .slice(0, 100)
       .map((item, index) => ({ ...item, rank: index + 1 }));
+
+    const topCustomersByRepeat: TopCustomerItem[] = allRepeatCustomers.slice(0, 100);
 
     const topCustomers = topCustomersByValue; // alias for backwards compatibility
 
@@ -834,6 +838,8 @@ class CustomerRepeatAnalyticsService {
       frequencyDistribution,
       repeatTrends,
       allCustomers: allCustomerProfiles,
+      allCustomersByValue,
+      allRepeatCustomers,
       topCustomers,
       topCustomersByValue,
       topCustomersByRepeat,

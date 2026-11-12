@@ -130,14 +130,16 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
   const [valueSortField, setValueSortField] = useState<'totalValue' | 'totalOrders' | 'lastOrderDate'>('totalValue');
   const [valueSortAsc, setValueSortAsc] = useState<boolean>(false);
   const [valueSearch, setValueSearch] = useState<string>('');
-  const [visibleCountValue, setVisibleCountValue] = useState<number>(15);
+  const [valuePage, setValuePage] = useState<number>(0);
+  const [valuePageSize, setValuePageSize] = useState<number>(15);
 
   // 4. Top 100 Repeat Customers Controls
   const [repeatLimit, setRepeatLimit] = useState<number>(100);
   const [repeatSortField, setRepeatSortField] = useState<'totalOrders' | 'totalValue' | 'lastOrderDate'>('totalOrders');
   const [repeatSortAsc, setRepeatSortAsc] = useState<boolean>(false);
   const [repeatSearch, setRepeatSearch] = useState<string>('');
-  const [visibleCountRepeat, setVisibleCountRepeat] = useState<number>(15);
+  const [repeatPage, setRepeatPage] = useState<number>(0);
+  const [repeatPageSize, setRepeatPageSize] = useState<number>(15);
 
   // 5. Geographic Controls
   const [geoTab, setGeoTab] = useState<'states' | 'cities'>('states');
@@ -231,12 +233,12 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
   // Reset pagination when search or limit changes
   const handleValueLimitChange = (lim: number) => {
     setValueLimit(lim);
-    setVisibleCountValue(15);
+    setValuePage(0);
   };
 
   const handleRepeatLimitChange = (lim: number) => {
     setRepeatLimit(lim);
-    setVisibleCountRepeat(15);
+    setRepeatPage(0);
   };
 
   // State Drilldown Handler
@@ -258,7 +260,9 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
   // -------------------------------------------------------------
   const processedValueCustomers = useMemo(() => {
     if (!data) return [];
-    const sourceList = data.topCustomersByValue || data.topCustomers || [];
+    const sourceList = department === 'sales'
+      ? (data.allCustomersByValue || data.allCustomers || data.topCustomersByValue || [])
+      : (data.topCustomersByValue || data.topCustomers || []);
     let list = [...sourceList];
 
     if (valueSearch.trim()) {
@@ -286,19 +290,22 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
       return valueSortAsc ? comparison : -comparison;
     });
 
-    return list.slice(0, valueLimit).map((c, idx) => ({
+    const limited = valueLimit > 0 ? list.slice(0, valueLimit) : list;
+    return limited.map((c, idx) => ({
       ...c,
       rank: idx + 1
     }));
-  }, [data, valueSearch, valueSortField, valueSortAsc, valueLimit]);
+  }, [data, department, valueSearch, valueSortField, valueSortAsc, valueLimit]);
 
   // -------------------------------------------------------------
-  // Filtered & Sorted: Top 100 Repeat Customers (2+ orders)
+  // Filtered & Sorted: Top / All Repeat Customers (2+ orders)
   // -------------------------------------------------------------
   const processedRepeatCustomers = useMemo(() => {
     if (!data) return [];
     // Only customers with 2+ valid orders
-    const sourceList = data.topCustomersByRepeat || [];
+    const sourceList = department === 'sales'
+      ? (data.allRepeatCustomers || (data.allCustomers || []).filter(c => c.totalOrders >= 2))
+      : (data.topCustomersByRepeat || []);
     let list = [...sourceList];
 
     if (repeatSearch.trim()) {
@@ -326,20 +333,25 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
       return repeatSortAsc ? comparison : -comparison;
     });
 
-    return list.slice(0, repeatLimit).map((c, idx) => ({
+    const limited = repeatLimit > 0 ? list.slice(0, repeatLimit) : list;
+    return limited.map((c, idx) => ({
       ...c,
       rank: idx + 1
     }));
-  }, [data, repeatSearch, repeatSortField, repeatSortAsc, repeatLimit]);
+  }, [data, department, repeatSearch, repeatSortField, repeatSortAsc, repeatLimit]);
 
-  // Visible rows for pagination
+  // Visible rows for page-based pagination (consistent global rank preserved)
+  const valueTotalPages = Math.max(1, Math.ceil(processedValueCustomers.length / valuePageSize));
+  const safeValuePage = Math.min(valuePage, valueTotalPages - 1);
   const visibleValueCustomers = useMemo(() => {
-    return processedValueCustomers.slice(0, visibleCountValue);
-  }, [processedValueCustomers, visibleCountValue]);
+    return processedValueCustomers.slice(safeValuePage * valuePageSize, (safeValuePage + 1) * valuePageSize);
+  }, [processedValueCustomers, safeValuePage, valuePageSize]);
 
+  const repeatTotalPages = Math.max(1, Math.ceil(processedRepeatCustomers.length / repeatPageSize));
+  const safeRepeatPage = Math.min(repeatPage, repeatTotalPages - 1);
   const visibleRepeatCustomers = useMemo(() => {
-    return processedRepeatCustomers.slice(0, visibleCountRepeat);
-  }, [processedRepeatCustomers, visibleCountRepeat]);
+    return processedRepeatCustomers.slice(safeRepeatPage * repeatPageSize, (safeRepeatPage + 1) * repeatPageSize);
+  }, [processedRepeatCustomers, safeRepeatPage, repeatPageSize]);
 
   // -------------------------------------------------------------
   // Filtered & Sorted Geographic Data
@@ -411,8 +423,9 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
       c.lastOrderDate
     ]);
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    downloadBlob(csvContent, `top_customers_by_value_${new Date().toISOString().slice(0, 10)}.csv`);
-    toast.success('Top Customers by Value exported to CSV');
+    const prefix = valueLimit === 0 ? 'all_customers_by_value' : `top_${valueLimit}_customers_by_value`;
+    downloadBlob(csvContent, `${prefix}_${new Date().toISOString().slice(0, 10)}.csv`);
+    toast.success(`Exported ${processedValueCustomers.length.toLocaleString('en-IN')} customers to CSV`);
   };
 
   const handleExportRepeatCustomersCSV = () => {
@@ -435,8 +448,9 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
       c.lastOrderDate
     ]);
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    downloadBlob(csvContent, `top_repeat_customers_${new Date().toISOString().slice(0, 10)}.csv`);
-    toast.success('Top Repeat Customers exported to CSV');
+    const prefix = repeatLimit === 0 ? 'all_repeat_customers' : `top_${repeatLimit}_repeat_customers`;
+    downloadBlob(csvContent, `${prefix}_${new Date().toISOString().slice(0, 10)}.csv`);
+    toast.success(`Exported ${processedRepeatCustomers.length.toLocaleString('en-IN')} repeat customers to CSV`);
   };
 
   const handleExportGeoCSV = () => {
@@ -1343,7 +1357,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
             <div className="flex items-center gap-2">
               <DollarSign size={16} className="text-emerald-400" />
               <h3 className="text-sm sm:text-base font-bold text-white tracking-tight flex items-center gap-2">
-                <span>Top {valueLimit} Customers by Customer Value</span>
+                <span>{valueLimit === 0 ? `All Customers by Customer Value (${processedValueCustomers.length.toLocaleString('en-IN')})` : `Top ${valueLimit} Customers by Customer Value`}</span>
                 <span className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-emerald-950/80 text-emerald-300 border border-emerald-700/50">
                   Value Ranked
                 </span>
@@ -1365,7 +1379,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
                 value={valueSearch}
                 onChange={e => {
                   setValueSearch(e.target.value);
-                  setVisibleCountValue(15);
+                  setValuePage(0);
                 }}
                 placeholder="Search name, phone, city..."
                 className="h-8 pl-8 pr-2.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 w-40 sm:w-52"
@@ -1382,6 +1396,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
               <option value={25}>Top 25</option>
               <option value={50}>Top 50</option>
               <option value={100}>Top 100</option>
+              {department === 'sales' && <option value={0}>All Customers (Overall)</option>}
             </select>
 
             {/* Sort Field Selector */}
@@ -1556,34 +1571,76 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
           </table>
         </div>
 
-        {/* Pagination & Expansion Footer: Showing 1–15 of N, View More / Show Less */}
+        {/* Pagination Footer: Page Size Selector & Page Controls */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
           <div className="text-xs text-slate-400 font-medium">
-            Showing <span className="font-mono font-bold text-white">1–{Math.min(visibleCountValue, processedValueCustomers.length)}</span> of{' '}
-            <span className="font-mono font-bold text-white">{processedValueCustomers.length}</span> customers
+            {processedValueCustomers.length === 0 ? (
+              <span>Showing 0 of 0 customers</span>
+            ) : (
+              <>
+                Showing{' '}
+                <span className="font-mono font-bold text-white">
+                  {(safeValuePage * valuePageSize + 1).toLocaleString('en-IN')}–{Math.min((safeValuePage + 1) * valuePageSize, processedValueCustomers.length).toLocaleString('en-IN')}
+                </span>{' '}
+                of <span className="font-mono font-bold text-white">{processedValueCustomers.length.toLocaleString('en-IN')}</span> customers
+              </>
+            )}
           </div>
 
-          <div className="flex items-center gap-2">
-            {visibleCountValue < processedValueCustomers.length && (
-              <button
-                type="button"
-                onClick={() => setVisibleCountValue(prev => Math.min(prev + 15, processedValueCustomers.length))}
-                className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 text-slate-200 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
-              >
-                <span>View More (+{Math.min(15, processedValueCustomers.length - visibleCountValue)})</span>
-                <ChevronDown size={14} className="text-emerald-400" />
-              </button>
-            )}
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={valuePageSize}
+              onChange={e => {
+                setValuePageSize(Number(e.target.value));
+                setValuePage(0);
+              }}
+              className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer"
+              aria-label="Rows per page"
+            >
+              <option value={15}>15 / page</option>
+              <option value={25}>25 / page</option>
+              <option value={50}>50 / page</option>
+              <option value={100}>100 / page</option>
+            </select>
 
-            {visibleCountValue > 15 && (
-              <button
-                type="button"
-                onClick={() => setVisibleCountValue(15)}
-                className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
-              >
-                <span>Show Less</span>
-                <ChevronUp size={14} className="text-slate-400" />
-              </button>
+            {valueTotalPages > 1 && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setValuePage(0)}
+                  disabled={safeValuePage === 0}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  First
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setValuePage(p => Math.max(0, p - 1))}
+                  disabled={safeValuePage === 0}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  Prev
+                </button>
+                <span className="px-2 text-xs font-mono text-slate-300">
+                  Page {safeValuePage + 1} / {valueTotalPages.toLocaleString('en-IN')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setValuePage(p => Math.min(valueTotalPages - 1, p + 1))}
+                  disabled={safeValuePage >= valueTotalPages - 1}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setValuePage(valueTotalPages - 1)}
+                  disabled={safeValuePage >= valueTotalPages - 1}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  Last
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -1601,7 +1658,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
             <div className="flex items-center gap-2">
               <Repeat size={16} className="text-indigo-400" />
               <h3 className="text-sm sm:text-base font-bold text-white tracking-tight flex items-center gap-2">
-                <span>Top {repeatLimit} Repeat Customers</span>
+                <span>{repeatLimit === 0 ? `All Repeat Customers (${processedRepeatCustomers.length.toLocaleString('en-IN')})` : `Top ${repeatLimit} Repeat Customers`}</span>
                 <span className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-indigo-950/80 text-indigo-300 border border-indigo-700/50">
                   Frequency Ranked (2+ Orders)
                 </span>
@@ -1623,7 +1680,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
                 value={repeatSearch}
                 onChange={e => {
                   setRepeatSearch(e.target.value);
-                  setVisibleCountRepeat(15);
+                  setRepeatPage(0);
                 }}
                 placeholder="Search name, phone, city..."
                 className="h-8 pl-8 pr-2.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 w-40 sm:w-52"
@@ -1640,6 +1697,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
               <option value={25}>Top 25</option>
               <option value={50}>Top 50</option>
               <option value={100}>Top 100</option>
+              {department === 'sales' && <option value={0}>All Customers (Overall)</option>}
             </select>
 
             {/* Sort Field Selector */}
@@ -1809,34 +1867,76 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
           </table>
         </div>
 
-        {/* Pagination & Expansion Footer: Showing 1–15 of N, View More / Show Less */}
+        {/* Pagination Footer: Page Size Selector & Page Controls */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
           <div className="text-xs text-slate-400 font-medium">
-            Showing <span className="font-mono font-bold text-white">1–{Math.min(visibleCountRepeat, processedRepeatCustomers.length)}</span> of{' '}
-            <span className="font-mono font-bold text-white">{processedRepeatCustomers.length}</span> repeat customers
+            {processedRepeatCustomers.length === 0 ? (
+              <span>Showing 0 of 0 repeat customers</span>
+            ) : (
+              <>
+                Showing{' '}
+                <span className="font-mono font-bold text-white">
+                  {(safeRepeatPage * repeatPageSize + 1).toLocaleString('en-IN')}–{Math.min((safeRepeatPage + 1) * repeatPageSize, processedRepeatCustomers.length).toLocaleString('en-IN')}
+                </span>{' '}
+                of <span className="font-mono font-bold text-white">{processedRepeatCustomers.length.toLocaleString('en-IN')}</span> repeat customers
+              </>
+            )}
           </div>
 
-          <div className="flex items-center gap-2">
-            {visibleCountRepeat < processedRepeatCustomers.length && (
-              <button
-                type="button"
-                onClick={() => setVisibleCountRepeat(prev => Math.min(prev + 15, processedRepeatCustomers.length))}
-                className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 text-slate-200 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
-              >
-                <span>View More (+{Math.min(15, processedRepeatCustomers.length - visibleCountRepeat)})</span>
-                <ChevronDown size={14} className="text-indigo-400" />
-              </button>
-            )}
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={repeatPageSize}
+              onChange={e => {
+                setRepeatPageSize(Number(e.target.value));
+                setRepeatPage(0);
+              }}
+              className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer"
+              aria-label="Rows per page"
+            >
+              <option value={15}>15 / page</option>
+              <option value={25}>25 / page</option>
+              <option value={50}>50 / page</option>
+              <option value={100}>100 / page</option>
+            </select>
 
-            {visibleCountRepeat > 15 && (
-              <button
-                type="button"
-                onClick={() => setVisibleCountRepeat(15)}
-                className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
-              >
-                <span>Show Less</span>
-                <ChevronUp size={14} className="text-slate-400" />
-              </button>
+            {repeatTotalPages > 1 && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setRepeatPage(0)}
+                  disabled={safeRepeatPage === 0}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  First
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRepeatPage(p => Math.max(0, p - 1))}
+                  disabled={safeRepeatPage === 0}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  Prev
+                </button>
+                <span className="px-2 text-xs font-mono text-slate-300">
+                  Page {safeRepeatPage + 1} / {repeatTotalPages.toLocaleString('en-IN')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setRepeatPage(p => Math.min(repeatTotalPages - 1, p + 1))}
+                  disabled={safeRepeatPage >= repeatTotalPages - 1}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRepeatPage(repeatTotalPages - 1)}
+                  disabled={safeRepeatPage >= repeatTotalPages - 1}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  Last
+                </button>
+              </div>
             )}
           </div>
         </div>
