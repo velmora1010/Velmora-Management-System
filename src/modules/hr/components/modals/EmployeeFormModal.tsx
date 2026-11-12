@@ -163,18 +163,64 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Initialization & Draft Loading
+  // Initialization & Clean Form State Management
   useEffect(() => {
-    if (!isOpen) return;
+    // When modal is closed, wipe all state completely to prevent stale retention across employee switches
+    if (!isOpen) {
+      setActiveTab('personal');
+      setCompletedTabs(new Set());
+      setTouchedFields(new Set());
+      setErrors({});
+      setFirstName('');
+      setLastName('');
+      setEmail('');
+      setPhone('');
+      setAvatar('');
+      setAvatarFileName('');
+      setUploadError('');
+      setGender('');
+      setDateOfBirth('');
+      setCity('');
+      setDesignation('');
+      setDesignationId('');
+      setDesignationCategory('');
+      setDepartmentId('');
+      setStatus('active');
+      setEmploymentType('');
+      setWorkLocation('');
+      setShiftId('');
+      setJoiningDate('');
+      setBaseSalary('');
+      setBankName('');
+      setAccountNumber('');
+      setIfscCode('');
+      setTaxId('');
+      setEmergencyContactName('');
+      setEmergencyContactRelation('');
+      setEmergencyContactPhone('');
+      setAddress('');
+      setCountry('');
+      setBio('');
+      return;
+    }
 
     setActiveTab('personal');
     setErrors({});
     setIsSubmitting(false);
     setIsDesignationOpen(false);
     setDesignationSearch('');
+    setTouchedFields(new Set());
 
     if (employeeToEdit) {
-      const source = employees.find((e) => e.id === employeeToEdit.id) || employeeToEdit;
+      // Find exact employee by unique ID or Code
+      const source =
+        employees.find(
+          (e) =>
+            e.id === employeeToEdit.id ||
+            (e.id && employeeToEdit.id && e.id.toLowerCase() === employeeToEdit.id.toLowerCase()) ||
+            (e.employeeCode && employeeToEdit.employeeCode && e.employeeCode.toLowerCase() === employeeToEdit.employeeCode.toLowerCase())
+        ) || employeeToEdit;
+
       setFirstName(source.firstName || '');
       setLastName(source.lastName || '');
       setEmail(source.email || '');
@@ -194,7 +240,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
       setShiftId(source.shiftId || '');
       setWorkLocation(source.workLocation || '');
 
-      // Load actual saved values directly and preserve them
+      // Load financial & banking values
       setBankName(source.bankName || '');
       setAccountNumber(source.accountNumber || '');
       setIfscCode(source.ifscCode || '');
@@ -205,6 +251,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
           : ''
       );
 
+      // Populate ONLY values genuinely saved for this employee (show empty if not entered)
       setEmergencyContactName(source.emergencyContactName || '');
       setEmergencyContactRelation(source.emergencyContactRelation || '');
       setEmergencyContactPhone(source.emergencyContactPhone || '');
@@ -214,9 +261,14 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
       setCountry(source.country || '');
       setBio(source.bio || '');
       setCompletedTabs(new Set(['personal', 'job', 'financial', 'emergency']));
-      setTouchedFields(new Set());
     } else {
-      // New employee: check draft if available, otherwise start completely empty
+      // New employee: emergency contact fields MUST ALWAYS start completely empty
+      setEmergencyContactName('');
+      setEmergencyContactRelation('');
+      setEmergencyContactPhone('');
+      setAddress('');
+
+      // Check draft if available, but NEVER restore emergency contacts from draft
       let draft: any = null;
       try {
         const stored = localStorage.getItem(DRAFT_STORAGE_KEY);
@@ -251,14 +303,16 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
         setAccountNumber(draft.accountNumber || '');
         setIfscCode(draft.ifscCode || '');
         setTaxId(draft.taxId || '');
-        setEmergencyContactName(draft.emergencyContactName || '');
-        setEmergencyContactRelation(draft.emergencyContactRelation || '');
-        setEmergencyContactPhone(draft.emergencyContactPhone || '');
-        setAddress(draft.address || '');
+
+        // Emergency contacts strictly empty for new profile
+        setEmergencyContactName('');
+        setEmergencyContactRelation('');
+        setEmergencyContactPhone('');
+        setAddress('');
+
         setCountry(draft.country || '');
         setBio(draft.bio || '');
         setCompletedTabs(new Set(draft.completedTabs || []));
-        setTouchedFields(new Set());
       } else {
         // Completely empty new employee form
         setFirstName('');
@@ -669,10 +723,10 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
       ifscCode: touchedFields.has('ifscCode') ? ifscCode.trim().toUpperCase() : (current?.ifscCode ?? ifscCode.trim().toUpperCase()),
       taxId: touchedFields.has('taxId') ? taxId.trim() : (current?.taxId ?? taxId.trim()),
 
-      emergencyContactName: touchedFields.has('emergencyContactName') ? emergencyContactName.trim() : (current?.emergencyContactName ?? emergencyContactName.trim()),
-      emergencyContactRelation: touchedFields.has('emergencyContactRelation') ? emergencyContactRelation.trim() : (current?.emergencyContactRelation ?? emergencyContactRelation.trim()),
-      emergencyContactPhone: touchedFields.has('emergencyContactPhone') ? emergencyContactPhone.trim() : (current?.emergencyContactPhone ?? emergencyContactPhone.trim()),
-      address: touchedFields.has('address') ? address.trim() : (current?.address ?? address.trim()),
+      emergencyContactName: emergencyContactName.trim(),
+      emergencyContactRelation: emergencyContactRelation.trim(),
+      emergencyContactPhone: emergencyContactPhone.trim(),
+      address: address.trim(),
       country: touchedFields.has('country') ? country.trim() : (current?.country ?? country.trim() ?? 'India'),
       bio: touchedFields.has('bio') ? bio.trim() : (current?.bio ?? bio.trim()),
     };
@@ -734,9 +788,8 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     if (employeeToEdit) {
       try {
         setIsSubmitting(true);
-        await new Promise((resolve) => setTimeout(resolve, 200));
         const payload = getPayloadForEmployee();
-        updateEmployee(employeeToEdit.id, payload);
+        await Promise.resolve(updateEmployee(employeeToEdit.id, payload));
       } catch (err: any) {
         console.error('Failed to save tab updates:', err);
         return;
@@ -772,8 +825,6 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
     setIsSubmitting(true);
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 350));
-
       const payload = getPayloadForEmployee();
 
       if (employeeToEdit) {

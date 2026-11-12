@@ -1,4 +1,29 @@
 /**
+ * Detects legacy seed/demo emergency contact records from initial database migration
+ * to prevent hardcoded demo entries from appearing as genuine employee information.
+ */
+export function isLegacySeedEmergencyContact(name?: string, phone?: string, address?: string): boolean {
+  if (!name && !phone && !address) return false;
+  const n = (name || '').trim().toLowerCase();
+  const p = (phone || '').replace(/[\s+-]/g, '');
+  const a = (address || '').trim().toLowerCase();
+
+  // Seed demo data for Priya K (emp-1003) from migration 20261103163000_create_hrms_tables.sql
+  if (n === 'kavitha r' || p === '919876500003' || p === '9876500003' || a.includes('quality lane')) {
+    return true;
+  }
+  // Seed demo data for Dinesh K (emp-1002) from migration
+  if (n === 'suresh k' || p === '919876500002' || p === '9876500002' || a.includes('cyber heights')) {
+    return true;
+  }
+  // Seed demo data for Dhesan M (emp-1001) from migration
+  if (n === 'dinesh' && p === '6532984276' && a.includes('tech park')) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * HRMS Supabase Service Layer
  * Handles persistent database operations between the Velmora HRMS Frontend
  * and the Supabase PostgreSQL database tables.
@@ -53,10 +78,10 @@ export function rowToEmployee(row: any): Employee {
     accountNumber: row.account_number || '',
     ifscCode: row.ifsc_code || '',
     taxId: row.tax_id || '',
-    emergencyContactName: row.emergency_contact_name || '',
-    emergencyContactRelation: row.emergency_contact_relation || '',
-    emergencyContactPhone: row.emergency_contact_phone || '',
-    address: row.address || '',
+    emergencyContactName: isLegacySeedEmergencyContact(row.emergency_contact_name, row.emergency_contact_phone, row.emergency_contact_address || row.address) ? '' : (row.emergency_contact_name || ''),
+    emergencyContactRelation: isLegacySeedEmergencyContact(row.emergency_contact_name, row.emergency_contact_phone, row.emergency_contact_address || row.address) ? '' : (row.emergency_contact_relation || ''),
+    emergencyContactPhone: isLegacySeedEmergencyContact(row.emergency_contact_name, row.emergency_contact_phone, row.emergency_contact_address || row.address) ? '' : (row.emergency_contact_phone || ''),
+    address: ((row.address || '').toLowerCase().includes('quality lane') || (row.address || '').toLowerCase().includes('cyber heights') || (row.address || '').toLowerCase().includes('tech park')) ? '' : (row.address || ''),
     city: row.city || '',
     country: row.country || 'India',
     bio: row.bio,
@@ -95,11 +120,11 @@ export function employeeToRow(emp: Employee, authUserId?: string): any {
     account_number: emp.accountNumber,
     ifsc_code: emp.ifscCode || null,
     tax_id: emp.taxId,
-    emergency_contact_name: emp.emergencyContactName,
-    emergency_contact_relation: emp.emergencyContactRelation,
-    emergency_contact_phone: emp.emergencyContactPhone,
-    emergency_contact_address: emp.address,
-    address: emp.address,
+    emergency_contact_name: emp.emergencyContactName && emp.emergencyContactName.trim() ? emp.emergencyContactName.trim() : null,
+    emergency_contact_relation: emp.emergencyContactRelation && emp.emergencyContactRelation.trim() ? emp.emergencyContactRelation.trim() : null,
+    emergency_contact_phone: emp.emergencyContactPhone && emp.emergencyContactPhone.trim() ? emp.emergencyContactPhone.trim() : null,
+    emergency_contact_address: emp.address && emp.address.trim() ? emp.address.trim() : null,
+    address: emp.address && emp.address.trim() ? emp.address.trim() : null,
     city: emp.city,
     country: emp.country || 'India',
     bio: emp.bio || null,
