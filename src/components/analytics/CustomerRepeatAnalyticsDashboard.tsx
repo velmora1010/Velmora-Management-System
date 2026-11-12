@@ -263,7 +263,9 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
     const sourceList = department === 'sales'
       ? (data.allCustomersByValue || data.allCustomers || data.topCustomersByValue || [])
       : (data.topCustomersByValue || data.topCustomers || []);
-    let list = [...sourceList];
+    let list = valueLimit === 0
+      ? sourceList.filter(c => c.totalOrders > 1)
+      : [...sourceList];
 
     if (valueSearch.trim()) {
       const q = valueSearch.toLowerCase().trim();
@@ -306,7 +308,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
     const sourceList = department === 'sales'
       ? (data.allRepeatCustomers || (data.allCustomers || []).filter(c => c.totalOrders >= 2))
       : (data.topCustomersByRepeat || []);
-    let list = [...sourceList];
+    let list = sourceList.filter(c => c.totalOrders > 1);
 
     if (repeatSearch.trim()) {
       const q = repeatSearch.toLowerCase().trim();
@@ -404,13 +406,16 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
 
   // CSV Export Helpers
   const handleExportValueCustomersCSV = () => {
-    if (processedValueCustomers.length === 0) {
+    const exportList = valueLimit === 0
+      ? processedValueCustomers.filter(c => c.totalOrders > 1)
+      : processedValueCustomers;
+    if (exportList.length === 0) {
       toast.error('No customers to export');
       return;
     }
     const headers = ['Rank', 'Customer Name', 'Phone', 'City', 'State', 'Valid Orders', 'Repeat Count', 'Total Net Spend (INR)', 'AOV (INR)', 'Top Product', 'Last Purchase Date'];
-    const rows = processedValueCustomers.map(c => [
-      c.rank,
+    const rows = exportList.map((c, idx) => [
+      idx + 1,
       `"${c.customerName.replace(/"/g, '""')}"`,
       c.phone,
       `"${c.city.replace(/"/g, '""')}"`,
@@ -423,9 +428,9 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
       c.lastOrderDate
     ]);
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    const prefix = valueLimit === 0 ? 'all_customers_by_value' : `top_${valueLimit}_customers_by_value`;
+    const prefix = valueLimit === 0 ? 'all_repeat_customers_by_value' : `top_${valueLimit}_customers_by_value`;
     downloadBlob(csvContent, `${prefix}_${new Date().toISOString().slice(0, 10)}.csv`);
-    toast.success(`Exported ${processedValueCustomers.length.toLocaleString('en-IN')} customers to CSV`);
+    toast.success(`Exported ${exportList.length.toLocaleString('en-IN')} customers to CSV`);
   };
 
   const handleExportRepeatCustomersCSV = () => {
@@ -1357,14 +1362,16 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
             <div className="flex items-center gap-2">
               <DollarSign size={16} className="text-emerald-400" />
               <h3 className="text-sm sm:text-base font-bold text-white tracking-tight flex items-center gap-2">
-                <span>{valueLimit === 0 ? `All Customers by Customer Value (${processedValueCustomers.length.toLocaleString('en-IN')})` : `Top ${valueLimit} Customers by Customer Value`}</span>
+                <span>{valueLimit === 0 ? `All Repeat Customers by Value (${processedValueCustomers.length.toLocaleString('en-IN')})` : `Top ${valueLimit} Customers by Customer Value`}</span>
                 <span className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-emerald-950/80 text-emerald-300 border border-emerald-700/50">
                   Value Ranked
                 </span>
               </h3>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Ranked by total net purchase value, highest to lowest. Displays high-value purchasers across valid orders.
+              {valueLimit === 0
+                ? 'Displays all repeat customers (2+ valid orders) ranked by total net purchase value, highest to lowest.'
+                : 'Ranked by total net purchase value, highest to lowest. Displays high-value purchasers across valid orders.'}
             </p>
           </div>
 
