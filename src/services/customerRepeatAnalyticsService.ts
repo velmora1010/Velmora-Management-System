@@ -40,6 +40,22 @@ export interface RepeatTrendPoint {
   totalOrders: number;
 }
 
+export function normalizeProductName(rawName: string | null | undefined): string {
+  if (!rawName) return 'Standard Products';
+  let normalized = rawName.trim();
+  if (!normalized) return 'Standard Products';
+  // Repair UTF-8 em-dash / en-dash bytes mis-decoded as Latin-1 / Windows-1252
+  normalized = normalized
+    .replace(/\u00e2\u0080\u0094/g, '-')
+    .replace(/\u00e2\u0080\u0093/g, '-')
+    .replace(/â€”/g, '-')
+    .replace(/â€“/g, '-');
+  if (/^DIY BBC Cleaner\s+[—–]\s+/i.test(normalized)) {
+    normalized = normalized.replace(/\s+[—–]\s+/, ' - ');
+  }
+  return normalized;
+}
+
 export interface CustomerOrderHistoryEntry {
   orderId: string;
   orderDate: string;
@@ -646,11 +662,11 @@ class CustomerRepeatAnalyticsService {
         const orderLineItems = itemsMap.get(ord.id) || [];
         if (orderLineItems.length > 0) {
           orderLineItems.forEach(it => {
-            const p = (it.product_name || 'Standard Products').trim();
+            const p = normalizeProductName(it.product_name);
             productCounts.set(p, (productCounts.get(p) || 0) + (it.quantity || 1));
           });
         } else {
-          const fallback = ord.product_name || 'Standard Products';
+          const fallback = normalizeProductName(ord.product_name);
           productCounts.set(fallback, (productCounts.get(fallback) || 0) + (ord.total_quantity || 1));
         }
       });
@@ -675,11 +691,11 @@ class CustomerRepeatAnalyticsService {
         const ordProdMap = new Map<string, number>();
         if (orderLineItems.length > 0) {
           orderLineItems.forEach(it => {
-            const p = (it.product_name || 'Standard Products').trim();
+            const p = normalizeProductName(it.product_name);
             ordProdMap.set(p, (ordProdMap.get(p) || 0) + (Number(it.quantity) || 1));
           });
         } else {
-          const fallback = (ord.product_name || 'Standard Products').trim();
+          const fallback = normalizeProductName(ord.product_name);
           ordProdMap.set(fallback, Number(ord.total_quantity) || 1);
         }
         return Array.from(ordProdMap.entries())
@@ -836,7 +852,7 @@ class CustomerRepeatAnalyticsService {
 
       if (orderItems.length > 0) {
         orderItems.forEach(it => {
-          const p = (it.product_name || 'Standard Products').trim();
+          const p = normalizeProductName(it.product_name);
           if (!productMap.has(p)) {
             productMap.set(p, { repeatQuantity: 0, repeatSalesValue: 0, buyersSet: new Set() });
           }

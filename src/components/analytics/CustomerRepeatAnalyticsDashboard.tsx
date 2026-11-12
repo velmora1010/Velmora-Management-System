@@ -542,7 +542,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
   };
 
   const downloadBlob = (content: string, filename: string) => {
-    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
