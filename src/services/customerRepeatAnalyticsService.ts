@@ -43,6 +43,7 @@ export interface RepeatTrendPoint {
 export interface CustomerOrderHistoryEntry {
   orderId: string;
   orderDate: string;
+  products: string;
 }
 
 export interface TopCustomerItem {
@@ -663,6 +664,29 @@ class CustomerRepeatAnalyticsService {
         }
       });
 
+      const chronologicalOrders = [...sortedOrders].sort((a, b) => {
+        const dateCmp = (a.order_date || '').localeCompare(b.order_date || '');
+        if (dateCmp !== 0) return dateCmp;
+        return String(a.order_id || '').localeCompare(String(b.order_id || ''));
+      });
+
+      const formatOrderProducts = (ord: any): string => {
+        const orderLineItems = itemsMap.get(ord.id) || [];
+        const ordProdMap = new Map<string, number>();
+        if (orderLineItems.length > 0) {
+          orderLineItems.forEach(it => {
+            const p = (it.product_name || 'Standard Products').trim();
+            ordProdMap.set(p, (ordProdMap.get(p) || 0) + (Number(it.quantity) || 1));
+          });
+        } else {
+          const fallback = (ord.product_name || 'Standard Products').trim();
+          ordProdMap.set(fallback, Number(ord.total_quantity) || 1);
+        }
+        return Array.from(ordProdMap.entries())
+          .map(([name, qty]) => `${name} × ${qty}`)
+          .join('; ');
+      };
+
       return {
         rank: 0,
         customerKey: c.customerKey,
@@ -679,9 +703,10 @@ class CustomerRepeatAnalyticsService {
         lastOrderDate,
         firstOrderDate,
         orderIds: sortedOrders.map(o => o.order_id),
-        orderHistory: sortedOrders.map(o => ({
+        orderHistory: chronologicalOrders.map(o => ({
           orderId: o.order_id,
-          orderDate: o.order_date || ''
+          orderDate: o.order_date || '',
+          products: formatOrderProducts(o)
         }))
       };
     });

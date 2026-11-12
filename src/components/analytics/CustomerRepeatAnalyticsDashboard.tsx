@@ -416,10 +416,17 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
   };
 
   const getCustomerOrderHistory = (c: TopCustomerItem) => {
-    if (c.orderHistory && c.orderHistory.length > 0) return c.orderHistory;
-    return (c.orderIds || []).map((orderId, idx, arr) => ({
+    if (c.orderHistory && c.orderHistory.length > 0) {
+      return [...c.orderHistory].sort((a, b) => {
+        const dateCmp = (a.orderDate || '').localeCompare(b.orderDate || '');
+        if (dateCmp !== 0) return dateCmp;
+        return String(a.orderId || '').localeCompare(String(b.orderId || ''));
+      });
+    }
+    return [...(c.orderIds || [])].reverse().map((orderId, idx, arr) => ({
       orderId,
-      orderDate: idx === 0 ? c.lastOrderDate : idx === arr.length - 1 ? c.firstOrderDate : ''
+      orderDate: idx === 0 ? c.firstOrderDate : idx === arr.length - 1 ? c.lastOrderDate : '',
+      products: ''
     }));
   };
 
@@ -436,7 +443,10 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
 
   const buildCustomerCSVContent = (customers: TopCustomerItem[], repeatCountHeader: string): string => {
     const maxOrders = customers.reduce((max, c) => Math.max(max, getCustomerOrderHistory(c).length), 0);
-    const orderDateHeaders = Array.from({ length: maxOrders }, (_, i) => `${getOrdinal(i + 1)} Order Date`);
+    const orderPairHeaders = Array.from({ length: maxOrders }, (_, i) => {
+      const ord = getOrdinal(i + 1);
+      return [`${ord} Order Date`, `${ord} Order Product`];
+    }).flat();
     const headers = [
       'Rank',
       'Customer Name',
@@ -450,14 +460,19 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
       'Top Product',
       'First Purchase Date',
       'Last Purchase Date',
-      ...orderDateHeaders
+      ...orderPairHeaders
     ];
 
     const rows = customers.map((c, idx) => {
-      const chronologicalDates = [...getCustomerOrderHistory(c)]
-        .sort((a, b) => (a.orderDate || '').localeCompare(b.orderDate || ''))
-        .map(h => h.orderDate || '');
-      const paddedDates = Array.from({ length: maxOrders }, (_, i) => chronologicalDates[i] || '');
+      const history = getCustomerOrderHistory(c);
+      const paddedPairs = Array.from({ length: maxOrders }, (_, i) => {
+        const entry = history[i];
+        if (!entry) return ['', ''];
+        return [
+          entry.orderDate || '',
+          `"${(entry.products || '').replace(/"/g, '""')}"`
+        ];
+      }).flat();
       return [
         idx + 1,
         `"${c.customerName.replace(/"/g, '""')}"`,
@@ -471,7 +486,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
         `"${c.mostPurchasedProduct.replace(/"/g, '""')}"`,
         c.firstOrderDate,
         c.lastOrderDate,
-        ...paddedDates
+        ...paddedPairs
       ];
     });
 
@@ -2392,7 +2407,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
          ========================================================================= */}
       {selectedCustomerForModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="bg-[#0b1220] border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+          <div className="bg-[#0b1220] border border-slate-800 rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
             
             {/* Modal Header */}
             <div className="p-4 sm:p-5 border-b border-slate-800 flex items-start justify-between bg-slate-900/50">
@@ -2467,39 +2482,52 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
                       Order History ({modalHistory.length} Valid Orders)
                     </h4>
 
-                    <div className="rounded-xl border border-slate-800 bg-slate-900/40 overflow-hidden">
-                      <div className="grid grid-cols-[44px_1fr_auto] items-center px-3 py-2 bg-slate-900/80 border-b border-slate-800 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                        <span>#</span>
-                        <span>Order ID</span>
-                        <span>Order Date</span>
-                      </div>
-                      <div className="divide-y divide-slate-800/80">
-                        {modalHistory.map((entry, idx) => (
-                          <div
-                            key={entry.orderId}
-                            className="px-3 py-2.5 grid grid-cols-[44px_1fr_auto] items-center text-xs hover:bg-slate-800/40 transition-colors"
-                          >
-                            <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center text-[10px] font-mono">
-                              {idx + 1}
-                            </span>
-                            <span className="font-mono font-bold text-white">{entry.orderId}</span>
-                            <div className="flex items-center gap-3">
-                              <span className="text-slate-300 font-mono text-[11px]" title={entry.orderDate || undefined}>
+                    <div className="rounded-xl border border-slate-800 bg-slate-900/40 overflow-x-auto">
+                      <table className="w-full text-left border-collapse min-w-[540px]">
+                        <thead>
+                          <tr className="bg-slate-900/80 border-b border-slate-800 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                            <th className="px-3 py-2 w-11">#</th>
+                            <th className="px-3 py-2 w-24">Order ID</th>
+                            <th className="px-3 py-2 w-32">Order Date</th>
+                            <th className="px-3 py-2">Products Purchased</th>
+                            {onNavigateToOrder && <th className="px-3 py-2 text-right w-28">Action</th>}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/80 text-xs">
+                          {modalHistory.map((entry, idx) => (
+                            <tr
+                              key={entry.orderId}
+                              className="hover:bg-slate-800/40 transition-colors"
+                            >
+                              <td className="px-3 py-2.5">
+                                <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center text-[10px] font-mono">
+                                  {idx + 1}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2.5 font-mono font-bold text-white whitespace-nowrap">
+                                {entry.orderId}
+                              </td>
+                              <td className="px-3 py-2.5 text-slate-300 font-mono text-[11px] whitespace-nowrap" title={entry.orderDate || undefined}>
                                 {formatOrderDisplayDate(entry.orderDate)}
-                              </span>
+                              </td>
+                              <td className="px-3 py-2.5 text-slate-200 leading-relaxed">
+                                {entry.products || '—'}
+                              </td>
                               {onNavigateToOrder && (
-                                <button
-                                  type="button"
-                                  onClick={() => onNavigateToOrder(entry.orderId)}
-                                  className="px-2 py-1 rounded bg-indigo-600/30 text-indigo-300 hover:text-white hover:bg-indigo-600 text-[11px] font-semibold transition-all cursor-pointer"
-                                >
-                                  View Order →
-                                </button>
+                                <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => onNavigateToOrder(entry.orderId)}
+                                    className="px-2 py-1 rounded bg-indigo-600/30 text-indigo-300 hover:text-white hover:bg-indigo-600 text-[11px] font-semibold transition-all cursor-pointer"
+                                  >
+                                    View Order →
+                                  </button>
+                                </td>
                               )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </>
                 );
