@@ -423,20 +423,41 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
     }));
   };
 
-  // CSV Export Helpers
-  const handleExportValueCustomersCSV = () => {
-    const exportList = valueLimit === 0
-      ? processedValueCustomers.filter(c => c.totalOrders > 1)
-      : processedValueCustomers;
-    if (exportList.length === 0) {
-      toast.error('No customers to export');
-      return;
+  const getOrdinal = (n: number): string => {
+    const mod100 = n % 100;
+    if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
+    switch (n % 10) {
+      case 1: return `${n}st`;
+      case 2: return `${n}nd`;
+      case 3: return `${n}rd`;
+      default: return `${n}th`;
     }
-    const headers = ['Rank', 'Customer Name', 'Phone', 'City', 'State', 'Valid Orders', 'Repeat Count', 'Total Net Spend (INR)', 'AOV (INR)', 'Top Product', 'Last Purchase Date', 'Order IDs', 'Order Dates'];
-    const rows = exportList.map((c, idx) => {
-      const history = getCustomerOrderHistory(c);
-      const orderIdsStr = history.map(h => h.orderId).join('; ');
-      const orderDatesStr = history.map(h => h.orderDate || 'N/A').join('; ');
+  };
+
+  const buildCustomerCSVContent = (customers: TopCustomerItem[], repeatCountHeader: string): string => {
+    const maxOrders = customers.reduce((max, c) => Math.max(max, getCustomerOrderHistory(c).length), 0);
+    const orderDateHeaders = Array.from({ length: maxOrders }, (_, i) => `${getOrdinal(i + 1)} Order Date`);
+    const headers = [
+      'Rank',
+      'Customer Name',
+      'Phone',
+      'City',
+      'State',
+      'Valid Orders',
+      repeatCountHeader,
+      'Total Net Spend (INR)',
+      'AOV (INR)',
+      'Top Product',
+      'First Purchase Date',
+      'Last Purchase Date',
+      ...orderDateHeaders
+    ];
+
+    const rows = customers.map((c, idx) => {
+      const chronologicalDates = [...getCustomerOrderHistory(c)]
+        .sort((a, b) => (a.orderDate || '').localeCompare(b.orderDate || ''))
+        .map(h => h.orderDate || '');
+      const paddedDates = Array.from({ length: maxOrders }, (_, i) => chronologicalDates[i] || '');
       return [
         idx + 1,
         `"${c.customerName.replace(/"/g, '""')}"`,
@@ -448,47 +469,40 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
         c.totalValue.toFixed(2),
         c.averageOrderValue,
         `"${c.mostPurchasedProduct.replace(/"/g, '""')}"`,
+        c.firstOrderDate,
         c.lastOrderDate,
-        `"${orderIdsStr.replace(/"/g, '""')}"`,
-        `"${orderDatesStr.replace(/"/g, '""')}"`
+        ...paddedDates
       ];
     });
-    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+
+    return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+  };
+
+  // CSV Export Helpers
+  const handleExportValueCustomersCSV = () => {
+    const exportList = valueLimit === 0
+      ? processedValueCustomers.filter(c => c.totalOrders > 1)
+      : processedValueCustomers;
+    if (exportList.length === 0) {
+      toast.error('No customers to export');
+      return;
+    }
+    const csvContent = buildCustomerCSVContent(exportList, 'Repeat Count');
     const prefix = valueLimit === 0 ? 'all_repeat_customers_by_value' : `top_${valueLimit}_customers_by_value`;
     downloadBlob(csvContent, `${prefix}_${new Date().toISOString().slice(0, 10)}.csv`);
     toast.success(`Exported ${exportList.length.toLocaleString('en-IN')} customers to CSV`);
   };
 
   const handleExportRepeatCustomersCSV = () => {
-    if (processedRepeatCustomers.length === 0) {
+    const exportList = processedRepeatCustomers.filter(c => c.totalOrders > 1);
+    if (exportList.length === 0) {
       toast.error('No repeat customers to export');
       return;
     }
-    const headers = ['Rank', 'Customer Name', 'Phone', 'City', 'State', 'Valid Orders', 'Repeat Purchase Count', 'Total Net Spend (INR)', 'AOV (INR)', 'Top Product', 'Last Purchase Date', 'Order IDs', 'Order Dates'];
-    const rows = processedRepeatCustomers.map(c => {
-      const history = getCustomerOrderHistory(c);
-      const orderIdsStr = history.map(h => h.orderId).join('; ');
-      const orderDatesStr = history.map(h => h.orderDate || 'N/A').join('; ');
-      return [
-        c.rank,
-        `"${c.customerName.replace(/"/g, '""')}"`,
-        c.phone,
-        `"${c.city.replace(/"/g, '""')}"`,
-        `"${c.state.replace(/"/g, '""')}"`,
-        c.totalOrders,
-        c.repeatPurchaseCount,
-        c.totalValue.toFixed(2),
-        c.averageOrderValue,
-        `"${c.mostPurchasedProduct.replace(/"/g, '""')}"`,
-        c.lastOrderDate,
-        `"${orderIdsStr.replace(/"/g, '""')}"`,
-        `"${orderDatesStr.replace(/"/g, '""')}"`
-      ];
-    });
-    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const csvContent = buildCustomerCSVContent(exportList, 'Repeat Purchase Count');
     const prefix = repeatLimit === 0 ? 'all_repeat_customers' : `top_${repeatLimit}_repeat_customers`;
     downloadBlob(csvContent, `${prefix}_${new Date().toISOString().slice(0, 10)}.csv`);
-    toast.success(`Exported ${processedRepeatCustomers.length.toLocaleString('en-IN')} repeat customers to CSV`);
+    toast.success(`Exported ${exportList.length.toLocaleString('en-IN')} repeat customers to CSV`);
   };
 
   const handleExportGeoCSV = () => {
