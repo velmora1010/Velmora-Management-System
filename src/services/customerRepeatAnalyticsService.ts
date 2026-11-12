@@ -40,6 +40,11 @@ export interface RepeatTrendPoint {
   totalOrders: number;
 }
 
+export interface CustomerOrderHistoryEntry {
+  orderId: string;
+  orderDate: string;
+}
+
 export interface TopCustomerItem {
   rank: number;
   customerKey: string;
@@ -56,6 +61,7 @@ export interface TopCustomerItem {
   lastOrderDate: string;
   firstOrderDate: string;
   orderIds: string[];
+  orderHistory: CustomerOrderHistoryEntry[];
 }
 
 export interface GeographicLocationItem {
@@ -672,7 +678,11 @@ class CustomerRepeatAnalyticsService {
         mostPurchasedProduct: mostPurchased,
         lastOrderDate,
         firstOrderDate,
-        orderIds: sortedOrders.map(o => o.order_id)
+        orderIds: sortedOrders.map(o => o.order_id),
+        orderHistory: sortedOrders.map(o => ({
+          orderId: o.order_id,
+          orderDate: o.order_date || ''
+        }))
       };
     });
 

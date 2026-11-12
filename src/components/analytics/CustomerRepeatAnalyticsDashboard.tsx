@@ -404,6 +404,25 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
     return list;
   }, [data, productSearch, productSortField, productSortAsc]);
 
+  const formatOrderDisplayDate = (dateStr: string): string => {
+    if (!dateStr || dateStr === 'N/A') return '—';
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return dateStr;
+    const [y, m, d] = parts;
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthName = months[parseInt(m, 10) - 1];
+    if (!monthName) return dateStr;
+    return `${d} ${monthName} ${y}`;
+  };
+
+  const getCustomerOrderHistory = (c: TopCustomerItem) => {
+    if (c.orderHistory && c.orderHistory.length > 0) return c.orderHistory;
+    return (c.orderIds || []).map((orderId, idx, arr) => ({
+      orderId,
+      orderDate: idx === 0 ? c.lastOrderDate : idx === arr.length - 1 ? c.firstOrderDate : ''
+    }));
+  };
+
   // CSV Export Helpers
   const handleExportValueCustomersCSV = () => {
     const exportList = valueLimit === 0
@@ -413,20 +432,27 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
       toast.error('No customers to export');
       return;
     }
-    const headers = ['Rank', 'Customer Name', 'Phone', 'City', 'State', 'Valid Orders', 'Repeat Count', 'Total Net Spend (INR)', 'AOV (INR)', 'Top Product', 'Last Purchase Date'];
-    const rows = exportList.map((c, idx) => [
-      idx + 1,
-      `"${c.customerName.replace(/"/g, '""')}"`,
-      c.phone,
-      `"${c.city.replace(/"/g, '""')}"`,
-      `"${c.state.replace(/"/g, '""')}"`,
-      c.totalOrders,
-      c.repeatPurchaseCount,
-      c.totalValue.toFixed(2),
-      c.averageOrderValue,
-      `"${c.mostPurchasedProduct.replace(/"/g, '""')}"`,
-      c.lastOrderDate
-    ]);
+    const headers = ['Rank', 'Customer Name', 'Phone', 'City', 'State', 'Valid Orders', 'Repeat Count', 'Total Net Spend (INR)', 'AOV (INR)', 'Top Product', 'Last Purchase Date', 'Order IDs', 'Order Dates'];
+    const rows = exportList.map((c, idx) => {
+      const history = getCustomerOrderHistory(c);
+      const orderIdsStr = history.map(h => h.orderId).join('; ');
+      const orderDatesStr = history.map(h => h.orderDate || 'N/A').join('; ');
+      return [
+        idx + 1,
+        `"${c.customerName.replace(/"/g, '""')}"`,
+        c.phone,
+        `"${c.city.replace(/"/g, '""')}"`,
+        `"${c.state.replace(/"/g, '""')}"`,
+        c.totalOrders,
+        c.repeatPurchaseCount,
+        c.totalValue.toFixed(2),
+        c.averageOrderValue,
+        `"${c.mostPurchasedProduct.replace(/"/g, '""')}"`,
+        c.lastOrderDate,
+        `"${orderIdsStr.replace(/"/g, '""')}"`,
+        `"${orderDatesStr.replace(/"/g, '""')}"`
+      ];
+    });
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     const prefix = valueLimit === 0 ? 'all_repeat_customers_by_value' : `top_${valueLimit}_customers_by_value`;
     downloadBlob(csvContent, `${prefix}_${new Date().toISOString().slice(0, 10)}.csv`);
@@ -438,20 +464,27 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
       toast.error('No repeat customers to export');
       return;
     }
-    const headers = ['Rank', 'Customer Name', 'Phone', 'City', 'State', 'Valid Orders', 'Repeat Purchase Count', 'Total Net Spend (INR)', 'AOV (INR)', 'Top Product', 'Last Purchase Date'];
-    const rows = processedRepeatCustomers.map(c => [
-      c.rank,
-      `"${c.customerName.replace(/"/g, '""')}"`,
-      c.phone,
-      `"${c.city.replace(/"/g, '""')}"`,
-      `"${c.state.replace(/"/g, '""')}"`,
-      c.totalOrders,
-      c.repeatPurchaseCount,
-      c.totalValue.toFixed(2),
-      c.averageOrderValue,
-      `"${c.mostPurchasedProduct.replace(/"/g, '""')}"`,
-      c.lastOrderDate
-    ]);
+    const headers = ['Rank', 'Customer Name', 'Phone', 'City', 'State', 'Valid Orders', 'Repeat Purchase Count', 'Total Net Spend (INR)', 'AOV (INR)', 'Top Product', 'Last Purchase Date', 'Order IDs', 'Order Dates'];
+    const rows = processedRepeatCustomers.map(c => {
+      const history = getCustomerOrderHistory(c);
+      const orderIdsStr = history.map(h => h.orderId).join('; ');
+      const orderDatesStr = history.map(h => h.orderDate || 'N/A').join('; ');
+      return [
+        c.rank,
+        `"${c.customerName.replace(/"/g, '""')}"`,
+        c.phone,
+        `"${c.city.replace(/"/g, '""')}"`,
+        `"${c.state.replace(/"/g, '""')}"`,
+        c.totalOrders,
+        c.repeatPurchaseCount,
+        c.totalValue.toFixed(2),
+        c.averageOrderValue,
+        `"${c.mostPurchasedProduct.replace(/"/g, '""')}"`,
+        c.lastOrderDate,
+        `"${orderIdsStr.replace(/"/g, '""')}"`,
+        `"${orderDatesStr.replace(/"/g, '""')}"`
+      ];
+    });
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     const prefix = repeatLimit === 0 ? 'all_repeat_customers' : `top_${repeatLimit}_repeat_customers`;
     downloadBlob(csvContent, `${prefix}_${new Date().toISOString().slice(0, 10)}.csv`);
@@ -2412,40 +2445,51 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
 
             {/* Order IDs & Dates List */}
             <div className="p-4 sm:p-5 overflow-y-auto space-y-3 flex-1 custom-scrollbar">
-              <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-                Order History ({selectedCustomerForModal.orderIds.length} Valid Orders)
-              </h4>
+              {(() => {
+                const modalHistory = getCustomerOrderHistory(selectedCustomerForModal);
+                return (
+                  <>
+                    <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                      Order History ({modalHistory.length} Valid Orders)
+                    </h4>
 
-              <div className="divide-y divide-slate-800/80 rounded-xl border border-slate-800 bg-slate-900/40 overflow-hidden">
-                {selectedCustomerForModal.orderIds.map((ordId, idx) => (
-                  <div
-                    key={ordId}
-                    className="p-3 flex items-center justify-between text-xs hover:bg-slate-850/60 transition-colors"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center text-[10px] font-mono">
-                        {idx + 1}
-                      </span>
-                      <span className="font-mono font-bold text-white">{ordId}</span>
+                    <div className="rounded-xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+                      <div className="grid grid-cols-[44px_1fr_auto] items-center px-3 py-2 bg-slate-900/80 border-b border-slate-800 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        <span>#</span>
+                        <span>Order ID</span>
+                        <span>Order Date</span>
+                      </div>
+                      <div className="divide-y divide-slate-800/80">
+                        {modalHistory.map((entry, idx) => (
+                          <div
+                            key={entry.orderId}
+                            className="px-3 py-2.5 grid grid-cols-[44px_1fr_auto] items-center text-xs hover:bg-slate-800/40 transition-colors"
+                          >
+                            <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center text-[10px] font-mono">
+                              {idx + 1}
+                            </span>
+                            <span className="font-mono font-bold text-white">{entry.orderId}</span>
+                            <div className="flex items-center gap-3">
+                              <span className="text-slate-300 font-mono text-[11px]" title={entry.orderDate || undefined}>
+                                {formatOrderDisplayDate(entry.orderDate)}
+                              </span>
+                              {onNavigateToOrder && (
+                                <button
+                                  type="button"
+                                  onClick={() => onNavigateToOrder(entry.orderId)}
+                                  className="px-2 py-1 rounded bg-indigo-600/30 text-indigo-300 hover:text-white hover:bg-indigo-600 text-[11px] font-semibold transition-all cursor-pointer"
+                                >
+                                  View Order →
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-
-                    <div className="flex items-center gap-3">
-                      <span className="text-slate-400 font-mono text-[11px]">
-                        {idx === 0 ? `Last: ${selectedCustomerForModal.lastOrderDate}` : idx === selectedCustomerForModal.orderIds.length - 1 ? `First: ${selectedCustomerForModal.firstOrderDate}` : ''}
-                      </span>
-                      {onNavigateToOrder && (
-                        <button
-                          type="button"
-                          onClick={() => onNavigateToOrder(ordId)}
-                          className="px-2 py-1 rounded bg-indigo-600/30 text-indigo-300 hover:text-white hover:bg-indigo-600 text-[11px] font-semibold transition-all cursor-pointer"
-                        >
-                          View Order →
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  </>
+                );
+              })()}
             </div>
 
             {/* Modal Footer */}
