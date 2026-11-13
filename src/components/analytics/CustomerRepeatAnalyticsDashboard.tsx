@@ -130,14 +130,16 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
   const [valueSortField, setValueSortField] = useState<'totalValue' | 'totalOrders' | 'lastOrderDate'>('totalValue');
   const [valueSortAsc, setValueSortAsc] = useState<boolean>(false);
   const [valueSearch, setValueSearch] = useState<string>('');
-  const [visibleCountValue, setVisibleCountValue] = useState<number>(15);
+  const [valuePage, setValuePage] = useState<number>(0);
+  const [valuePageSize, setValuePageSize] = useState<number>(15);
 
   // 4. Top 100 Repeat Customers Controls
   const [repeatLimit, setRepeatLimit] = useState<number>(100);
   const [repeatSortField, setRepeatSortField] = useState<'totalOrders' | 'totalValue' | 'lastOrderDate'>('totalOrders');
   const [repeatSortAsc, setRepeatSortAsc] = useState<boolean>(false);
   const [repeatSearch, setRepeatSearch] = useState<string>('');
-  const [visibleCountRepeat, setVisibleCountRepeat] = useState<number>(15);
+  const [repeatPage, setRepeatPage] = useState<number>(0);
+  const [repeatPageSize, setRepeatPageSize] = useState<number>(15);
 
   // 5. Geographic Controls
   const [geoTab, setGeoTab] = useState<'states' | 'cities'>('states');
@@ -231,12 +233,12 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
   // Reset pagination when search or limit changes
   const handleValueLimitChange = (lim: number) => {
     setValueLimit(lim);
-    setVisibleCountValue(15);
+    setValuePage(0);
   };
 
   const handleRepeatLimitChange = (lim: number) => {
     setRepeatLimit(lim);
-    setVisibleCountRepeat(15);
+    setRepeatPage(0);
   };
 
   // State Drilldown Handler
@@ -258,8 +260,12 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
   // -------------------------------------------------------------
   const processedValueCustomers = useMemo(() => {
     if (!data) return [];
-    const sourceList = data.topCustomersByValue || data.topCustomers || [];
-    let list = [...sourceList];
+    const sourceList = department === 'sales'
+      ? (data.allCustomersByValue || data.allCustomers || data.topCustomersByValue || [])
+      : (data.topCustomersByValue || data.topCustomers || []);
+    let list = valueLimit === 0
+      ? sourceList.filter(c => c.totalOrders > 1)
+      : [...sourceList];
 
     if (valueSearch.trim()) {
       const q = valueSearch.toLowerCase().trim();
@@ -286,20 +292,23 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
       return valueSortAsc ? comparison : -comparison;
     });
 
-    return list.slice(0, valueLimit).map((c, idx) => ({
+    const limited = valueLimit > 0 ? list.slice(0, valueLimit) : list;
+    return limited.map((c, idx) => ({
       ...c,
       rank: idx + 1
     }));
-  }, [data, valueSearch, valueSortField, valueSortAsc, valueLimit]);
+  }, [data, department, valueSearch, valueSortField, valueSortAsc, valueLimit]);
 
   // -------------------------------------------------------------
-  // Filtered & Sorted: Top 100 Repeat Customers (2+ orders)
+  // Filtered & Sorted: Top / All Repeat Customers (2+ orders)
   // -------------------------------------------------------------
   const processedRepeatCustomers = useMemo(() => {
     if (!data) return [];
     // Only customers with 2+ valid orders
-    const sourceList = data.topCustomersByRepeat || [];
-    let list = [...sourceList];
+    const sourceList = department === 'sales'
+      ? (data.allRepeatCustomers || (data.allCustomers || []).filter(c => c.totalOrders >= 2))
+      : (data.topCustomersByRepeat || []);
+    let list = sourceList.filter(c => c.totalOrders > 1);
 
     if (repeatSearch.trim()) {
       const q = repeatSearch.toLowerCase().trim();
@@ -326,20 +335,25 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
       return repeatSortAsc ? comparison : -comparison;
     });
 
-    return list.slice(0, repeatLimit).map((c, idx) => ({
+    const limited = repeatLimit > 0 ? list.slice(0, repeatLimit) : list;
+    return limited.map((c, idx) => ({
       ...c,
       rank: idx + 1
     }));
-  }, [data, repeatSearch, repeatSortField, repeatSortAsc, repeatLimit]);
+  }, [data, department, repeatSearch, repeatSortField, repeatSortAsc, repeatLimit]);
 
-  // Visible rows for pagination
+  // Visible rows for page-based pagination (consistent global rank preserved)
+  const valueTotalPages = Math.max(1, Math.ceil(processedValueCustomers.length / valuePageSize));
+  const safeValuePage = Math.min(valuePage, valueTotalPages - 1);
   const visibleValueCustomers = useMemo(() => {
-    return processedValueCustomers.slice(0, visibleCountValue);
-  }, [processedValueCustomers, visibleCountValue]);
+    return processedValueCustomers.slice(safeValuePage * valuePageSize, (safeValuePage + 1) * valuePageSize);
+  }, [processedValueCustomers, safeValuePage, valuePageSize]);
 
+  const repeatTotalPages = Math.max(1, Math.ceil(processedRepeatCustomers.length / repeatPageSize));
+  const safeRepeatPage = Math.min(repeatPage, repeatTotalPages - 1);
   const visibleRepeatCustomers = useMemo(() => {
-    return processedRepeatCustomers.slice(0, visibleCountRepeat);
-  }, [processedRepeatCustomers, visibleCountRepeat]);
+    return processedRepeatCustomers.slice(safeRepeatPage * repeatPageSize, (safeRepeatPage + 1) * repeatPageSize);
+  }, [processedRepeatCustomers, safeRepeatPage, repeatPageSize]);
 
   // -------------------------------------------------------------
   // Filtered & Sorted Geographic Data
@@ -390,53 +404,120 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
     return list;
   }, [data, productSearch, productSortField, productSortAsc]);
 
+  const formatOrderDisplayDate = (dateStr: string): string => {
+    if (!dateStr || dateStr === 'N/A') return '—';
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return dateStr;
+    const [y, m, d] = parts;
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthName = months[parseInt(m, 10) - 1];
+    if (!monthName) return dateStr;
+    return `${d} ${monthName} ${y}`;
+  };
+
+  const getCustomerOrderHistory = (c: TopCustomerItem) => {
+    if (c.orderHistory && c.orderHistory.length > 0) {
+      return [...c.orderHistory].sort((a, b) => {
+        const dateCmp = (a.orderDate || '').localeCompare(b.orderDate || '');
+        if (dateCmp !== 0) return dateCmp;
+        return String(a.orderId || '').localeCompare(String(b.orderId || ''));
+      });
+    }
+    return [...(c.orderIds || [])].reverse().map((orderId, idx, arr) => ({
+      orderId,
+      orderDate: idx === 0 ? c.firstOrderDate : idx === arr.length - 1 ? c.lastOrderDate : '',
+      products: ''
+    }));
+  };
+
+  const getOrdinal = (n: number): string => {
+    const mod100 = n % 100;
+    if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
+    switch (n % 10) {
+      case 1: return `${n}st`;
+      case 2: return `${n}nd`;
+      case 3: return `${n}rd`;
+      default: return `${n}th`;
+    }
+  };
+
+  const buildCustomerCSVContent = (customers: TopCustomerItem[], repeatCountHeader: string): string => {
+    const maxOrders = customers.reduce((max, c) => Math.max(max, getCustomerOrderHistory(c).length), 0);
+    const orderPairHeaders = Array.from({ length: maxOrders }, (_, i) => {
+      const ord = getOrdinal(i + 1);
+      return [`${ord} Order Date`, `${ord} Order Product`];
+    }).flat();
+    const headers = [
+      'Rank',
+      'Customer Name',
+      'Phone',
+      'City',
+      'State',
+      'Valid Orders',
+      repeatCountHeader,
+      'Total Net Spend (INR)',
+      'AOV (INR)',
+      'Top Product',
+      'First Purchase Date',
+      'Last Purchase Date',
+      ...orderPairHeaders
+    ];
+
+    const rows = customers.map((c, idx) => {
+      const history = getCustomerOrderHistory(c);
+      const paddedPairs = Array.from({ length: maxOrders }, (_, i) => {
+        const entry = history[i];
+        if (!entry) return ['', ''];
+        return [
+          entry.orderDate || '',
+          `"${(entry.products || '').replace(/"/g, '""')}"`
+        ];
+      }).flat();
+      return [
+        idx + 1,
+        `"${c.customerName.replace(/"/g, '""')}"`,
+        c.phone,
+        `"${c.city.replace(/"/g, '""')}"`,
+        `"${c.state.replace(/"/g, '""')}"`,
+        c.totalOrders,
+        c.repeatPurchaseCount,
+        c.totalValue.toFixed(2),
+        c.averageOrderValue,
+        `"${c.mostPurchasedProduct.replace(/"/g, '""')}"`,
+        c.firstOrderDate,
+        c.lastOrderDate,
+        ...paddedPairs
+      ];
+    });
+
+    return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+  };
+
   // CSV Export Helpers
   const handleExportValueCustomersCSV = () => {
-    if (processedValueCustomers.length === 0) {
+    const exportList = valueLimit === 0
+      ? processedValueCustomers.filter(c => c.totalOrders > 1)
+      : processedValueCustomers;
+    if (exportList.length === 0) {
       toast.error('No customers to export');
       return;
     }
-    const headers = ['Rank', 'Customer Name', 'Phone', 'City', 'State', 'Valid Orders', 'Repeat Count', 'Total Net Spend (INR)', 'AOV (INR)', 'Top Product', 'Last Purchase Date'];
-    const rows = processedValueCustomers.map(c => [
-      c.rank,
-      `"${c.customerName.replace(/"/g, '""')}"`,
-      c.phone,
-      `"${c.city.replace(/"/g, '""')}"`,
-      `"${c.state.replace(/"/g, '""')}"`,
-      c.totalOrders,
-      c.repeatPurchaseCount,
-      c.totalValue.toFixed(2),
-      c.averageOrderValue,
-      `"${c.mostPurchasedProduct.replace(/"/g, '""')}"`,
-      c.lastOrderDate
-    ]);
-    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    downloadBlob(csvContent, `top_customers_by_value_${new Date().toISOString().slice(0, 10)}.csv`);
-    toast.success('Top Customers by Value exported to CSV');
+    const csvContent = buildCustomerCSVContent(exportList, 'Repeat Count');
+    const prefix = valueLimit === 0 ? 'all_repeat_customers_by_value' : `top_${valueLimit}_customers_by_value`;
+    downloadBlob(csvContent, `${prefix}_${new Date().toISOString().slice(0, 10)}.csv`);
+    toast.success(`Exported ${exportList.length.toLocaleString('en-IN')} customers to CSV`);
   };
 
   const handleExportRepeatCustomersCSV = () => {
-    if (processedRepeatCustomers.length === 0) {
+    const exportList = processedRepeatCustomers.filter(c => c.totalOrders > 1);
+    if (exportList.length === 0) {
       toast.error('No repeat customers to export');
       return;
     }
-    const headers = ['Rank', 'Customer Name', 'Phone', 'City', 'State', 'Valid Orders', 'Repeat Purchase Count', 'Total Net Spend (INR)', 'AOV (INR)', 'Top Product', 'Last Purchase Date'];
-    const rows = processedRepeatCustomers.map(c => [
-      c.rank,
-      `"${c.customerName.replace(/"/g, '""')}"`,
-      c.phone,
-      `"${c.city.replace(/"/g, '""')}"`,
-      `"${c.state.replace(/"/g, '""')}"`,
-      c.totalOrders,
-      c.repeatPurchaseCount,
-      c.totalValue.toFixed(2),
-      c.averageOrderValue,
-      `"${c.mostPurchasedProduct.replace(/"/g, '""')}"`,
-      c.lastOrderDate
-    ]);
-    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    downloadBlob(csvContent, `top_repeat_customers_${new Date().toISOString().slice(0, 10)}.csv`);
-    toast.success('Top Repeat Customers exported to CSV');
+    const csvContent = buildCustomerCSVContent(exportList, 'Repeat Purchase Count');
+    const prefix = repeatLimit === 0 ? 'all_repeat_customers' : `top_${repeatLimit}_repeat_customers`;
+    downloadBlob(csvContent, `${prefix}_${new Date().toISOString().slice(0, 10)}.csv`);
+    toast.success(`Exported ${exportList.length.toLocaleString('en-IN')} repeat customers to CSV`);
   };
 
   const handleExportGeoCSV = () => {
@@ -461,7 +542,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
   };
 
   const downloadBlob = (content: string, filename: string) => {
-    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
@@ -1343,14 +1424,16 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
             <div className="flex items-center gap-2">
               <DollarSign size={16} className="text-emerald-400" />
               <h3 className="text-sm sm:text-base font-bold text-white tracking-tight flex items-center gap-2">
-                <span>Top {valueLimit} Customers by Customer Value</span>
+                <span>{valueLimit === 0 ? `All Repeat Customers by Value (${processedValueCustomers.length.toLocaleString('en-IN')})` : `Top ${valueLimit} Customers by Customer Value`}</span>
                 <span className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-emerald-950/80 text-emerald-300 border border-emerald-700/50">
                   Value Ranked
                 </span>
               </h3>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Ranked by total net purchase value, highest to lowest. Displays high-value purchasers across valid orders.
+              {valueLimit === 0
+                ? 'Displays all repeat customers (2+ valid orders) ranked by total net purchase value, highest to lowest.'
+                : 'Ranked by total net purchase value, highest to lowest. Displays high-value purchasers across valid orders.'}
             </p>
           </div>
 
@@ -1365,7 +1448,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
                 value={valueSearch}
                 onChange={e => {
                   setValueSearch(e.target.value);
-                  setVisibleCountValue(15);
+                  setValuePage(0);
                 }}
                 placeholder="Search name, phone, city..."
                 className="h-8 pl-8 pr-2.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 w-40 sm:w-52"
@@ -1382,6 +1465,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
               <option value={25}>Top 25</option>
               <option value={50}>Top 50</option>
               <option value={100}>Top 100</option>
+              {department === 'sales' && <option value={0}>All Customers (Overall)</option>}
             </select>
 
             {/* Sort Field Selector */}
@@ -1556,34 +1640,76 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
           </table>
         </div>
 
-        {/* Pagination & Expansion Footer: Showing 1–15 of N, View More / Show Less */}
+        {/* Pagination Footer: Page Size Selector & Page Controls */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
           <div className="text-xs text-slate-400 font-medium">
-            Showing <span className="font-mono font-bold text-white">1–{Math.min(visibleCountValue, processedValueCustomers.length)}</span> of{' '}
-            <span className="font-mono font-bold text-white">{processedValueCustomers.length}</span> customers
+            {processedValueCustomers.length === 0 ? (
+              <span>Showing 0 of 0 customers</span>
+            ) : (
+              <>
+                Showing{' '}
+                <span className="font-mono font-bold text-white">
+                  {(safeValuePage * valuePageSize + 1).toLocaleString('en-IN')}–{Math.min((safeValuePage + 1) * valuePageSize, processedValueCustomers.length).toLocaleString('en-IN')}
+                </span>{' '}
+                of <span className="font-mono font-bold text-white">{processedValueCustomers.length.toLocaleString('en-IN')}</span> customers
+              </>
+            )}
           </div>
 
-          <div className="flex items-center gap-2">
-            {visibleCountValue < processedValueCustomers.length && (
-              <button
-                type="button"
-                onClick={() => setVisibleCountValue(prev => Math.min(prev + 15, processedValueCustomers.length))}
-                className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 text-slate-200 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
-              >
-                <span>View More (+{Math.min(15, processedValueCustomers.length - visibleCountValue)})</span>
-                <ChevronDown size={14} className="text-emerald-400" />
-              </button>
-            )}
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={valuePageSize}
+              onChange={e => {
+                setValuePageSize(Number(e.target.value));
+                setValuePage(0);
+              }}
+              className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer"
+              aria-label="Rows per page"
+            >
+              <option value={15}>15 / page</option>
+              <option value={25}>25 / page</option>
+              <option value={50}>50 / page</option>
+              <option value={100}>100 / page</option>
+            </select>
 
-            {visibleCountValue > 15 && (
-              <button
-                type="button"
-                onClick={() => setVisibleCountValue(15)}
-                className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
-              >
-                <span>Show Less</span>
-                <ChevronUp size={14} className="text-slate-400" />
-              </button>
+            {valueTotalPages > 1 && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setValuePage(0)}
+                  disabled={safeValuePage === 0}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  First
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setValuePage(p => Math.max(0, p - 1))}
+                  disabled={safeValuePage === 0}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  Prev
+                </button>
+                <span className="px-2 text-xs font-mono text-slate-300">
+                  Page {safeValuePage + 1} / {valueTotalPages.toLocaleString('en-IN')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setValuePage(p => Math.min(valueTotalPages - 1, p + 1))}
+                  disabled={safeValuePage >= valueTotalPages - 1}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setValuePage(valueTotalPages - 1)}
+                  disabled={safeValuePage >= valueTotalPages - 1}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  Last
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -1601,7 +1727,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
             <div className="flex items-center gap-2">
               <Repeat size={16} className="text-indigo-400" />
               <h3 className="text-sm sm:text-base font-bold text-white tracking-tight flex items-center gap-2">
-                <span>Top {repeatLimit} Repeat Customers</span>
+                <span>{repeatLimit === 0 ? `All Repeat Customers (${processedRepeatCustomers.length.toLocaleString('en-IN')})` : `Top ${repeatLimit} Repeat Customers`}</span>
                 <span className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-indigo-950/80 text-indigo-300 border border-indigo-700/50">
                   Frequency Ranked (2+ Orders)
                 </span>
@@ -1623,7 +1749,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
                 value={repeatSearch}
                 onChange={e => {
                   setRepeatSearch(e.target.value);
-                  setVisibleCountRepeat(15);
+                  setRepeatPage(0);
                 }}
                 placeholder="Search name, phone, city..."
                 className="h-8 pl-8 pr-2.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 w-40 sm:w-52"
@@ -1640,6 +1766,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
               <option value={25}>Top 25</option>
               <option value={50}>Top 50</option>
               <option value={100}>Top 100</option>
+              {department === 'sales' && <option value={0}>All Customers (Overall)</option>}
             </select>
 
             {/* Sort Field Selector */}
@@ -1809,34 +1936,76 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
           </table>
         </div>
 
-        {/* Pagination & Expansion Footer: Showing 1–15 of N, View More / Show Less */}
+        {/* Pagination Footer: Page Size Selector & Page Controls */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
           <div className="text-xs text-slate-400 font-medium">
-            Showing <span className="font-mono font-bold text-white">1–{Math.min(visibleCountRepeat, processedRepeatCustomers.length)}</span> of{' '}
-            <span className="font-mono font-bold text-white">{processedRepeatCustomers.length}</span> repeat customers
+            {processedRepeatCustomers.length === 0 ? (
+              <span>Showing 0 of 0 repeat customers</span>
+            ) : (
+              <>
+                Showing{' '}
+                <span className="font-mono font-bold text-white">
+                  {(safeRepeatPage * repeatPageSize + 1).toLocaleString('en-IN')}–{Math.min((safeRepeatPage + 1) * repeatPageSize, processedRepeatCustomers.length).toLocaleString('en-IN')}
+                </span>{' '}
+                of <span className="font-mono font-bold text-white">{processedRepeatCustomers.length.toLocaleString('en-IN')}</span> repeat customers
+              </>
+            )}
           </div>
 
-          <div className="flex items-center gap-2">
-            {visibleCountRepeat < processedRepeatCustomers.length && (
-              <button
-                type="button"
-                onClick={() => setVisibleCountRepeat(prev => Math.min(prev + 15, processedRepeatCustomers.length))}
-                className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 text-slate-200 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
-              >
-                <span>View More (+{Math.min(15, processedRepeatCustomers.length - visibleCountRepeat)})</span>
-                <ChevronDown size={14} className="text-indigo-400" />
-              </button>
-            )}
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={repeatPageSize}
+              onChange={e => {
+                setRepeatPageSize(Number(e.target.value));
+                setRepeatPage(0);
+              }}
+              className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer"
+              aria-label="Rows per page"
+            >
+              <option value={15}>15 / page</option>
+              <option value={25}>25 / page</option>
+              <option value={50}>50 / page</option>
+              <option value={100}>100 / page</option>
+            </select>
 
-            {visibleCountRepeat > 15 && (
-              <button
-                type="button"
-                onClick={() => setVisibleCountRepeat(15)}
-                className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 text-slate-300 hover:text-white border border-slate-700/80 hover:border-slate-600 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
-              >
-                <span>Show Less</span>
-                <ChevronUp size={14} className="text-slate-400" />
-              </button>
+            {repeatTotalPages > 1 && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setRepeatPage(0)}
+                  disabled={safeRepeatPage === 0}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  First
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRepeatPage(p => Math.max(0, p - 1))}
+                  disabled={safeRepeatPage === 0}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  Prev
+                </button>
+                <span className="px-2 text-xs font-mono text-slate-300">
+                  Page {safeRepeatPage + 1} / {repeatTotalPages.toLocaleString('en-IN')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setRepeatPage(p => Math.min(repeatTotalPages - 1, p + 1))}
+                  disabled={safeRepeatPage >= repeatTotalPages - 1}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRepeatPage(repeatTotalPages - 1)}
+                  disabled={safeRepeatPage >= repeatTotalPages - 1}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  Last
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -2238,7 +2407,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
          ========================================================================= */}
       {selectedCustomerForModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="bg-[#0b1220] border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+          <div className="bg-[#0b1220] border border-slate-800 rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
             
             {/* Modal Header */}
             <div className="p-4 sm:p-5 border-b border-slate-800 flex items-start justify-between bg-slate-900/50">
@@ -2305,40 +2474,64 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
 
             {/* Order IDs & Dates List */}
             <div className="p-4 sm:p-5 overflow-y-auto space-y-3 flex-1 custom-scrollbar">
-              <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-                Order History ({selectedCustomerForModal.orderIds.length} Valid Orders)
-              </h4>
+              {(() => {
+                const modalHistory = getCustomerOrderHistory(selectedCustomerForModal);
+                return (
+                  <>
+                    <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                      Order History ({modalHistory.length} Valid Orders)
+                    </h4>
 
-              <div className="divide-y divide-slate-800/80 rounded-xl border border-slate-800 bg-slate-900/40 overflow-hidden">
-                {selectedCustomerForModal.orderIds.map((ordId, idx) => (
-                  <div
-                    key={ordId}
-                    className="p-3 flex items-center justify-between text-xs hover:bg-slate-850/60 transition-colors"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center text-[10px] font-mono">
-                        {idx + 1}
-                      </span>
-                      <span className="font-mono font-bold text-white">{ordId}</span>
+                    <div className="rounded-xl border border-slate-800 bg-slate-900/40 overflow-x-auto">
+                      <table className="w-full text-left border-collapse min-w-[540px]">
+                        <thead>
+                          <tr className="bg-slate-900/80 border-b border-slate-800 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                            <th className="px-3 py-2 w-11">#</th>
+                            <th className="px-3 py-2 w-24">Order ID</th>
+                            <th className="px-3 py-2 w-32">Order Date</th>
+                            <th className="px-3 py-2">Products Purchased</th>
+                            {onNavigateToOrder && <th className="px-3 py-2 text-right w-28">Action</th>}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/80 text-xs">
+                          {modalHistory.map((entry, idx) => (
+                            <tr
+                              key={entry.orderId}
+                              className="hover:bg-slate-800/40 transition-colors"
+                            >
+                              <td className="px-3 py-2.5">
+                                <span className="w-5 h-5 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center text-[10px] font-mono">
+                                  {idx + 1}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2.5 font-mono font-bold text-white whitespace-nowrap">
+                                {entry.orderId}
+                              </td>
+                              <td className="px-3 py-2.5 text-slate-300 font-mono text-[11px] whitespace-nowrap" title={entry.orderDate || undefined}>
+                                {formatOrderDisplayDate(entry.orderDate)}
+                              </td>
+                              <td className="px-3 py-2.5 text-slate-200 leading-relaxed">
+                                {entry.products || '—'}
+                              </td>
+                              {onNavigateToOrder && (
+                                <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => onNavigateToOrder(entry.orderId)}
+                                    className="px-2 py-1 rounded bg-indigo-600/30 text-indigo-300 hover:text-white hover:bg-indigo-600 text-[11px] font-semibold transition-all cursor-pointer"
+                                  >
+                                    View Order →
+                                  </button>
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-
-                    <div className="flex items-center gap-3">
-                      <span className="text-slate-400 font-mono text-[11px]">
-                        {idx === 0 ? `Last: ${selectedCustomerForModal.lastOrderDate}` : idx === selectedCustomerForModal.orderIds.length - 1 ? `First: ${selectedCustomerForModal.firstOrderDate}` : ''}
-                      </span>
-                      {onNavigateToOrder && (
-                        <button
-                          type="button"
-                          onClick={() => onNavigateToOrder(ordId)}
-                          className="px-2 py-1 rounded bg-indigo-600/30 text-indigo-300 hover:text-white hover:bg-indigo-600 text-[11px] font-semibold transition-all cursor-pointer"
-                        >
-                          View Order →
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  </>
+                );
+              })()}
             </div>
 
             {/* Modal Footer */}

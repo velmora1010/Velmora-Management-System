@@ -40,6 +40,28 @@ export interface RepeatTrendPoint {
   totalOrders: number;
 }
 
+export function normalizeProductName(rawName: string | null | undefined): string {
+  if (!rawName) return 'Standard Products';
+  let normalized = rawName.trim();
+  if (!normalized) return 'Standard Products';
+  // Repair UTF-8 em-dash / en-dash bytes mis-decoded as Latin-1 / Windows-1252
+  normalized = normalized
+    .replace(/\u00e2\u0080\u0094/g, '-')
+    .replace(/\u00e2\u0080\u0093/g, '-')
+    .replace(/â€”/g, '-')
+    .replace(/â€“/g, '-');
+  if (/^DIY BBC Cleaner\s+[—–]\s+/i.test(normalized)) {
+    normalized = normalized.replace(/\s+[—–]\s+/, ' - ');
+  }
+  return normalized;
+}
+
+export interface CustomerOrderHistoryEntry {
+  orderId: string;
+  orderDate: string;
+  products: string;
+}
+
 export interface TopCustomerItem {
   rank: number;
   customerKey: string;
@@ -56,6 +78,7 @@ export interface TopCustomerItem {
   lastOrderDate: string;
   firstOrderDate: string;
   orderIds: string[];
+  orderHistory: CustomerOrderHistoryEntry[];
 }
 
 export interface GeographicLocationItem {
@@ -93,6 +116,8 @@ export interface ComprehensiveRepeatAnalyticsData {
   frequencyDistribution: FrequencyDistributionItem[];
   repeatTrends: RepeatTrendPoint[];
   allCustomers: TopCustomerItem[];
+  allCustomersByValue: TopCustomerItem[];
+  allRepeatCustomers: TopCustomerItem[];
   topCustomers: TopCustomerItem[];
   topCustomersByValue: TopCustomerItem[];
   topCustomersByRepeat: TopCustomerItem[];
@@ -637,11 +662,11 @@ class CustomerRepeatAnalyticsService {
         const orderLineItems = itemsMap.get(ord.id) || [];
         if (orderLineItems.length > 0) {
           orderLineItems.forEach(it => {
-            const p = (it.product_name || 'Standard Products').trim();
+            const p = normalizeProductName(it.product_name);
             productCounts.set(p, (productCounts.get(p) || 0) + (it.quantity || 1));
           });
         } else {
-          const fallback = ord.product_name || 'Standard Products';
+          const fallback = normalizeProductName(ord.product_name);
           productCounts.set(fallback, (productCounts.get(fallback) || 0) + (ord.total_quantity || 1));
         }
       });
@@ -654,6 +679,29 @@ class CustomerRepeatAnalyticsService {
           mostPurchased = name;
         }
       });
+
+      const chronologicalOrders = [...sortedOrders].sort((a, b) => {
+        const dateCmp = (a.order_date || '').localeCompare(b.order_date || '');
+        if (dateCmp !== 0) return dateCmp;
+        return String(a.order_id || '').localeCompare(String(b.order_id || ''));
+      });
+
+      const formatOrderProducts = (ord: any): string => {
+        const orderLineItems = itemsMap.get(ord.id) || [];
+        const ordProdMap = new Map<string, number>();
+        if (orderLineItems.length > 0) {
+          orderLineItems.forEach(it => {
+            const p = normalizeProductName(it.product_name);
+            ordProdMap.set(p, (ordProdMap.get(p) || 0) + (Number(it.quantity) || 1));
+          });
+        } else {
+          const fallback = normalizeProductName(ord.product_name);
+          ordProdMap.set(fallback, Number(ord.total_quantity) || 1);
+        }
+        return Array.from(ordProdMap.entries())
+          .map(([name, qty]) => `${name} × ${qty}`)
+          .join('; ');
+      };
 
       return {
         rank: 0,
@@ -670,12 +718,17 @@ class CustomerRepeatAnalyticsService {
         mostPurchasedProduct: mostPurchased,
         lastOrderDate,
         firstOrderDate,
-        orderIds: sortedOrders.map(o => o.order_id)
+        orderIds: sortedOrders.map(o => o.order_id),
+        orderHistory: chronologicalOrders.map(o => ({
+          orderId: o.order_id,
+          orderDate: o.order_date || '',
+          products: formatOrderProducts(o)
+        }))
       };
     });
 
-    // 7A. Top 100 Customers Ranked by Total Purchase Value (highest to lowest)
-    const topCustomersByValue: TopCustomerItem[] = [...allCustomerProfiles]
+    // 7A. All Customers Ranked by Total Purchase Value (highest to lowest) + Top 100 slice
+    const allCustomersByValue: TopCustomerItem[] = [...allCustomerProfiles]
       .sort((a, b) => {
         // Primary: totalValue desc
         if (b.totalValue !== a.totalValue) return b.totalValue - a.totalValue;
@@ -684,12 +737,13 @@ class CustomerRepeatAnalyticsService {
         // Tertiary: lastOrderDate desc
         return (b.lastOrderDate || '').localeCompare(a.lastOrderDate || '');
       })
-      .slice(0, 100)
       .map((item, index) => ({ ...item, rank: index + 1 }));
 
-    // 7B. Top 100 Repeat Customers (2+ distinct valid orders, highest to lowest)
+    const topCustomersByValue: TopCustomerItem[] = allCustomersByValue.slice(0, 100);
+
+    // 7B. All Repeat Customers (2+ distinct valid orders, highest to lowest) + Top 100 slice
     const repeatCustomerProfiles = allCustomerProfiles.filter(c => c.totalOrders >= 2);
-    const topCustomersByRepeat: TopCustomerItem[] = [...repeatCustomerProfiles]
+    const allRepeatCustomers: TopCustomerItem[] = [...repeatCustomerProfiles]
       .sort((a, b) => {
         // Primary: totalOrders desc
         if (b.totalOrders !== a.totalOrders) return b.totalOrders - a.totalOrders;
@@ -698,8 +752,9 @@ class CustomerRepeatAnalyticsService {
         // Tertiary: lastOrderDate desc
         return (b.lastOrderDate || '').localeCompare(a.lastOrderDate || '');
       })
-      .slice(0, 100)
       .map((item, index) => ({ ...item, rank: index + 1 }));
+
+    const topCustomersByRepeat: TopCustomerItem[] = allRepeatCustomers.slice(0, 100);
 
     const topCustomers = topCustomersByValue; // alias for backwards compatibility
 
@@ -797,7 +852,7 @@ class CustomerRepeatAnalyticsService {
 
       if (orderItems.length > 0) {
         orderItems.forEach(it => {
-          const p = (it.product_name || 'Standard Products').trim();
+          const p = normalizeProductName(it.product_name);
           if (!productMap.has(p)) {
             productMap.set(p, { repeatQuantity: 0, repeatSalesValue: 0, buyersSet: new Set() });
           }
@@ -834,6 +889,8 @@ class CustomerRepeatAnalyticsService {
       frequencyDistribution,
       repeatTrends,
       allCustomers: allCustomerProfiles,
+      allCustomersByValue,
+      allRepeatCustomers,
       topCustomers,
       topCustomersByValue,
       topCustomersByRepeat,
