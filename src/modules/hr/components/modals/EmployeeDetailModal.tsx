@@ -138,6 +138,11 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
     [employee, authenticatedEmployee]
   );
 
+  // Document upload capability:
+  // Strictly restricted to employee self-service login viewing their own profile.
+  // HR administrators and users managing employees must NOT upload on behalf of employees through this profile view.
+  const canUploadDoc = !canManageEmployees && isOwnEmployeeProfile && currentUser?.role === 'employee';
+
   // Document state and counting logic
   const [docCategory, setDocCategory] = useState<EmployeeFileCategory>('ID Proof');
   const [isUploadingDoc, setIsUploadingDoc] = useState(false);
@@ -159,6 +164,11 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
   }, [employee, employeeFiles]);
 
   const handleEmployeeDocUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canUploadDoc) {
+      showToast('Document upload is restricted to employee self-service login.', 'error');
+      if (e.target) e.target.value = '';
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file || !employee) return;
 
@@ -179,23 +189,21 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
     setDocFeedback(null);
 
     try {
-      const isEmployeeSession = !canManageEmployees || isOwnEmployeeProfile;
       await uploadEmployeeFile({
         employeeId: employee.id,
         file,
         category: docCategory,
-        uploaderRole: isEmployeeSession ? 'employee' : 'hr_admin',
-        submissionSource: isEmployeeSession ? 'employee' : 'hr',
-        uploadedBy: isEmployeeSession ? (currentUser?.name || employee.fullName) : 'HR Administrator',
-        verificationStatus: isEmployeeSession ? 'pending_review' : 'verified',
+        uploaderRole: 'employee',
+        submissionSource: 'employee',
+        uploadedBy: currentUser?.name || employee.fullName,
+        verificationStatus: 'pending_review',
       });
 
       setDocFeedback({
         type: 'success',
-        message: isEmployeeSession
-          ? `Document "${file.name}" submitted successfully for HR review!`
-          : `Document "${file.name}" uploaded successfully!`,
+        message: `Document "${file.name}" submitted successfully for HR review!`,
       });
+      showToast('Document submitted successfully for verification.', 'success');
     } catch (err: any) {
       setDocFeedback({ type: 'error', message: err.message || 'Failed to upload document.' });
     } finally {
@@ -1191,98 +1199,102 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
               </div>
             </div>
 
-            {/* Document Upload Area */}
-            <div className="p-4 rounded-xl bg-[#0F172A] border border-[#334155] space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#334155]/60 pb-2.5">
-                <div>
-                  <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <UploadCloud className="w-4 h-4 text-[#60A5FA]" />
-                    <span>Upload &amp; Submit Document</span>
-                  </h4>
-                  <p className="text-[11px] text-[#94A3B8]">
-                    {isOwnEmployeeProfile
-                      ? 'Submit your ID proof, degree certificate, or tax documents for HR verification'
-                      : `Submit documentation for ${employee.fullName}`}
-                  </p>
-                </div>
-                <span className="text-[10px] text-[#64748B] font-mono">
-                  PDF, JPG, PNG, DOC, DOCX (Max 15MB)
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
-                <div className="sm:col-span-5">
-                  <label className="block text-[10px] font-bold uppercase text-[#94A3B8] mb-1">
-                    Document Category *
-                  </label>
-                  <select
-                    value={docCategory}
-                    onChange={(e) => setDocCategory(e.target.value as EmployeeFileCategory)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-[#334155] bg-[#151D2B] text-white focus:outline-hidden focus:border-[#3B82F6]"
-                  >
-                    <option value="ID Proof">ID Proof</option>
-                    <option value="Offer Letter">Offer Letter</option>
-                    <option value="Resume">Resume</option>
-                    <option value="Contract">Contract</option>
-                    <option value="Certification">Certification</option>
-                    <option value="Tax Form">Tax Form</option>
-                    <option value="Other">Other</option>
-                  </select>
+            {/* Document Upload Area: strictly available only for employee self-service login */}
+            {canUploadDoc && (
+              <div className="p-4 rounded-xl bg-[#0F172A] border border-[#334155] space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#334155]/60 pb-2.5">
+                  <div>
+                    <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <UploadCloud className="w-4 h-4 text-[#60A5FA]" />
+                      <span>Upload &amp; Submit Document</span>
+                    </h4>
+                    <p className="text-[11px] text-[#94A3B8]">
+                      Submit your ID proof, degree certificate, or tax documents for HR verification
+                    </p>
+                  </div>
+                  <span className="text-[10px] text-[#64748B] font-mono">
+                    PDF, JPG, PNG, DOC, DOCX (Max 15MB)
+                  </span>
                 </div>
 
-                <div className="sm:col-span-7">
-                  <input
-                    type="file"
-                    ref={employeeFileInputRef}
-                    accept=".pdf, .jpg, .jpeg, .png, .doc, .docx"
-                    onChange={handleEmployeeDocUpload}
-                    className="hidden"
-                  />
-                  <button
-                    type="button"
-                    disabled={isUploadingDoc}
-                    onClick={() => employeeFileInputRef.current?.click()}
-                    className="w-full h-[38px] px-4 py-2 text-xs font-bold text-white bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer"
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                  <div className="sm:col-span-5">
+                    <label className="block text-[10px] font-bold uppercase text-[#94A3B8] mb-1">
+                      Document Category *
+                    </label>
+                    <select
+                      value={docCategory}
+                      onChange={(e) => setDocCategory(e.target.value as EmployeeFileCategory)}
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-[#334155] bg-[#151D2B] text-white focus:outline-hidden focus:border-[#3B82F6]"
+                    >
+                      <option value="ID Proof">ID Proof</option>
+                      <option value="Offer Letter">Offer Letter</option>
+                      <option value="Resume">Resume</option>
+                      <option value="Contract">Contract</option>
+                      <option value="Certification">Certification</option>
+                      <option value="Tax Form">Tax Form</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-7">
+                    <input
+                      type="file"
+                      ref={employeeFileInputRef}
+                      accept=".pdf, .jpg, .jpeg, .png, .doc, .docx"
+                      onChange={handleEmployeeDocUpload}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      disabled={isUploadingDoc}
+                      onClick={() => employeeFileInputRef.current?.click()}
+                      className="w-full h-[38px] px-4 py-2 text-xs font-bold text-white bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer"
+                    >
+                      {isUploadingDoc ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Uploading &amp; Submitting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <UploadCloud className="w-3.5 h-3.5" />
+                          <span>Browse &amp; Upload Document</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {docFeedback && (
+                  <div
+                    className={`p-2.5 rounded-xl text-xs flex items-center gap-2 ${
+                      docFeedback.type === 'error'
+                        ? 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
+                        : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+                    }`}
                   >
-                    {isUploadingDoc ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        <span>Uploading &amp; Submitting...</span>
-                      </>
+                    {docFeedback.type === 'error' ? (
+                      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
                     ) : (
-                      <>
-                        <UploadCloud className="w-3.5 h-3.5" />
-                        <span>Browse &amp; Upload Document</span>
-                      </>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                     )}
-                  </button>
-                </div>
+                    <span>{docFeedback.message}</span>
+                  </div>
+                )}
               </div>
-
-              {docFeedback && (
-                <div
-                  className={`p-2.5 rounded-xl text-xs flex items-center gap-2 ${
-                    docFeedback.type === 'error'
-                      ? 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
-                      : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
-                  }`}
-                >
-                  {docFeedback.type === 'error' ? (
-                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                  ) : (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  )}
-                  <span>{docFeedback.message}</span>
-                </div>
-              )}
-            </div>
+            )}
 
             {/* Personal Employee Submissions Table */}
             <div className="space-y-2.5">
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
                   <UserCheck className="w-3.5 h-3.5 text-blue-400" />
-                  <span>Personal Employee Submissions ({employeeSubmittedDocs.length})</span>
+                  <span>
+                    {canUploadDoc
+                      ? `Personal Employee Submissions (${employeeSubmittedDocs.length})`
+                      : `Employee Submitted Documents (${employeeSubmittedDocs.length})`}
+                  </span>
                 </h4>
                 <span className="text-[10px] text-[#94A3B8]">
                   Documents submitted personally by {employee.fullName}
@@ -1291,7 +1303,9 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
 
               {employeeSubmittedDocs.length === 0 ? (
                 <div className="p-6 text-center border border-dashed border-[#334155] rounded-xl bg-[#151D2B]/40 text-xs text-[#94A3B8]">
-                  No personal employee submissions yet. Use the upload form above to submit your documents.
+                  {canUploadDoc
+                    ? 'No personal employee submissions yet. Use the upload form above to submit your documents.'
+                    : 'No employee documents submitted yet.'}
                 </div>
               ) : (
                 <div className="border border-[#334155] rounded-xl overflow-x-auto shadow-sm">
@@ -1300,6 +1314,7 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
                       <tr>
                         <th className="py-2.5 px-3">Document Name</th>
                         <th className="py-2.5 px-3">Category</th>
+                        <th className="py-2.5 px-3">File Type</th>
                         <th className="py-2.5 px-3">File Size</th>
                         <th className="py-2.5 px-3">Submitted By</th>
                         <th className="py-2.5 px-3">Submission Date & Time</th>
@@ -1320,6 +1335,9 @@ export const EmployeeDetailModal: React.FC<EmployeeDetailModalProps> = ({
                             <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-500/10 text-blue-300 border border-blue-500/20">
                               {doc.category}
                             </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-[#94A3B8] font-mono text-[11px] uppercase">
+                            {doc.fileType ? doc.fileType.replace('application/', '').replace('image/', '') : (doc.fileName.split('.').pop() || 'FILE')}
                           </td>
                           <td className="py-2.5 px-3 text-[#94A3B8] font-mono text-[11px]">{doc.fileSize}</td>
                           <td className="py-2.5 px-3">
