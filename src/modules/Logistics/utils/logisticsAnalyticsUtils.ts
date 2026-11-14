@@ -1,6 +1,7 @@
 import type { UnifiedLogisticsOrder } from '../../../types/unifiedLogistics';
 import { CONFIGURED_COURIERS, normalizeCourier } from '../../../config/courierConfig';
 import { isDispatchedOrder, normalizeState, resolveStateFromPincode, parseOrderAmount } from '../../../utils/logisticsOrderUtils';
+import { decodeHtmlEntities } from '../../../utils/textSanitizer';
 import { parseAndFormatLogisticsDate } from '../../../utils/logisticsDateUtils';
 import type { LogisticsFilterState } from '../types/logisticsFilters';
 import { resolveDateRangeForPreset, formatLocalYMD } from '../types/logisticsFilters';
@@ -252,26 +253,37 @@ export function getCanonicalStatus(order: any): CanonicalLogisticsStatus {
 
   // 6. In Transit & Dispatched checks
   if (isDispatchedOrder(order)) {
-    // Check SLA Breach / Overdue
-    if (order.estimatedDeliveryDate && order.estimatedDeliveryDate < todayStr) {
-      return 'Delayed / SLA Breached';
-    }
-    if (order.dispatchDate) {
-      const parsedDispatch = parseAndFormatLogisticsDate(order.dispatchDate);
-      if (parsedDispatch.isoDate) {
-        const d1 = new Date(parsedDispatch.isoDate).getTime();
-        const now = new Date(todayStr).getTime();
-        const diffDays = Math.floor((now - d1) / (1000 * 60 * 60 * 24));
-        if (diffDays > 7) {
-          return 'Delayed / SLA Breached';
-        }
+    const rawDisp = order.dispatchDate || (order as any).manifestDate || (order as any).pickupDate;
+    const parsedDispatch = parseAndFormatLogisticsDate(rawDisp);
+    const parsedEdd = parseAndFormatLogisticsDate(order.estimatedDeliveryDate);
+    const estIso = order.estimatedDeliveryDateIso || parsedEdd.isoDate;
+    const dispIso = order.dispatchDateIso || parsedDispatch.isoDate;
+    const hasValidEdd = !!(estIso && (!dispIso || estIso >= dispIso));
+
+    // Check SLA Breach / Overdue with valid date parsing
+    if (hasValidEdd) {
+      if (estIso < todayStr) {
+        return 'Delayed / SLA Breached';
+      }
+    } else if (dispIso) {
+      // Only fallback to transit elapsed days when no valid carrier EDD is provided
+      const d1 = new Date(dispIso).getTime();
+      const now = new Date(todayStr).getTime();
+      const diffDays = Math.floor((now - d1) / (1000 * 60 * 60 * 24));
+      if (diffDays > 7) {
+        return 'Delayed / SLA Breached';
       }
     }
 
+    // Do NOT classify upload parsing errors or sync unavailability as delivery exceptions
+    const trackingErrLower = (order.trackingError || '').toLowerCase();
+    const isUploadParsingError = trackingErrLower.includes('parsing error') || trackingErrLower.includes('upload parsing');
+
     if (
-      statusStr.includes('exception') || 
-      rawStatusStr.includes('exception') || 
-      (order.trackingError && order.trackingError.trim())
+      !isUploadParsingError &&
+      (statusStr.includes('exception') || 
+       rawStatusStr.includes('exception') || 
+       (order.trackingError && order.trackingError.trim() && !trackingErrLower.includes('sync not available')))
     ) {
       return 'Shipment Exception';
     }
@@ -336,35 +348,37 @@ export function checkDeliverySla(order: UnifiedLogisticsOrder): {
   let deliveryDays: number | null = null;
   let ageDays = 0;
 
-  if (order.dispatchDate) {
-    const parsedDisp = parseAndFormatLogisticsDate(order.dispatchDate);
-    if (parsedDisp.isoDate) {
-      const dispTime = new Date(parsedDisp.isoDate).getTime();
-      
-      if (isDelivered && order.deliveredDate) {
-        const parsedDel = parseAndFormatLogisticsDate(order.deliveredDate);
-        if (parsedDel.isoDate) {
-          const delTime = new Date(parsedDel.isoDate).getTime();
-          if (delTime >= dispTime) {
-            deliveryDays = Math.round((delTime - dispTime) / (1000 * 60 * 60 * 24));
-          }
+  const rawDisp = order.dispatchDate || (order as any).manifestDate || (order as any).pickupDate;
+  const parsedDisp = parseAndFormatLogisticsDate(rawDisp);
+  const dispIso = order.dispatchDateIso || parsedDisp.isoDate;
+
+  if (dispIso) {
+    const dispTime = new Date(dispIso).getTime();
+    
+    if (isDelivered && order.deliveredDate) {
+      const parsedDel = parseAndFormatLogisticsDate(order.deliveredDate);
+      const delIso = order.deliveredDateIso || parsedDel.isoDate;
+      if (delIso) {
+        const delTime = new Date(delIso).getTime();
+        if (delTime >= dispTime) {
+          deliveryDays = Math.round((delTime - dispTime) / (1000 * 60 * 60 * 24));
         }
       }
-
-      const nowTime = new Date(todayStr).getTime();
-      ageDays = Math.max(0, Math.floor((nowTime - dispTime) / (1000 * 60 * 60 * 24)));
     }
+
+    const nowTime = new Date(todayStr).getTime();
+    ageDays = Math.max(0, Math.floor((nowTime - dispTime) / (1000 * 60 * 60 * 24)));
   }
 
-  if (order.estimatedDeliveryDate && order.dispatchDate) {
-    const parsedEst = parseAndFormatLogisticsDate(order.estimatedDeliveryDate);
-    const parsedDisp = parseAndFormatLogisticsDate(order.dispatchDate);
-    if (parsedEst.isoDate && parsedDisp.isoDate) {
-      const diff = Math.round((new Date(parsedEst.isoDate).getTime() - new Date(parsedDisp.isoDate).getTime()) / (1000 * 60 * 60 * 24));
-      if (diff > 0) {
-        slaDays = diff;
-        isEstimatedSla = false;
-      }
+  const parsedEst = parseAndFormatLogisticsDate(order.estimatedDeliveryDate);
+  const estIso = order.estimatedDeliveryDateIso || parsedEst.isoDate;
+  const hasValidEdd = !!(estIso && (!dispIso || estIso >= dispIso));
+
+  if (hasValidEdd && dispIso) {
+    const diff = Math.round((new Date(estIso).getTime() - new Date(dispIso).getTime()) / (1000 * 60 * 60 * 24));
+    if (diff > 0) {
+      slaDays = diff;
+      isEstimatedSla = false;
     }
   }
 
@@ -375,8 +389,10 @@ export function checkDeliverySla(order: UnifiedLogisticsOrder): {
   let isApproaching = false;
 
   if (isDelivered) {
-    if (order.estimatedDeliveryDate && order.deliveredDate) {
-      isOnTime = order.deliveredDate <= order.estimatedDeliveryDate;
+    const parsedDel = parseAndFormatLogisticsDate(order.deliveredDate);
+    const delIso = order.deliveredDateIso || parsedDel.isoDate;
+    if (hasValidEdd && delIso) {
+      isOnTime = delIso <= estIso;
       isLate = !isOnTime;
     } else if (deliveryDays !== null) {
       isOnTime = deliveryDays <= slaDays;
@@ -385,22 +401,28 @@ export function checkDeliverySla(order: UnifiedLogisticsOrder): {
       isOnTime = true; // Default fallback for delivered without dates
     }
   } else if (isDispatchedOrder(order) && !status.includes('RTO') && status !== 'Cancelled') {
-    if (order.estimatedDeliveryDate) {
-      if (order.estimatedDeliveryDate < todayStr) {
-        isOverdue = true;
-      } else {
-        const estTime = new Date(order.estimatedDeliveryDate).getTime();
-        const nowTime = new Date(todayStr).getTime();
-        const diffDays = Math.floor((estTime - nowTime) / (1000 * 60 * 60 * 24));
-        if (diffDays <= 2) {
+    // Check if order is affected by an upload parsing error
+    const rawError = `${order.trackingError || ''} ${order.remarks || ''}`.toLowerCase();
+    const isUploadParsingError = rawError.includes('parsing error') || rawError.includes('upload parsing');
+
+    if (!isUploadParsingError) {
+      if (hasValidEdd) {
+        if (estIso < todayStr) {
+          isOverdue = true;
+        } else {
+          const estTime = new Date(estIso).getTime();
+          const nowTime = new Date(todayStr).getTime();
+          const diffDays = Math.floor((estTime - nowTime) / (1000 * 60 * 60 * 24));
+          if (diffDays <= 2 && diffDays >= 0) {
+            isApproaching = true;
+          }
+        }
+      } else if (dispIso) {
+        if (ageDays > standardSlaDays) {
+          isOverdue = true;
+        } else if (ageDays >= standardSlaDays - 1) {
           isApproaching = true;
         }
-      }
-    } else {
-      if (ageDays > standardSlaDays) {
-        isOverdue = true;
-      } else if (ageDays >= standardSlaDays - 1) {
-        isApproaching = true;
       }
     }
   }
