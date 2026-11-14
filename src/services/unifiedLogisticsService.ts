@@ -10,6 +10,7 @@ import type {
 } from '../types/unifiedLogistics';
 
 import { parseAndFormatLogisticsDate } from '../utils/logisticsDateUtils';
+import { decodeHtmlEntities } from '../utils/textSanitizer';
 import { getDeliveryDelayInfo } from '../modules/Logistics/utils/deliveryDelayUtils';
 import {
   extractCustomerOrderBaseId,
@@ -296,14 +297,14 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
     displayOrderId: `#${cleanedId}`,
     source: 'upload',
     customerKey,
-    customerName: order.customerName || 'Customer',
+    customerName: decodeHtmlEntities(order.customerName) || 'Customer',
     phoneNumber: normalizedPhone || (order.phoneNumber ? String(order.phoneNumber).trim() : ''),
     phone: normalizedPhone || (order.phoneNumber ? String(order.phoneNumber).trim() : ''),
     rawPhoneNumber: order.phoneNumber ? String(order.phoneNumber).trim() : undefined,
-    address: order.address || '',
-    shippingAddress: order.address || '',
-    city: city,
-    shippingCity: city,
+    address: decodeHtmlEntities(order.address || ''),
+    shippingAddress: decodeHtmlEntities(order.address || ''),
+    city: decodeHtmlEntities(city),
+    shippingCity: decodeHtmlEntities(city),
     state: state,
     shippingState: state,
     pincode: order.pincode || '',
@@ -313,15 +314,18 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
     amount: amount,
     totalAmount: amount,
     isAmountKnown: isAmountKnown,
-    products: productsSummary,
-    productSummary: productsSummary,
+    products: decodeHtmlEntities(productsSummary),
+    productSummary: decodeHtmlEntities(productsSummary),
     totalQuantity: 1,
     courier: order.courier || '',
     awbNumber: order.awbNumber || '',
     dispatchDate: parsedDispatchDate.displayDate || order.dispatchDate || '',
+    dispatchDateIso: parsedDispatchDate.isoDate || undefined,
     estimatedDeliveryDate: parsedEstDeliveryDate.displayDate || order.estimatedDeliveryDate || '',
+    estimatedDeliveryDateIso: parsedEstDeliveryDate.isoDate || undefined,
     deliveredDate: parsedDeliveredDate.displayDate || order.deliveredDate || '',
-    remarks: order.remarks || order.lastEvent || order.sourceStatus || order.sourceSubStatus,
+    deliveredDateIso: parsedDeliveredDate.isoDate || undefined,
+    remarks: decodeHtmlEntities(order.remarks || order.lastEvent || order.sourceStatus || order.sourceSubStatus),
     batchId: order.batchId,
     batchName: order.batchName,
     fulfillmentStatus: order.fulfillmentStatus,
@@ -350,8 +354,7 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
     cancellationConfirmedBy: order.cancellationConfirmedBy,
     cancellationDate: order.cancellationDate || order.cancellationRequestedAt,
     previousShipmentStatus: order.previousShipmentStatus,
-    cancellation: order.cancellation,
-    remarks: order.remarks || order.lastEvent || order.sourceStatus || order.sourceSubStatus
+    cancellation: order.cancellation
   };
 };
 

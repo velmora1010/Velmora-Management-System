@@ -18,6 +18,7 @@ import type { UnifiedLogisticsOrder } from '../../../../types/unifiedLogistics';
 import { getCanonicalStatus, checkDeliverySla } from '../../utils/logisticsAnalyticsUtils';
 import { normalizeCourier } from '../../../../config/courierConfig';
 import { isDispatchedOrder } from '../../../../utils/logisticsOrderUtils';
+import { decodeHtmlEntities } from '../../../../utils/textSanitizer';
 import toast from 'react-hot-toast';
 
 interface TrackingExceptionsSectionProps {
@@ -69,6 +70,17 @@ export const TrackingExceptionsSection: React.FC<TrackingExceptionsSectionProps>
       const awb = (o.awbNumber || '').trim();
       const rawText = `${o.remarks || ''} ${o.lastEvent || ''} ${o.trackingError || ''}`.toLowerCase();
 
+      // Do NOT classify upload parsing errors as delivery exceptions
+      const isUploadParsingError = 
+        rawText.includes('parsing error') || 
+        rawText.includes('upload parsing') || 
+        rawText.includes('failed to parse') ||
+        (o.trackingError && /parse|parsing|upload|syntax|corrupt/i.test(o.trackingError));
+
+      if (isUploadParsingError) {
+        return;
+      }
+
       // 1. Missing Courier or AWB on prepare dispatch or active
       if (!courierName || courierName === 'Unassigned' || !awb) {
         if (o.workflowStage === 'prepare_dispatch') {
@@ -94,7 +106,7 @@ export const TrackingExceptionsSection: React.FC<TrackingExceptionsSectionProps>
           order: o,
           type: 'failed_attempt',
           typeLabel: 'Failed Attempt',
-          reason: rawText.includes('door') ? 'Door closed / locked' : (rawText.includes('unreachable') ? 'Customer unreachable' : 'Delivery attempt failed'),
+          reason: decodeHtmlEntities(rawText.includes('door') ? 'Door closed / locked' : (rawText.includes('unreachable') ? 'Customer unreachable' : (o.remarks || 'Delivery attempt failed'))),
           courierName,
           awb: awb || '—',
           ageDays: sla.ageDays,
@@ -111,7 +123,7 @@ export const TrackingExceptionsSection: React.FC<TrackingExceptionsSectionProps>
           order: o,
           type: 'address_issue',
           typeLabel: 'Address Exception',
-          reason: 'Incomplete or unverified destination address',
+          reason: decodeHtmlEntities(o.remarks && o.remarks.toLowerCase().includes('address') ? o.remarks : 'Incomplete or unverified destination address'),
           courierName,
           awb: awb || '—',
           ageDays: sla.ageDays,
@@ -162,7 +174,7 @@ export const TrackingExceptionsSection: React.FC<TrackingExceptionsSectionProps>
           order: o,
           type: 'rto_alert',
           typeLabel: 'RTO Initiated',
-          reason: 'Return initiated by carrier',
+          reason: decodeHtmlEntities(o.remarks || 'Return initiated by carrier'),
           courierName,
           awb: awb || '—',
           ageDays: sla.ageDays,
@@ -309,7 +321,7 @@ export const TrackingExceptionsSection: React.FC<TrackingExceptionsSectionProps>
 
                     {/* Customer */}
                     <td className="px-4 py-3 text-slate-200 font-semibold max-w-[160px] truncate">
-                      {item.order.customerName || '—'}
+                      {decodeHtmlEntities(item.order.customerName || '—')}
                       {item.order.phoneNumber && (
                         <div className="text-[10px] font-mono text-slate-500">{item.order.phoneNumber}</div>
                       )}
@@ -323,7 +335,7 @@ export const TrackingExceptionsSection: React.FC<TrackingExceptionsSectionProps>
                     </td>
 
                     {/* Issue Reason */}
-                    <td className="px-4 py-3 text-slate-300 max-w-[200px] truncate" title={item.reason}>
+                    <td className="px-4 py-3 text-slate-300 max-w-[200px] truncate" title={decodeHtmlEntities(item.reason)}>
                       {item.reason}
                     </td>
 

@@ -33,8 +33,8 @@ export type UnifiedTrackingStatus =
   | 'Cancelled'
   | 'RTO'
   | 'Returned'
-  | 'COD Reconciliation'
-  | 'Ready for Pickup'
+  | 'COD Reconciliation'
+  | 'Ready for Pickup'
   | 'Ready to Ship';
 
 export interface UnifiedLogisticsOrder {
@@ -86,8 +86,11 @@ export interface UnifiedLogisticsOrder {
   courier?: string; // 'Delhivery' | 'ST Courier' | 'Amazon' | 'Ekart' | 'India Post'
   awbNumber?: string;
   dispatchDate?: string;
+  dispatchDateIso?: string;
   estimatedDeliveryDate?: string;
+  estimatedDeliveryDateIso?: string;
   deliveredDate?: string;
+  deliveredDateIso?: string;
   pickupLocation?: string;
   transportMode?: 'Surface' | 'Air' | string;
   zone?: string;

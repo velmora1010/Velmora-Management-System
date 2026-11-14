@@ -40,6 +40,8 @@ export interface RepeatTrendPoint {
   totalOrders: number;
 }
 
+import { decodeHtmlEntities } from '../utils/textSanitizer';
+
 export function normalizeProductName(rawName: string | null | undefined): string {
   if (!rawName) return 'Standard Products';
   let normalized = rawName.trim();
@@ -53,7 +55,7 @@ export function normalizeProductName(rawName: string | null | undefined): string
   if (/^DIY BBC Cleaner\s+[—–]\s+/i.test(normalized)) {
     normalized = normalized.replace(/\s+[—–]\s+/, ' - ');
   }
-  return normalized;
+  return decodeHtmlEntities(normalized);
 }
 
 export interface CustomerOrderHistoryEntry {
