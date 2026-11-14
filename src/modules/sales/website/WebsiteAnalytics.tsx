@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { 
   BarChart3, 
   MapPin, 
@@ -33,6 +33,7 @@ import { OptionItem } from './components/MultiSelectDropdown';
 import { AnalyticsSegmentedControl, SegmentOption } from './components/AnalyticsSegmentedControl';
 import { AnalyticsDonutChart } from './components/AnalyticsDonutChart';
 import { CardMatchingOrdersList } from './components/CardMatchingOrdersList';
+import { RepeatCustomerSummarySection } from './components/RepeatCustomerSummarySection';
 import { CustomerRepeatAnalyticsDashboard } from '../../../components/analytics/CustomerRepeatAnalyticsDashboard';
 import { TopPerformingProductsCombos } from './components/TopPerformingProductsCombos';
 import { AnalyticsFullPageDataView, CustomerPurchaseProfile, OperationalOrderRecord } from './components/AnalyticsFullPageDataView';
@@ -155,6 +156,7 @@ const ORDERS_REV_SEGMENTS: SegmentOption<'orders' | 'revenue'>[] = [
 ];
 
 export const WebsiteAnalytics: React.FC = () => {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [allOrders, setAllOrders] = useState<WebsiteConsolidatedOrder[]>([]);
   const [batches, setBatches] = useState<WebsiteUploadBatch[]>([]);
@@ -1499,6 +1501,14 @@ export const WebsiteAnalytics: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* REPEAT CUSTOMER SUMMARY */}
+      <RepeatCustomerSummarySection
+        orders={filteredOrders}
+        startDate={analyticsStartDate}
+        endDate={analyticsEndDate}
+        onNavigateToOrder={(ordId) => navigate(`/sales/website/orders?search=${ordId}`)}
+      />
 
       {totalOrdersCount === 0 && !loading ? (
         <div className="p-12 text-center rounded-2xl bg-slate-900/80 border border-slate-800 space-y-3">

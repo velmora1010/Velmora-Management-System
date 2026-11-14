@@ -42,6 +42,7 @@ import { ComboDispatchModal } from './components/ComboDispatchModal';
 import { DateRangePickerModal, DateRangePreset } from './components/DateRangePickerModal';
 import { AnalyticsDonutChart } from './components/AnalyticsDonutChart';
 import { CardMatchingOrdersList } from './components/CardMatchingOrdersList';
+import { RepeatCustomerSummarySection } from './components/RepeatCustomerSummarySection';
 import { useWebsiteSalesDateRange } from './context/WebsiteSalesDateRangeContext';
 import toast from 'react-hot-toast';
 
@@ -733,6 +734,14 @@ export const WebsiteDashboard: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* SECTION 4: REPEAT CUSTOMER SUMMARY */}
+      <RepeatCustomerSummarySection
+        orders={orders}
+        startDate={salesStartDate}
+        endDate={salesEndDate}
+        onNavigateToOrder={(ordId) => navigate(`/sales/website/orders?search=${ordId}`)}
+      />
 
       {/* FILTERED VISUALIZATION (SHOWN ONLY WHEN 1 OR MORE DASHBOARD FILTERS ARE ACTIVE) */}
       {hasActiveDashboardFilters && (
