@@ -20,12 +20,15 @@ import {
   DollarSign,
   LayoutGrid,
   Check,
+  CheckCircle2,
+  TrendingUp,
   ChevronLeft,
   ChevronRight,
   X,
   Eye,
   Search,
-  SlidersHorizontal
+  SlidersHorizontal,
+  FileSpreadsheet
 } from 'lucide-react';
 import type { WebsiteConsolidatedOrder, WebsiteUploadBatch, WebsiteOrderItem } from './types';
 import { websiteSalesService } from './websiteSalesService';
@@ -36,12 +39,14 @@ import { CardMatchingOrdersList } from './components/CardMatchingOrdersList';
 import { RepeatCustomerSummarySection } from './components/RepeatCustomerSummarySection';
 import { CustomerRepeatAnalyticsDashboard } from '../../../components/analytics/CustomerRepeatAnalyticsDashboard';
 import { TopPerformingProductsCombos } from './components/TopPerformingProductsCombos';
+import { WebsiteCourierPerformanceSection } from './components/WebsiteCourierPerformanceSection';
 import { AnalyticsFullPageDataView, CustomerPurchaseProfile, OperationalOrderRecord } from './components/AnalyticsFullPageDataView';
 import { OrderDetailsModal } from './components/OrderDetailsModal';
 import { AnalyticsFilterDrawer } from './components/AnalyticsFilterDrawer';
 import { DateRangePickerModal } from './components/DateRangePickerModal';
 import { useWebsiteSalesDateRange } from './context/WebsiteSalesDateRangeContext';
 import { 
+  getCanonicalStatus,
   calculateCanonicalRtoMetrics, 
   isRtoOrder, 
   isCodOrder, 
@@ -66,6 +71,7 @@ import {
   resolveCanonicalProductName
 } from './websiteSalesUtils';
 import toast from 'react-hot-toast';
+import { exportWebsiteSalesAnalyticsExcel } from './services/websiteSalesExcelExportService';
 
 export interface MultiSelectFilterState {
   batchIds: string[];
@@ -239,6 +245,7 @@ export const WebsiteAnalytics: React.FC = () => {
   const [prodCompCardSlice, setProdCompCardSlice] = useState<string | null>(null);
   const [qtyCompCardSlice, setQtyCompCardSlice] = useState<string | null>(null);
   const [codCardSlice, setCodCardSlice] = useState<string | null>(null);
+  const [shipmentOutcomeFilter, setShipmentOutcomeFilter] = useState<'ALL' | 'DELIVERED' | 'RTO'>('ALL');
 
   const [selectedOrderForModal, setSelectedOrderForModal] = useState<WebsiteConsolidatedOrder | null>(null);
   const [fullPageView, setFullPageView] = useState<{
@@ -357,6 +364,31 @@ export const WebsiteAnalytics: React.FC = () => {
     setAppliedFilters(draftFilters);
     setIsFilterDrawerOpen(false);
     toast.success('Filters applied successfully');
+  };
+
+  const [isExportingExcel, setIsExportingExcel] = useState<boolean>(false);
+
+  const handleExportExcel = async () => {
+    if (filteredOrders.length === 0) {
+      toast.error('No orders available to export for the selected period.');
+      return;
+    }
+
+    setIsExportingExcel(true);
+    const toastId = toast.loading('Generating Excel analytics workbook...');
+    try {
+      await exportWebsiteSalesAnalyticsExcel({
+        startDate: analyticsStartDate,
+        endDate: analyticsEndDate,
+        orders: filteredOrders
+      });
+      toast.success('Analytics workbook downloaded successfully!', { id: toastId });
+    } catch (err: any) {
+      console.error('Failed to export Excel analytics:', err);
+      toast.error('Failed to generate Excel export. Please try again.', { id: toastId });
+    } finally {
+      setIsExportingExcel(false);
+    }
   };
 
   // --- FILTERING DATA LOGIC ---
@@ -1179,6 +1211,22 @@ export const WebsiteAnalytics: React.FC = () => {
           >
             <RefreshCw size={14} className={loading ? 'animate-spin text-purple-400' : ''} />
           </button>
+
+          {/* EXPORT EXCEL BUTTON */}
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={isExportingExcel || loading || filteredOrders.length === 0}
+            className="h-[38px] px-3.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 hover:text-emerald-200 border border-emerald-500/40 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-2 shadow-sm shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Export Website Sales Analytics to Excel (.xlsx)"
+          >
+            {isExportingExcel ? (
+              <RefreshCw size={14} className="animate-spin text-emerald-400" />
+            ) : (
+              <FileSpreadsheet size={14} className="text-emerald-400" />
+            )}
+            <span>Export Excel</span>
+          </button>
         </div>
       </div>
 
@@ -1406,100 +1454,371 @@ export const WebsiteAnalytics: React.FC = () => {
           </div>
         </div>
 
-        {/* Row 3: Return & RTO Metrics */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {/* Card 1: Total RTO Orders */}
-          <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-rose-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
-            <div className="flex items-center justify-between text-slate-400">
-              <span className="text-[11px] font-bold uppercase tracking-wider">Total RTO Orders</span>
-              <div className="w-7 h-7 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center">
-                <RotateCcw size={14} />
-              </div>
+        {/* Row 3: Shipment Outcome & Delivery Intelligence */}
+        <div className="space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 px-1">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-300">Shipment Outcome & Operations</span>
+              <span className="text-[11px] text-slate-500 font-mono">({filteredOrders.length} Orders)</span>
             </div>
-            <div className="text-2xl font-bold text-rose-400 font-mono mt-2">
-              {rtoMetrics.totalRtoOrders.toLocaleString('en-IN')}
-            </div>
-            <div className="flex items-center justify-between text-[10px] text-slate-500">
-              <span>Rate: <strong className="text-rose-300 font-mono">{rtoMetrics.rtoRate}%</strong></span>
+            {/* Shipment Outcome Filter Toggle */}
+            <div className="flex items-center bg-slate-950/70 p-1 rounded-xl border border-slate-800 text-xs self-start sm:self-auto">
               <button
                 type="button"
-                onClick={() => handleOpenOrdersFullPage('All RTO Orders', rtoMetrics.rtoOrders)}
-                className="text-rose-400 hover:text-rose-300 font-bold hover:underline cursor-pointer"
+                onClick={() => setShipmentOutcomeFilter('ALL')}
+                className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  shipmentOutcomeFilter === 'ALL'
+                    ? 'bg-purple-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
               >
-                View All →
+                All Orders ({filteredOrders.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setShipmentOutcomeFilter('DELIVERED')}
+                className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  shipmentOutcomeFilter === 'DELIVERED'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-emerald-300'
+                }`}
+              >
+                <CheckCircle2 size={12} />
+                <span>Delivered ({rtoMetrics.totalDeliveredOrders})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShipmentOutcomeFilter('RTO')}
+                className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  shipmentOutcomeFilter === 'RTO'
+                    ? 'bg-rose-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-rose-300'
+                }`}
+              >
+                <RotateCcw size={12} />
+                <span>RTO ({rtoMetrics.totalRtoOrders})</span>
               </button>
             </div>
           </div>
 
-          {/* Card 2: RTO Avg Value */}
-          <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-amber-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
-            <div className="flex items-center justify-between text-slate-400">
-              <span className="text-[11px] font-bold uppercase tracking-wider">RTO Avg Value</span>
-              <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center">
-                <BarChart3 size={14} />
+          {/* Cards based on shipmentOutcomeFilter */}
+          {shipmentOutcomeFilter === 'DELIVERED' ? (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 animate-in fade-in duration-200">
+              {/* Card 1: Delivered Orders */}
+              <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-emerald-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[11px] font-bold uppercase tracking-wider">Delivered Orders</span>
+                  <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+                    <CheckCircle2 size={14} />
+                  </div>
+                </div>
+                <div className="text-2xl font-bold text-emerald-400 font-mono mt-2">
+                  {rtoMetrics.totalDeliveredOrders.toLocaleString('en-IN')}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span>Delivery Rate: <strong className="text-emerald-300 font-mono">{rtoMetrics.deliveryRate}</strong></span>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenOrdersFullPage('Delivered Website Orders', rtoMetrics.deliveredOrders)}
+                    className="text-emerald-400 hover:text-emerald-300 font-bold hover:underline cursor-pointer"
+                  >
+                    View All →
+                  </button>
+                </div>
               </div>
-            </div>
-            <div className="text-2xl font-bold text-amber-400 font-mono mt-2">
-              {formatINR(rtoMetrics.rtoAvgValue)}
-            </div>
-            <div className="flex items-center justify-between text-[10px] text-slate-500">
-              <span>Avg ticket returned</span>
-              <button
-                type="button"
-                onClick={() => handleOpenOrdersFullPage('RTO Average Order Value (AOV)', rtoMetrics.rtoOrders)}
-                className="text-amber-400 hover:text-amber-300 font-bold hover:underline cursor-pointer"
-              >
-                View All →
-              </button>
-            </div>
-          </div>
 
-          {/* Card 3: RTO COD Value */}
-          <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-rose-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
-            <div className="flex items-center justify-between text-slate-400">
-              <span className="text-[11px] font-bold uppercase tracking-wider">RTO COD Value</span>
-              <div className="w-7 h-7 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center">
-                <CreditCard size={14} />
+              {/* Card 2: Delivered Order Value */}
+              <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-emerald-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[11px] font-bold uppercase tracking-wider">Delivered Order Value</span>
+                  <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+                    <TrendingUp size={14} />
+                  </div>
+                </div>
+                <div className="text-2xl font-bold text-emerald-300 font-mono mt-2">
+                  {formatINR(rtoMetrics.totalDeliveredValue)}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span>Avg: <strong className="text-emerald-300 font-mono">{formatINR(rtoMetrics.deliveredAvgValue)}</strong> / order</span>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenOrdersFullPage('Delivered Website Orders', rtoMetrics.deliveredOrders)}
+                    className="text-emerald-400 hover:text-emerald-300 font-bold hover:underline cursor-pointer"
+                  >
+                    View All →
+                  </button>
+                </div>
               </div>
-            </div>
-            <div className="text-2xl font-bold text-white font-mono mt-2">
-              {formatINR(rtoMetrics.rtoCodValue)}
-            </div>
-            <div className="flex items-center justify-between text-[10px] text-slate-500">
-              <span><strong className="text-rose-300 font-mono">{rtoMetrics.rtoCodOrders}</strong> Pure COD</span>
-              <button
-                type="button"
-                onClick={() => handleOpenOrdersFullPage('RTO COD Orders', rtoMetrics.rtoOrders.filter(o => isCodOrder(o)))}
-                className="text-rose-400 hover:text-rose-300 font-bold hover:underline cursor-pointer"
-              >
-                View All →
-              </button>
-            </div>
-          </div>
 
-          {/* Card 4: RTO Prepaid Value */}
-          <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-purple-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
-            <div className="flex items-center justify-between text-slate-400">
-              <span className="text-[11px] font-bold uppercase tracking-wider">RTO Prepaid Value</span>
-              <div className="w-7 h-7 rounded-lg bg-purple-500/10 text-purple-400 flex items-center justify-center">
-                <CreditCard size={14} />
+              {/* Card 3: Delivered COD Value */}
+              <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-amber-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[11px] font-bold uppercase tracking-wider">Delivered COD Value</span>
+                  <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center">
+                    <CreditCard size={14} />
+                  </div>
+                </div>
+                <div className="text-2xl font-bold text-white font-mono mt-2">
+                  {formatINR(rtoMetrics.deliveredCodValue)}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span><strong className="text-amber-300 font-mono">{rtoMetrics.deliveredCodOrders}</strong> Pure COD</span>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenOrdersFullPage('Delivered COD Orders', rtoMetrics.deliveredOrders.filter(o => isCodOrder(o)))}
+                    className="text-amber-400 hover:text-amber-300 font-bold hover:underline cursor-pointer"
+                  >
+                    View All →
+                  </button>
+                </div>
+              </div>
+
+              {/* Card 4: Delivered Prepaid Value */}
+              <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-purple-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[11px] font-bold uppercase tracking-wider">Delivered Prepaid Value</span>
+                  <div className="w-7 h-7 rounded-lg bg-purple-500/10 text-purple-400 flex items-center justify-center">
+                    <CreditCard size={14} />
+                  </div>
+                </div>
+                <div className="text-2xl font-bold text-white font-mono mt-2">
+                  {formatINR(rtoMetrics.deliveredPrepaidValue)}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span><strong className="text-purple-300 font-mono">{rtoMetrics.deliveredPrepaidOrders}</strong> Prepaid ({rtoMetrics.deliveredPurePrepaidOrders} Full · {rtoMetrics.deliveredPartialCodOrders} Partial)</span>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenOrdersFullPage('Delivered Prepaid Orders', rtoMetrics.deliveredOrders.filter(o => isPrepaidOrder(o)))}
+                    className="text-purple-400 hover:text-purple-300 font-bold hover:underline cursor-pointer"
+                  >
+                    View All →
+                  </button>
+                </div>
               </div>
             </div>
-            <div className="text-2xl font-bold text-white font-mono mt-2">
-              {formatINR(rtoMetrics.rtoPrepaidValue)}
+          ) : shipmentOutcomeFilter === 'RTO' ? (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 animate-in fade-in duration-200">
+              {/* Card 1: Total RTO Orders */}
+              <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-rose-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[11px] font-bold uppercase tracking-wider">Total RTO Orders</span>
+                  <div className="w-7 h-7 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center">
+                    <RotateCcw size={14} />
+                  </div>
+                </div>
+                <div className="text-2xl font-bold text-rose-400 font-mono mt-2">
+                  {rtoMetrics.totalRtoOrders.toLocaleString('en-IN')}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span>RTO Rate: <strong className="text-rose-300 font-mono">{rtoMetrics.rtoRate}%</strong></span>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenOrdersFullPage('All RTO Orders', rtoMetrics.rtoOrders)}
+                    className="text-rose-400 hover:text-rose-300 font-bold hover:underline cursor-pointer"
+                  >
+                    View All →
+                  </button>
+                </div>
+              </div>
+
+              {/* Card 2: RTO Avg Value */}
+              <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-amber-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[11px] font-bold uppercase tracking-wider">RTO Avg Value</span>
+                  <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center">
+                    <BarChart3 size={14} />
+                  </div>
+                </div>
+                <div className="text-2xl font-bold text-amber-400 font-mono mt-2">
+                  {formatINR(rtoMetrics.rtoAvgValue)}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span>Avg ticket returned</span>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenOrdersFullPage('RTO Average Order Value (AOV)', rtoMetrics.rtoOrders)}
+                    className="text-amber-400 hover:text-amber-300 font-bold hover:underline cursor-pointer"
+                  >
+                    View All →
+                  </button>
+                </div>
+              </div>
+
+              {/* Card 3: RTO COD Value */}
+              <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-rose-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[11px] font-bold uppercase tracking-wider">RTO COD Value</span>
+                  <div className="w-7 h-7 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center">
+                    <CreditCard size={14} />
+                  </div>
+                </div>
+                <div className="text-2xl font-bold text-white font-mono mt-2">
+                  {formatINR(rtoMetrics.rtoCodValue)}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span><strong className="text-rose-300 font-mono">{rtoMetrics.rtoCodOrders}</strong> Pure COD</span>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenOrdersFullPage('RTO COD Orders', rtoMetrics.rtoOrders.filter(o => isCodOrder(o)))}
+                    className="text-rose-400 hover:text-rose-300 font-bold hover:underline cursor-pointer"
+                  >
+                    View All →
+                  </button>
+                </div>
+              </div>
+
+              {/* Card 4: RTO Prepaid Value */}
+              <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-purple-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[11px] font-bold uppercase tracking-wider">RTO Prepaid Value</span>
+                  <div className="w-7 h-7 rounded-lg bg-purple-500/10 text-purple-400 flex items-center justify-center">
+                    <CreditCard size={14} />
+                  </div>
+                </div>
+                <div className="text-2xl font-bold text-white font-mono mt-2">
+                  {formatINR(rtoMetrics.rtoPrepaidValue)}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span><strong className="text-purple-300 font-mono">{rtoMetrics.rtoPrepaidOrders}</strong> Prepaid ({rtoMetrics.rtoPurePrepaidOrders} Full · {rtoMetrics.rtoPartialCodOrders} Partial)</span>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenOrdersFullPage('RTO Prepaid Orders', rtoMetrics.rtoOrders.filter(o => isPrepaidOrder(o)))}
+                    className="text-purple-400 hover:text-purple-300 font-bold hover:underline cursor-pointer"
+                  >
+                    View All →
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center justify-between text-[10px] text-slate-500">
-              <span><strong className="text-purple-300 font-mono">{rtoMetrics.rtoPrepaidOrders}</strong> Prepaid ({rtoMetrics.rtoPurePrepaidOrders} Full · {rtoMetrics.rtoPartialCodOrders} Partial)</span>
-              <button
-                type="button"
-                onClick={() => handleOpenOrdersFullPage('RTO Prepaid Orders', rtoMetrics.rtoOrders.filter(o => isPrepaidOrder(o)))}
-                className="text-purple-400 hover:text-purple-300 font-bold hover:underline cursor-pointer"
-              >
-                View All →
-              </button>
+          ) : (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 animate-in fade-in duration-200">
+              {/* Card 1: Delivered Orders */}
+              <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-emerald-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[11px] font-bold uppercase tracking-wider">Delivered Shipments</span>
+                  <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+                    <CheckCircle2 size={14} />
+                  </div>
+                </div>
+                <div className="text-2xl font-bold text-emerald-400 font-mono mt-2">
+                  {rtoMetrics.totalDeliveredOrders.toLocaleString('en-IN')}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span>Rate: <strong className="text-emerald-300 font-mono">{rtoMetrics.deliveryRate}</strong></span>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenOrdersFullPage('Delivered Website Orders', rtoMetrics.deliveredOrders)}
+                    className="text-emerald-400 hover:text-emerald-300 font-bold hover:underline cursor-pointer"
+                  >
+                    View All →
+                  </button>
+                </div>
+              </div>
+
+              {/* Card 2: Delivered Revenue */}
+              <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-emerald-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[11px] font-bold uppercase tracking-wider">Delivered Revenue</span>
+                  <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+                    <TrendingUp size={14} />
+                  </div>
+                </div>
+                <div className="text-2xl font-bold text-white font-mono mt-2">
+                  {formatINR(rtoMetrics.totalDeliveredValue)}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span>Avg: <strong className="text-emerald-300 font-mono">{formatINR(rtoMetrics.deliveredAvgValue)}</strong></span>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenOrdersFullPage('Delivered Website Orders', rtoMetrics.deliveredOrders)}
+                    className="text-emerald-400 hover:text-emerald-300 font-bold hover:underline cursor-pointer"
+                  >
+                    View All →
+                  </button>
+                </div>
+              </div>
+
+              {/* Card 3: Total RTO Orders */}
+              <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-rose-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[11px] font-bold uppercase tracking-wider">Total RTO Orders</span>
+                  <div className="w-7 h-7 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center">
+                    <RotateCcw size={14} />
+                  </div>
+                </div>
+                <div className="text-2xl font-bold text-rose-400 font-mono mt-2">
+                  {rtoMetrics.totalRtoOrders.toLocaleString('en-IN')}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span>Rate: <strong className="text-rose-300 font-mono">{rtoMetrics.rtoRate}%</strong></span>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenOrdersFullPage('All RTO Orders', rtoMetrics.rtoOrders)}
+                    className="text-rose-400 hover:text-rose-300 font-bold hover:underline cursor-pointer"
+                  >
+                    View All →
+                  </button>
+                </div>
+              </div>
+
+              {/* Card 4: RTO Revenue Loss */}
+              <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-purple-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[11px] font-bold uppercase tracking-wider">RTO Revenue Loss</span>
+                  <div className="w-7 h-7 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center">
+                    <CreditCard size={14} />
+                  </div>
+                </div>
+                <div className="text-2xl font-bold text-white font-mono mt-2">
+                  {formatINR(rtoMetrics.totalRtoValue)}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span>Avg ticket: <strong className="text-amber-300 font-mono">{formatINR(rtoMetrics.rtoAvgValue)}</strong></span>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenOrdersFullPage('All RTO Orders', rtoMetrics.rtoOrders)}
+                    className="text-purple-400 hover:text-purple-300 font-bold hover:underline cursor-pointer"
+                  >
+                    View All →
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
+          )}
         </div>
+
+        {/* COURIER PERFORMANCE BREAKDOWN */}
+        <WebsiteCourierPerformanceSection
+          courierPerformance={rtoMetrics.courierPerformance}
+          allOrders={filteredOrders}
+          onViewCourierOrders={(courierName, orders, filterStatus) => {
+            let list = orders;
+            if (filterStatus === 'DELIVERED') {
+              list = list.filter(o => getCanonicalStatus(o) === 'Delivered');
+            } else if (filterStatus === 'RTO') {
+              list = list.filter(o => getCanonicalStatus(o).includes('RTO'));
+            } else if (filterStatus === 'IN_TRANSIT') {
+              list = list.filter(o => {
+                const s = getCanonicalStatus(o);
+                return s === 'In Transit' || s === 'Out for Delivery';
+              });
+            } else if (filterStatus === 'OTHER') {
+              list = list.filter(o => {
+                const s = getCanonicalStatus(o);
+                return s !== 'Delivered' && !s.includes('RTO') && s !== 'In Transit' && s !== 'Out for Delivery' && s !== 'Cancelled';
+              });
+            } else if (filterStatus === 'CANCELLED') {
+              list = list.filter(o => getCanonicalStatus(o) === 'Cancelled');
+            }
+            const statusLabel = filterStatus && filterStatus !== 'ALL'
+              ? (filterStatus === 'DELIVERED' ? 'Delivered' : filterStatus === 'RTO' ? 'RTO' : filterStatus === 'IN_TRANSIT' ? 'In Transit' : filterStatus === 'OTHER' ? 'Other Statuses' : 'Cancelled')
+              : '';
+            const label = statusLabel
+              ? `${courierName} – ${statusLabel} Records`
+              : `${courierName} Shipments`;
+            handleOpenOrdersFullPage(label, list);
+          }}
+        />
       </div>
 
       {/* REPEAT CUSTOMER SUMMARY */}

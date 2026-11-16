@@ -2226,7 +2226,7 @@ export const KNOWN_CANONICAL_PRODUCT_NAMES: Record<string, string> = {
   'magic sponge 6 pieces': 'Magic Sponge - 6 Pieces',
   'diy floor cleaner': 'DIY Floor Cleaner',
   'diy kitchen cleaner': 'DIY Kitchen Cleaner',
-  'diy bbc cleaner - brass bronze copper cleaner': 'DIY BBC Cleaner — Brass, Bronze & Copper Cleaner',
+  'diy bbc cleaner - brass bronze copper cleaner': 'DIY BBC Cleaner - Brass, Bronze & Copper Cleaner',
   'diy handwash liquid': 'DIY Handwash Liquid',
   'bamboo kitchen towel': 'Bamboo Kitchen Towel',
   'diy car shampoo': 'DIY Car Shampoo',
