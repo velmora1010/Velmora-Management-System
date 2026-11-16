@@ -25,7 +25,8 @@ import {
   X,
   Eye,
   Search,
-  SlidersHorizontal
+  SlidersHorizontal,
+  FileSpreadsheet
 } from 'lucide-react';
 import type { WebsiteConsolidatedOrder, WebsiteUploadBatch, WebsiteOrderItem } from './types';
 import { websiteSalesService } from './websiteSalesService';
@@ -66,6 +67,7 @@ import {
   resolveCanonicalProductName
 } from './websiteSalesUtils';
 import toast from 'react-hot-toast';
+import { exportWebsiteSalesAnalyticsExcel } from './services/websiteSalesExcelExportService';
 
 export interface MultiSelectFilterState {
   batchIds: string[];
@@ -357,6 +359,31 @@ export const WebsiteAnalytics: React.FC = () => {
     setAppliedFilters(draftFilters);
     setIsFilterDrawerOpen(false);
     toast.success('Filters applied successfully');
+  };
+
+  const [isExportingExcel, setIsExportingExcel] = useState<boolean>(false);
+
+  const handleExportExcel = async () => {
+    if (filteredOrders.length === 0) {
+      toast.error('No orders available to export for the selected period.');
+      return;
+    }
+
+    setIsExportingExcel(true);
+    const toastId = toast.loading('Generating Excel analytics workbook...');
+    try {
+      await exportWebsiteSalesAnalyticsExcel({
+        startDate: analyticsStartDate,
+        endDate: analyticsEndDate,
+        orders: filteredOrders
+      });
+      toast.success('Analytics workbook downloaded successfully!', { id: toastId });
+    } catch (err: any) {
+      console.error('Failed to export Excel analytics:', err);
+      toast.error('Failed to generate Excel export. Please try again.', { id: toastId });
+    } finally {
+      setIsExportingExcel(false);
+    }
   };
 
   // --- FILTERING DATA LOGIC ---
@@ -1178,6 +1205,22 @@ export const WebsiteAnalytics: React.FC = () => {
             title="Refresh analytics data"
           >
             <RefreshCw size={14} className={loading ? 'animate-spin text-purple-400' : ''} />
+          </button>
+
+          {/* EXPORT EXCEL BUTTON */}
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={isExportingExcel || loading || filteredOrders.length === 0}
+            className="h-[38px] px-3.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 hover:text-emerald-200 border border-emerald-500/40 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-2 shadow-sm shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Export Website Sales Analytics to Excel (.xlsx)"
+          >
+            {isExportingExcel ? (
+              <RefreshCw size={14} className="animate-spin text-emerald-400" />
+            ) : (
+              <FileSpreadsheet size={14} className="text-emerald-400" />
+            )}
+            <span>Export Excel</span>
           </button>
         </div>
       </div>
