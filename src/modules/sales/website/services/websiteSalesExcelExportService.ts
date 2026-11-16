@@ -129,7 +129,7 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
   });
 
   // =========================================================================
-  // SHEET 1: Website Sales Analytics (Section A: Summary, Section B: RTO Summary, Section C: RTO Customer Details)
+  // SHEET 1: Website Sales Analytics (Overall Executive Summary ONLY)
   // =========================================================================
   const totalOrdersCount = orders.length;
   const totalRevenue = orders.reduce((sum, o) => sum + (Number(o.price) || 0), 0);
@@ -156,9 +156,8 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
   const rtoPrepaidValue = rtoMetrics.rtoPrepaidValue;
   const rtoOrders = rtoMetrics.rtoOrders || [];
 
-  // Section A: Website Sales Analytics Summary (3 columns: METRIC NAME, VALUE, UNIT / DETAIL)
-  const s1SectionARows: (string | number)[][] = [
-    ['SECTION A - WEBSITE SALES ANALYTICS SUMMARY'],
+  const s1Rows: (string | number)[][] = [
+    ['WEBSITE SALES ANALYTICS SUMMARY'],
     ['Report Period', `${formatExcelDate(startDate)} to ${formatExcelDate(endDate)}`, 'Date Range (DD-MMM-YYYY)'],
     ['Generated On', new Date().toLocaleString('en-IN'), 'Timestamp'],
     [],
@@ -178,10 +177,18 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
     ['Total COD Receivable', Math.round(totalCodReceivable), '₹ (INR) Pending from Courier/Customer']
   ];
 
-  // Section B: RTO Summary (4 key RTO metrics + Total RTO Orders + RTO Rate)
-  const s1SectionBRows: (string | number)[][] = [
+  const ws1 = XLSX.utils.aoa_to_sheet(s1Rows);
+  enhanceWorksheet(ws1, 4, false);
+
+  // =========================================================================
+  // SHEET 2: RTO Summary & Customer Details
+  // =========================================================================
+  const s2RtoSummaryRows: (string | number)[][] = [
+    ['RTO SUMMARY & CUSTOMER DETAILS'],
+    ['Report Period', `${formatExcelDate(startDate)} to ${formatExcelDate(endDate)}`, 'Date Range (DD-MMM-YYYY)'],
+    ['Generated On', new Date().toLocaleString('en-IN'), 'Timestamp'],
     [],
-    ['SECTION B - RTO SUMMARY'],
+    ['SECTION A - RTO SUMMARY'],
     ['RTO METRIC', 'VALUE', 'UNIT / DETAIL'],
     ['Total RTO Orders', totalRtoOrders, 'Returned to Origin Shipments'],
     ['Total RTO Value', Math.round(totalRtoValue), '₹ (INR) Gross Returned Order Value'],
@@ -191,7 +198,6 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
     ['RTO Prepaid Value', Math.round(rtoPrepaidValue), '₹ Prepaid & Partial COD Returned Value']
   ];
 
-  // Section C: RTO Customer Details
   const rtoDetailHeaders = [
     'S.No',
     'Order ID',
@@ -250,24 +256,19 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
       })
     : [['-', '-', '-', '-', 'No RTO orders recorded in the selected period', '-', '-', '-', '-', 0, 0, 0, '-']];
 
-  const s1SectionCRows: (string | number)[][] = [
+  const s2RtoRows: (string | number)[][] = [
+    ...s2RtoSummaryRows,
     [],
-    ['SECTION C - RTO CUSTOMER DETAILS'],
+    ['SECTION B - RTO CUSTOMER DETAILS'],
     rtoDetailHeaders,
     ...rtoDetailDataRows
   ];
 
-  const s1Rows: (string | number)[][] = [
-    ...s1SectionARows,
-    ...s1SectionBRows,
-    ...s1SectionCRows
-  ];
-
-  const ws1 = XLSX.utils.aoa_to_sheet(s1Rows);
-  const rtoHeaderRowIndex = s1SectionARows.length + s1SectionBRows.length + 2; // Row index of Section C table header
-  enhanceWorksheet(ws1, 4, true, {
+  const wsRto = XLSX.utils.aoa_to_sheet(s2RtoRows);
+  const rtoHeaderRowIndex = s2RtoSummaryRows.length + 2; // Row index of Section B table header
+  enhanceWorksheet(wsRto, rtoHeaderRowIndex, true, {
     s: { r: rtoHeaderRowIndex, c: 0 },
-    e: { r: s1Rows.length - 1, c: rtoDetailHeaders.length - 1 }
+    e: { r: s2RtoRows.length - 1, c: rtoDetailHeaders.length - 1 }
   });
 
   // =========================================================================
@@ -930,10 +931,11 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
   enhanceWorksheet(ws8, 0, true);
 
   // =========================================================================
-  // Assemble Workbook & Download
+  // Assemble Workbook & Download (Exact 9 Sheets Order)
   // =========================================================================
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws1, 'Website Sales Analytics');
+  XLSX.utils.book_append_sheet(wb, wsRto, 'RTO Summary & Details');
   XLSX.utils.book_append_sheet(wb, ws2, 'Repeat Customer Summary');
   XLSX.utils.book_append_sheet(wb, ws3, 'Payment Mode Breakdown');
   XLSX.utils.book_append_sheet(wb, ws4, 'Revenue Mix');
