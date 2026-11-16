@@ -132,6 +132,8 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
   const [valueSearch, setValueSearch] = useState<string>('');
   const [valuePage, setValuePage] = useState<number>(0);
   const [valuePageSize, setValuePageSize] = useState<number>(15);
+  const [valueFrequencyFilter, setValueFrequencyFilter] = useState<string>('all');
+  const [valueCustomerTypeFilter, setValueCustomerTypeFilter] = useState<'all' | 'vip' | 'non_vip'>('all');
 
   // 4. Top 100 Repeat Customers Controls
   const [repeatLimit, setRepeatLimit] = useState<number>(100);
@@ -236,6 +238,16 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
     setValuePage(0);
   };
 
+  const handleValueFrequencyChange = (freq: string) => {
+    setValueFrequencyFilter(freq);
+    setValuePage(0);
+  };
+
+  const handleValueCustomerTypeChange = (type: 'all' | 'vip' | 'non_vip') => {
+    setValueCustomerTypeFilter(type);
+    setValuePage(0);
+  };
+
   const handleRepeatLimitChange = (lim: number) => {
     setRepeatLimit(lim);
     setRepeatPage(0);
@@ -263,10 +275,27 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
     const sourceList = department === 'sales'
       ? (data.allCustomersByValue || data.allCustomers || data.topCustomersByValue || [])
       : (data.topCustomersByValue || data.topCustomers || []);
-    let list = valueLimit === 0
-      ? sourceList.filter(c => c.totalOrders > 1)
-      : [...sourceList];
+    let list = [...sourceList];
 
+    // 1. Order Frequency Filter
+    if (valueFrequencyFilter !== 'all') {
+      if (valueFrequencyFilter === '11+') {
+        list = list.filter(c => c.totalOrders >= 11);
+      } else {
+        const targetFreq = Number(valueFrequencyFilter);
+        list = list.filter(c => c.totalOrders === targetFreq);
+      }
+    }
+
+    // 2. Customer Type Filter (VIP vs Non-VIP)
+    // Reuse existing Velmora VIP standard: totalOrders >= 5 is VIP
+    if (valueCustomerTypeFilter === 'vip') {
+      list = list.filter(c => c.totalOrders >= 5);
+    } else if (valueCustomerTypeFilter === 'non_vip') {
+      list = list.filter(c => c.totalOrders < 5);
+    }
+
+    // 3. Search Query Filter
     if (valueSearch.trim()) {
       const q = valueSearch.toLowerCase().trim();
       list = list.filter(c =>
@@ -278,6 +307,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
       );
     }
 
+    // 4. Sorting
     list.sort((a, b) => {
       let comparison = 0;
       if (valueSortField === 'totalValue') {
@@ -292,12 +322,13 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
       return valueSortAsc ? comparison : -comparison;
     });
 
+    // 5. Limit (Top 15, 25, 50, 100 or 0 for All Customers)
     const limited = valueLimit > 0 ? list.slice(0, valueLimit) : list;
     return limited.map((c, idx) => ({
       ...c,
       rank: idx + 1
     }));
-  }, [data, department, valueSearch, valueSortField, valueSortAsc, valueLimit]);
+  }, [data, department, valueFrequencyFilter, valueCustomerTypeFilter, valueSearch, valueSortField, valueSortAsc, valueLimit]);
 
   // -------------------------------------------------------------
   // Filtered & Sorted: Top / All Repeat Customers (2+ orders)
@@ -495,15 +526,13 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
 
   // CSV Export Helpers
   const handleExportValueCustomersCSV = () => {
-    const exportList = valueLimit === 0
-      ? processedValueCustomers.filter(c => c.totalOrders > 1)
-      : processedValueCustomers;
+    const exportList = processedValueCustomers;
     if (exportList.length === 0) {
       toast.error('No customers to export');
       return;
     }
     const csvContent = buildCustomerCSVContent(exportList, 'Repeat Count');
-    const prefix = valueLimit === 0 ? 'all_repeat_customers_by_value' : `top_${valueLimit}_customers_by_value`;
+    const prefix = valueLimit === 0 ? 'all_customers_by_value' : `top_${valueLimit}_customers_by_value`;
     downloadBlob(csvContent, `${prefix}_${new Date().toISOString().slice(0, 10)}.csv`);
     toast.success(`Exported ${exportList.length.toLocaleString('en-IN')} customers to CSV`);
   };
@@ -1424,16 +1453,14 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
             <div className="flex items-center gap-2">
               <DollarSign size={16} className="text-emerald-400" />
               <h3 className="text-sm sm:text-base font-bold text-white tracking-tight flex items-center gap-2">
-                <span>{valueLimit === 0 ? `All Repeat Customers by Value (${processedValueCustomers.length.toLocaleString('en-IN')})` : `Top ${valueLimit} Customers by Customer Value`}</span>
+                <span>{valueLimit === 0 ? `All Customers by Value (${processedValueCustomers.length.toLocaleString('en-IN')})` : `Top ${valueLimit} Customers by Customer Value`}</span>
                 <span className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-emerald-950/80 text-emerald-300 border border-emerald-700/50">
                   Value Ranked
                 </span>
               </h3>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              {valueLimit === 0
-                ? 'Displays all repeat customers (2+ valid orders) ranked by total net purchase value, highest to lowest.'
-                : 'Ranked by total net purchase value, highest to lowest. Displays high-value purchasers across valid orders.'}
+              Ranked by total net purchase value, highest to lowest. Displays high-value purchasers across valid orders.
             </p>
           </div>
 
@@ -1451,9 +1478,42 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
                   setValuePage(0);
                 }}
                 placeholder="Search name, phone, city..."
-                className="h-8 pl-8 pr-2.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 w-40 sm:w-52"
+                className="h-8 pl-8 pr-2.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 w-36 sm:w-48"
               />
             </div>
+
+            {/* Order Frequency Filter */}
+            <select
+              aria-label="Filter by order frequency"
+              value={valueFrequencyFilter}
+              onChange={e => handleValueFrequencyChange(e.target.value)}
+              className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer focus:outline-none focus:border-emerald-500"
+            >
+              <option value="all">All Orders</option>
+              <option value="1">1 Order</option>
+              <option value="2">2 Orders</option>
+              <option value="3">3 Orders</option>
+              <option value="4">4 Orders</option>
+              <option value="5">5 Orders</option>
+              <option value="6">6 Orders</option>
+              <option value="7">7 Orders</option>
+              <option value="8">8 Orders</option>
+              <option value="9">9 Orders</option>
+              <option value="10">10 Orders</option>
+              <option value="11+">11+ Orders</option>
+            </select>
+
+            {/* Customer Type / VIP Filter */}
+            <select
+              aria-label="Filter by customer type"
+              value={valueCustomerTypeFilter}
+              onChange={e => handleValueCustomerTypeChange(e.target.value as any)}
+              className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer focus:outline-none focus:border-emerald-500"
+            >
+              <option value="all">All Customers</option>
+              <option value="vip">VIP Customers</option>
+              <option value="non_vip">Non-VIP Customers</option>
+            </select>
 
             {/* Limit Selector: Top 15 / 25 / 50 / 100 */}
             <select
