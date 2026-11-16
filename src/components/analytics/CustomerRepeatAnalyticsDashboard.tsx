@@ -1448,28 +1448,30 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
       <div className="p-4 sm:p-5 rounded-2xl bg-[#0b1220] border border-slate-800 shadow-xl space-y-3.5">
         
         {/* Table Header & Controls Bar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
-          <div>
-            <div className="flex items-center gap-2">
-              <DollarSign size={16} className="text-emerald-400" />
-              <h3 className="text-sm sm:text-base font-bold text-white tracking-tight flex items-center gap-2">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 pb-3 border-b border-slate-800/80">
+          
+          {/* 1. Section Title and Description (Left) */}
+          <div className="shrink-0 min-w-0 max-w-full lg:max-w-[270px] xl:max-w-xs">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <DollarSign size={16} className="text-emerald-400 shrink-0" />
+              <h3 className="text-sm font-bold text-white tracking-tight flex items-center gap-1.5 whitespace-nowrap">
                 <span>{valueLimit === 0 ? `All Customers by Value (${processedValueCustomers.length.toLocaleString('en-IN')})` : `Top ${valueLimit} Customers by Customer Value`}</span>
-                <span className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-emerald-950/80 text-emerald-300 border border-emerald-700/50">
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-950/80 text-emerald-300 border border-emerald-700/50">
                   Value Ranked
                 </span>
               </h3>
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className="text-[11px] text-slate-400 mt-0.5 truncate" title="Ranked by total net purchase value, highest to lowest. Displays high-value purchasers across valid orders.">
               Ranked by total net purchase value, highest to lowest. Displays high-value purchasers across valid orders.
             </p>
           </div>
 
-          {/* Controls: Search, Limit (15/25/50/100), Sort, Mask, CSV Export */}
-          <div className="flex flex-wrap items-center gap-2">
+          {/* Controls Bar: Items 2 to 8 in single horizontal row */}
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap lg:flex-nowrap justify-start lg:justify-end min-w-0 flex-1">
             
-            {/* Search Input */}
-            <div className="relative">
-              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            {/* 2. Customer Search Field */}
+            <div className="relative shrink min-w-[100px] w-28 sm:w-32 xl:w-40">
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
                 value={valueSearch}
@@ -1477,17 +1479,17 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
                   setValueSearch(e.target.value);
                   setValuePage(0);
                 }}
-                placeholder="Search name, phone, city..."
-                className="h-8 pl-8 pr-2.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 w-36 sm:w-48"
+                placeholder="Search..."
+                className="h-8 w-full pl-7 pr-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
               />
             </div>
 
-            {/* Order Frequency Filter */}
+            {/* 3. Order Frequency Filter */}
             <select
               aria-label="Filter by order frequency"
               value={valueFrequencyFilter}
               onChange={e => handleValueFrequencyChange(e.target.value)}
-              className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer focus:outline-none focus:border-emerald-500"
+              className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer focus:outline-none focus:border-emerald-500 shrink-0"
             >
               <option value="all">All Orders</option>
               <option value="1">1 Order</option>
@@ -1503,56 +1505,56 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
               <option value="11+">11+ Orders</option>
             </select>
 
-            {/* Customer Type / VIP Filter */}
+            {/* 4. Customer Type Filter */}
             <select
               aria-label="Filter by customer type"
               value={valueCustomerTypeFilter}
               onChange={e => handleValueCustomerTypeChange(e.target.value as any)}
-              className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer focus:outline-none focus:border-emerald-500"
+              className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer focus:outline-none focus:border-emerald-500 shrink-0"
             >
               <option value="all">All Customers</option>
               <option value="vip">VIP Customers</option>
               <option value="non_vip">Non-VIP Customers</option>
             </select>
 
-            {/* Limit Selector: Top 15 / 25 / 50 / 100 */}
+            {/* 5. Top N Selector */}
             <select
               value={valueLimit}
               onChange={e => handleValueLimitChange(Number(e.target.value))}
-              className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer"
+              className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer focus:outline-none focus:border-emerald-500 shrink-0"
             >
               <option value={15}>Top 15</option>
               <option value={25}>Top 25</option>
               <option value={50}>Top 50</option>
               <option value={100}>Top 100</option>
-              {department === 'sales' && <option value={0}>All Customers (Overall)</option>}
+              {department === 'sales' && <option value={0}>Overall</option>}
             </select>
 
-            {/* Sort Field Selector */}
+            {/* 6. Sorting Selector */}
             <select
               value={valueSortField}
               onChange={e => setValueSortField(e.target.value as any)}
-              className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer"
+              className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer focus:outline-none focus:border-emerald-500 shrink-0"
             >
               <option value="totalValue">Sort: Spend</option>
               <option value="totalOrders">Sort: Orders</option>
               <option value="lastOrderDate">Sort: Recent</option>
             </select>
 
-            {/* Mask/Unmask Toggle */}
+            {/* 7. Mask / Unmask Button */}
             <button
               onClick={() => setShowMaskedPhone(prev => !prev)}
-              className="h-8 px-2.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-300 hover:text-white flex items-center gap-1.5 cursor-pointer transition-colors"
+              className="h-8 px-2.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-300 hover:text-white flex items-center gap-1.5 cursor-pointer transition-colors shrink-0 whitespace-nowrap"
               title={showMaskedPhone ? 'Click to show unmasked phone numbers' : 'Click to mask phone numbers'}
             >
               {showMaskedPhone ? <Eye size={12} /> : <EyeOff size={12} />}
-              <span className="hidden sm:inline">{showMaskedPhone ? 'Unmask' : 'Mask'}</span>
+              <span>{showMaskedPhone ? 'Unmask' : 'Mask'}</span>
             </button>
 
-            {/* Export CSV Button */}
+            {/* 8. Export CSV Button (extreme right) */}
             <button
               onClick={handleExportValueCustomersCSV}
-              className="h-8 px-3 rounded-lg bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-600/30 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
+              className="h-8 px-3 rounded-lg bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-600/30 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all shadow-sm shrink-0 whitespace-nowrap"
               title="Export Top Customers by Value to CSV"
             >
               <Download size={13} />
