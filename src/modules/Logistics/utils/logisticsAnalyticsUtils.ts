@@ -186,8 +186,11 @@ export function getCanonicalStatus(order: any): CanonicalLogisticsStatus {
   const isRto = 
     statusStr.includes('rto') || 
     statusStr.includes('return') || 
+    statusStr.includes('delivered to seller') ||
     rawStatusStr.includes('rto') || 
     rawStatusStr.includes('return') ||
+    rawStatusStr.includes('delivered_seller') ||
+    rawStatusStr.includes('delivered to seller') ||
     eventStr.includes('rto') ||
     eventStr.includes('return to origin') ||
     remarksStr.includes('rto') ||
@@ -200,6 +203,7 @@ export function getCanonicalStatus(order: any): CanonicalLogisticsStatus {
       statusStr === 'returned' ||
       statusStr.includes('returned to origin') ||
       rawStatusStr.includes('delivered to seller') || 
+      rawStatusStr.includes('delivered_seller') || 
       rawStatusStr.includes('returned_to_origin') ||
       rawStatusStr.includes('returned to origin') ||
       rawStatusStr === 'returned' ||
@@ -699,9 +703,16 @@ export interface CourierPerformanceSummary {
   delivered: number;
   rto: number;
   inTransit: number;
+  otherStatuses: number;
+  cancelled: number;
   deliveryRate: string;
   rtoRate: string;
   orders: any[];
+  deliveredOrders?: any[];
+  rtoOrders?: any[];
+  inTransitOrders?: any[];
+  otherOrders?: any[];
+  cancelledOrders?: any[];
 }
 
 export function normalizeCourierName(courierName?: string | null): string {
@@ -821,7 +832,21 @@ export function calculateCanonicalRtoMetrics(orders: any[], options?: { delivere
 
   const rtoOrders: any[] = [];
   const seenOrderIds = new Set<string>();
-  const courierMap = new Map<string, { courier: string; total: number; delivered: number; rto: number; inTransit: number; orders: any[] }>();
+  const courierMap = new Map<string, { 
+    courier: string; 
+    total: number; 
+    delivered: number; 
+    rto: number; 
+    inTransit: number; 
+    otherStatuses: number;
+    cancelled: number;
+    orders: any[];
+    deliveredOrders: any[];
+    rtoOrders: any[];
+    inTransitOrders: any[];
+    otherOrders: any[];
+    cancelledOrders: any[];
+  }>();
 
   orders.forEach(order => {
     const rawAmt = parseOrderAmount(order.amount ?? order.totalAmount ?? order.price ?? order.order_total) || 0;
@@ -833,28 +858,44 @@ export function calculateCanonicalRtoMetrics(orders: any[], options?: { delivere
     }
 
     const canonical = getCanonicalStatus(order);
-
-    // 1. Exclude cancelled orders from concluded metrics
-    if (canonical === 'Cancelled') {
-      cancelledCount++;
-      cancelledValue += rawAmt;
-      cancelledOrders.push(order);
-      return;
-    }
-
     const courier = normalizeCourierName(order.courier || order.extra_data?.courier);
     if (!courierMap.has(courier)) {
-      courierMap.set(courier, { courier, total: 0, delivered: 0, rto: 0, inTransit: 0, orders: [] });
+      courierMap.set(courier, { 
+        courier, 
+        total: 0, 
+        delivered: 0, 
+        rto: 0, 
+        inTransit: 0, 
+        otherStatuses: 0,
+        cancelled: 0,
+        orders: [],
+        deliveredOrders: [],
+        rtoOrders: [],
+        inTransitOrders: [],
+        otherOrders: [],
+        cancelledOrders: []
+      });
     }
     const cEntry = courierMap.get(courier)!;
     cEntry.total++;
     cEntry.orders.push(order);
+
+    // 1. Handle cancelled orders (tracked under courier reconciliation, excluded from delivery/RTO rates)
+    if (canonical === 'Cancelled') {
+      cancelledCount++;
+      cancelledValue += rawAmt;
+      cancelledOrders.push(order);
+      cEntry.cancelled++;
+      cEntry.cancelledOrders.push(order);
+      return;
+    }
 
     if (canonical === 'Delivered') {
       deliveredCount++;
       totalDeliveredValue += rawAmt;
       deliveredOrders.push(order);
       cEntry.delivered++;
+      cEntry.deliveredOrders.push(order);
 
       const cat = classifyOrderPaymentType(order);
       if (cat === 'COD') {
@@ -879,6 +920,7 @@ export function calculateCanonicalRtoMetrics(orders: any[], options?: { delivere
       totalRtoValue += rawAmt;
       rtoOrders.push(order);
       cEntry.rto++;
+      cEntry.rtoOrders.push(order);
 
       if (canonical === 'RTO Initiated') rtoInitiated++;
       else if (canonical === 'RTO In Transit') rtoInTransit++;
@@ -912,6 +954,10 @@ export function calculateCanonicalRtoMetrics(orders: any[], options?: { delivere
       inTransitValue += rawAmt;
       inTransitOrders.push(order);
       cEntry.inTransit++;
+      cEntry.inTransitOrders.push(order);
+    } else {
+      cEntry.otherStatuses++;
+      cEntry.otherOrders.push(order);
     }
   });
 
@@ -922,6 +968,7 @@ export function calculateCanonicalRtoMetrics(orders: any[], options?: { delivere
   const deliveryRate = concluded > 0 ? ((deliveredCount / concluded) * 100).toFixed(1) : '0.0';
 
   const courierPerformance: CourierPerformanceSummary[] = Array.from(courierMap.values()).map(c => {
+    const activeTotal = c.total - c.cancelled;
     const conc = c.delivered + c.rto;
     return {
       courier: c.courier,
@@ -929,9 +976,20 @@ export function calculateCanonicalRtoMetrics(orders: any[], options?: { delivere
       delivered: c.delivered,
       rto: c.rto,
       inTransit: c.inTransit,
-      deliveryRate: conc > 0 ? `${((c.delivered / conc) * 100).toFixed(1)}%` : '0.0%',
-      rtoRate: conc > 0 ? `${((c.rto / conc) * 100).toFixed(1)}%` : '0.0%',
-      orders: c.orders
+      otherStatuses: c.otherStatuses,
+      cancelled: c.cancelled,
+      deliveryRate: conc > 0 
+        ? `${((c.delivered / conc) * 100).toFixed(1)}%` 
+        : (activeTotal > 0 ? `${((c.delivered / activeTotal) * 100).toFixed(1)}%` : '0.0%'),
+      rtoRate: conc > 0 
+        ? `${((c.rto / conc) * 100).toFixed(1)}%` 
+        : (activeTotal > 0 ? `${((c.rto / activeTotal) * 100).toFixed(1)}%` : '0.0%'),
+      orders: c.orders,
+      deliveredOrders: c.deliveredOrders,
+      rtoOrders: c.rtoOrders,
+      inTransitOrders: c.inTransitOrders,
+      otherOrders: c.otherOrders,
+      cancelledOrders: c.cancelledOrders
     };
   }).sort((a, b) => b.total - a.total);
 

@@ -1790,15 +1790,31 @@ export const WebsiteAnalytics: React.FC = () => {
         {/* COURIER PERFORMANCE BREAKDOWN */}
         <WebsiteCourierPerformanceSection
           courierPerformance={rtoMetrics.courierPerformance}
+          allOrders={filteredOrders}
           onViewCourierOrders={(courierName, orders, filterStatus) => {
             let list = orders;
             if (filterStatus === 'DELIVERED') {
               list = list.filter(o => getCanonicalStatus(o) === 'Delivered');
             } else if (filterStatus === 'RTO') {
               list = list.filter(o => getCanonicalStatus(o).includes('RTO'));
+            } else if (filterStatus === 'IN_TRANSIT') {
+              list = list.filter(o => {
+                const s = getCanonicalStatus(o);
+                return s === 'In Transit' || s === 'Out for Delivery';
+              });
+            } else if (filterStatus === 'OTHER') {
+              list = list.filter(o => {
+                const s = getCanonicalStatus(o);
+                return s !== 'Delivered' && !s.includes('RTO') && s !== 'In Transit' && s !== 'Out for Delivery' && s !== 'Cancelled';
+              });
+            } else if (filterStatus === 'CANCELLED') {
+              list = list.filter(o => getCanonicalStatus(o) === 'Cancelled');
             }
-            const label = filterStatus && filterStatus !== 'ALL'
-              ? `${courierName} – ${filterStatus === 'DELIVERED' ? 'Delivered' : 'RTO'} Shipments`
+            const statusLabel = filterStatus && filterStatus !== 'ALL'
+              ? (filterStatus === 'DELIVERED' ? 'Delivered' : filterStatus === 'RTO' ? 'RTO' : filterStatus === 'IN_TRANSIT' ? 'In Transit' : filterStatus === 'OTHER' ? 'Other Statuses' : 'Cancelled')
+              : '';
+            const label = statusLabel
+              ? `${courierName} – ${statusLabel} Records`
               : `${courierName} Shipments`;
             handleOpenOrdersFullPage(label, list);
           }}

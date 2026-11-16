@@ -967,46 +967,122 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
   enhanceWorksheet(ws8, 0, true);
 
   // =========================================================================
-  // SHEET 10: Courier Performance
+  // =========================================================================
+  // SHEET 10: Courier Reconciliation & Performance Breakdown
   // =========================================================================
   const courierPerfList = rtoMetrics.courierPerformance || [];
+  const cancelledOrdersList = rtoMetrics.cancelledOrders || orders.filter(o => getCanonicalStatus(o) === 'Cancelled');
+  const activeOrdersCount = orders.length - cancelledOrdersList.length;
 
-  const s10SummaryHeaders = [
-    'Courier Name',
-    'Total Shipments',
-    'Delivered Count',
-    'RTO Count',
-    'In Transit Count',
-    'Delivery Rate (%)',
-    'RTO Rate (%)'
-  ];
+  let totalOtherStatuses = 0;
+  courierPerfList.forEach(c => {
+    totalOtherStatuses += c.otherStatuses || 0;
+  });
 
-  const s10SummaryRows: (string | number)[][] = [
-    ['COURIER PERFORMANCE BREAKDOWN'],
+  // Count missing AWB and unknown courier orders
+  let missingAwbCount = 0;
+  let unknownCourierCount = 0;
+  orders.forEach(o => {
+    const canonical = getCanonicalStatus(o);
+    if (canonical === 'Cancelled') return;
+    const awb = (o.awb_number || (o as any).extra_data?.awb_number || '').trim();
+    const cour = (o.courier || (o as any).extra_data?.courier || '').trim();
+    if (!awb) missingAwbCount++;
+    if (!cour || cour.toLowerCase().includes('unknown') || cour.toLowerCase().includes('not available')) unknownCourierCount++;
+  });
+  const reconciledRecordsCount = orders.length - unknownCourierCount - cancelledOrdersList.length;
+
+  const s10ReconRows: (string | number)[][] = [
+    ['VELMORA - COURIER RECONCILIATION & PERFORMANCE'],
     ['Report Period', `${formatExcelDate(startDate)} to ${formatExcelDate(endDate)}`, 'Date Range (DD-MMM-YYYY)'],
     ['Generated On', new Date().toLocaleString('en-IN'), 'Timestamp'],
     [],
-    ['SECTION A - COURIER SUMMARY'],
-    s10SummaryHeaders,
+    ['SECTION A - EXECUTIVE RECONCILIATION SUMMARY'],
+    ['Metric Name', 'Value', 'Unit / Detail'],
+    ['Total Website Orders', orders.length, 'Total orders recorded in sales dataset for period'],
+    ['Active Fulfillable Shipments', activeOrdersCount, 'Orders requiring carrier fulfillment (excluding cancelled)'],
+    ['Cancelled Orders (Pre-Dispatch)', cancelledOrdersList.length, 'Orders cancelled prior to dispatch; excluded from carrier SLAs'],
+    ['Reconciled with Carrier Manifest', reconciledRecordsCount, 'Shipments linked to verified courier partner reports'],
+    ['Unmatched / Awaiting Tracking Report', unknownCourierCount, 'Orders lacking uploaded carrier tracking reports'],
+    ['Missing AWB Tracking Numbers', missingAwbCount, 'Orders without waybill numbers assigned'],
+    ['Delivered Shipments', totalDeliveredOrders, 'Orders verified as Delivered by carrier'],
+    ['RTO Returns', totalRtoOrders, 'Orders returned to origin / delivered to seller'],
+    ['In Transit Shipments', rtoMetrics.inTransitCount, 'Shipments actively in carrier transit'],
+    ['Other Statuses', totalOtherStatuses, 'Shipments in pickup pending, out for delivery, or attempt stages'],
+    ['Carrier Delivery Rate', `${deliveryRate}%`, '% of concluded carrier shipments'],
+    ['Carrier RTO Return Rate', `${rtoRate}%`, '% of concluded carrier shipments'],
+    [],
+    ['SECTION B - CARRIER PERFORMANCE BREAKDOWN'],
+    [
+      'Courier Partner',
+      'Total Orders',
+      'Delivered',
+      'RTO',
+      'In Transit',
+      'Other Statuses',
+      'Cancelled',
+      'Delivery Rate (%)',
+      'RTO Rate (%)'
+    ],
     ...courierPerfList.map(c => [
       c.courier,
       c.total,
       c.delivered,
       c.rto,
       c.inTransit,
+      c.otherStatuses || 0,
+      c.cancelled || 0,
       c.deliveryRate,
       c.rtoRate
     ]),
     [
-      'Total',
+      'Total Reconciled',
       orders.length,
       totalDeliveredOrders,
       totalRtoOrders,
       rtoMetrics.inTransitCount,
-      deliveryRate,
-      rtoRate
+      totalOtherStatuses,
+      cancelledOrdersList.length,
+      `${deliveryRate}%`,
+      `${rtoRate}%`
     ]
   ];
+
+  // Section C: Cancelled / Non-Fulfillable Orders (Exact 5 missing records)
+  const s10CancelledHeaders = [
+    'S.No',
+    'Order ID',
+    'Order Date',
+    'Customer Name',
+    'Phone',
+    'City',
+    'State',
+    'Order Value (₹)',
+    'Carrier',
+    'AWB Number',
+    'Reconciliation Outcome / Exclusion Reason'
+  ];
+
+  const s10CancelledRows: (string | number)[][] = cancelledOrdersList.map((o, idx) => {
+    const rawCourier = o.courier || (o as any).extra_data?.courier;
+    const awb = o.awb_number || (o as any).extra_data?.awb_number || '-';
+    const val = Number(Number(o.price || 0).toFixed(2));
+    const reason = (o as any).extra_data?.cancellation_reason || (o as any).cancellation?.reason || 'Order cancelled pre-fulfillment; excluded from delivery SLA';
+
+    return [
+      idx + 1,
+      o.order_id || o.id,
+      formatExcelDate(o.order_date),
+      o.customer_name || 'Customer',
+      o.phone ? String(o.phone) : '-',
+      normalizeCityName(o.city) || 'Unspecified',
+      normalizeStateName(o.state) || 'Unspecified',
+      val,
+      rawCourier || 'None Assigned',
+      awb,
+      reason
+    ];
+  });
 
   const s10ShipmentHeaders = [
     'S.No',
@@ -1016,9 +1092,9 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
     'Phone',
     'City',
     'State',
-    'Courier',
+    'Courier Partner',
     'AWB Number',
-    'Shipment Status',
+    'Carrier Status',
     'Canonical Status',
     'Payment Mode',
     'Order Value (₹)'
@@ -1050,22 +1126,103 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
   });
 
   const s10Rows: (string | number)[][] = [
-    ...s10SummaryRows,
+    ...s10ReconRows,
     [],
-    ['SECTION B - SHIPMENT-LEVEL COURIER RECORDS'],
+    ['SECTION C - CANCELLED ORDERS & EXCLUSION RECONCILIATION'],
+    s10CancelledHeaders,
+    ...(s10CancelledRows.length > 0 ? s10CancelledRows : [['-', '-', '-', '-', '-', '-', '-', 0, '-', '-', 'No cancelled orders in selected period']]),
+    [],
+    ['SECTION D - SHIPMENT-LEVEL COURIER RECORDS'],
     s10ShipmentHeaders,
     ...s10ShipmentRows
   ];
 
   const ws10 = XLSX.utils.aoa_to_sheet(s10Rows);
-  const s10HeaderRowIndex = s10SummaryRows.length + 2;
+  const s10HeaderRowIndex = 5;
   enhanceWorksheet(ws10, s10HeaderRowIndex, true, {
     s: { r: s10HeaderRowIndex, c: 0 },
-    e: { r: s10Rows.length - 1, c: s10ShipmentHeaders.length - 1 }
+    e: { r: s10Rows.length - 1, c: Math.max(s10ShipmentHeaders.length - 1, 10) }
   });
 
   // =========================================================================
-  // Assemble Workbook & Download (Exact 10 Sheets Order)
+  // SHEET 11: Unknown Records Detail (Actionable Missing Courier Audit)
+  // =========================================================================
+  const unknownOrdersList = orders.filter(o => {
+    const canonical = getCanonicalStatus(o);
+    if (canonical === 'Cancelled') return false;
+    const cour = (o.courier || (o as any).extra_data?.courier || '').trim();
+    const awb = (o.awb_number || (o as any).extra_data?.awb_number || '').trim();
+    return !cour || !awb || cour.toLowerCase().includes('unknown') || cour.toLowerCase().includes('not available');
+  });
+
+  const s11Headers = [
+    'S.No',
+    'Order ID',
+    'Order Date',
+    'Customer Name',
+    'Phone',
+    'City',
+    'State',
+    'Payment Mode',
+    'Order Value (₹)',
+    'Fulfillment Status',
+    'Dispatch Status',
+    'AWB Number',
+    'Courier Partner',
+    'Diagnostic Classification Reason'
+  ];
+
+  const s11DataRows: (string | number)[][] = unknownOrdersList.map((o, idx) => {
+    const awb = (o.awb_number || (o as any).extra_data?.awb_number || '').trim();
+    const cour = (o.courier || (o as any).extra_data?.courier || '').trim();
+    const fStatus = (o as any).fulfillment_status || (o as any).extra_data?.fulfillment_status || 'fulfilled';
+    const dStatus = o.dispatch_status || 'DELIVERED';
+    const val = Number(Number(o.price || 0).toFixed(2));
+
+    let reason = 'No carrier tracking report uploaded for this order; awaiting tracking import';
+    if (!awb && cour) {
+      reason = `Carrier assigned (${cour}) but no waybill tracking number generated`;
+    } else if (awb && !cour) {
+      reason = `Waybill (${awb}) present but carrier name is unassigned or unrecognized`;
+    }
+
+    return [
+      idx + 1,
+      o.order_id || o.id,
+      formatExcelDate(o.order_date),
+      o.customer_name || 'Customer',
+      o.phone ? String(o.phone) : '-',
+      normalizeCityName(o.city) || 'Unspecified',
+      normalizeStateName(o.state) || 'Unspecified',
+      o.payment_mode || 'UNKNOWN',
+      val,
+      fStatus,
+      dStatus,
+      awb || 'None',
+      cour || 'Unknown / Not Available',
+      reason
+    ];
+  });
+
+  const s11Rows: (string | number)[][] = [
+    ['VELMORA - UNKNOWN & MISSING COURIER RECORDS (ACTIONABLE AUDIT)'],
+    ['Report Period', `${formatExcelDate(startDate)} to ${formatExcelDate(endDate)}`, 'Date Range (DD-MMM-YYYY)'],
+    ['Generated On', new Date().toLocaleString('en-IN'), 'Timestamp'],
+    ['Total Unknown / Unlinked Records', unknownOrdersList.length, 'Orders requiring carrier file upload or waybill assignment'],
+    [],
+    s11Headers,
+    ...(s11DataRows.length > 0 ? s11DataRows : [['-', '-', '-', '-', '-', '-', '-', '-', 0, '-', '-', '-', '-', 'All orders in period have verified courier and waybill records']])
+  ];
+
+  const ws11 = XLSX.utils.aoa_to_sheet(s11Rows);
+  const s11HeaderRowIndex = 5;
+  enhanceWorksheet(ws11, s11HeaderRowIndex, true, {
+    s: { r: s11HeaderRowIndex, c: 0 },
+    e: { r: s11Rows.length - 1, c: s11Headers.length - 1 }
+  });
+
+  // =========================================================================
+  // Assemble Workbook & Download (Exact 11 Sheets Order)
   // =========================================================================
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws1, 'Website Sales Analytics');
@@ -1077,7 +1234,8 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
   XLSX.utils.book_append_sheet(wb, ws6, 'Top Performing Combos');
   XLSX.utils.book_append_sheet(wb, ws7, 'Customer Details');
   XLSX.utils.book_append_sheet(wb, ws8, 'Order Details');
-  XLSX.utils.book_append_sheet(wb, ws10, 'Courier Performance');
+  XLSX.utils.book_append_sheet(wb, ws10, 'Courier Reconciliation');
+  XLSX.utils.book_append_sheet(wb, ws11, 'Unknown Records');
 
   const filename = startDate === endDate
     ? `Website_Sales_Analytics_${startDate}.xlsx`
