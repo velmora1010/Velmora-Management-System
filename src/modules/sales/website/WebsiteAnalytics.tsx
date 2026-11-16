@@ -20,6 +20,8 @@ import {
   DollarSign,
   LayoutGrid,
   Check,
+  CheckCircle2,
+  TrendingUp,
   ChevronLeft,
   ChevronRight,
   X,
