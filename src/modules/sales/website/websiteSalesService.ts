@@ -712,7 +712,9 @@ export class WebsiteSalesService {
         awb_number: logRec?.awbNumber || extra.awb_number || o.awb_number || '',
         courier: logRec?.courier || extra.courier || o.courier || '',
         shipment_status: logRec?.status || logRec?.stage || (logRec?.awbNumber || extra.awb_number || o.awb_number ? 'Dispatched' : (o.dispatch_status === 'DELIVERED' ? 'Delivered' : 'Pending Manifest')),
-        raw_status: logRec?.rawStatus || (logRec as any)?.raw_status || extra.raw_status || '',
+        raw_status: logRec?.rawStatus || (logRec as any)?.raw_status || extra.delhivery_current_status || extra.raw_status || '',
+        delhivery_remarks: extra.delhivery_remarks || '',
+        extra_data: extra,
         fulfilled_date: extra.fulfilled_date || o.dispatch_date || '',
         order_status: o.order_status,
         cancellation: extra.cancellation || (o.order_status === 'CANCELLED' ? {
@@ -1481,6 +1483,9 @@ export class WebsiteSalesService {
         awb_number: awb,
         courier: courier,
         shipment_status: shipmentStatus,
+        raw_status: extra.delhivery_current_status || extra.raw_status || '',
+        delhivery_remarks: extra.delhivery_remarks || '',
+        extra_data: extra,
         fulfilled_date: extra.fulfilled_date || o.dispatch_date || '',
         order_status: o.order_status,
         cancellation: extra.cancellation || (o.order_status === 'CANCELLED' ? {

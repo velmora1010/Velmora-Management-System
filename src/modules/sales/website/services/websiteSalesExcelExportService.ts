@@ -4,6 +4,7 @@ import { calculateWebsitePaymentSummary, normalizeProductGroupingKey, resolveCan
 import {
   calculateCanonicalRtoMetrics,
   getCanonicalStatus,
+  normalizeCourierName,
   isCodOrder,
   isPrepaidOrder
 } from '../../../Logistics/utils/logisticsAnalyticsUtils';
@@ -136,6 +137,18 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
   const totalUnits = orders.reduce((sum, o) => sum + (Number(o.total_quantity) || 0), 0);
   const avgOrderValue = totalOrdersCount > 0 ? Math.round(totalRevenue / totalOrdersCount) : 0;
 
+  // Cancelled orders calculation for reconciliation
+  const cancelledOrders = orders.filter(o => !validOrders.includes(o));
+  const cancelledOrdersCount = cancelledOrders.length;
+  const cancelledRevenue = cancelledOrders.reduce((sum, o) => sum + (Number(o.price) || 0), 0);
+  const cancelledUnits = cancelledOrders.reduce((sum, o) => sum + (Number(o.total_quantity) || 0), 0);
+
+  // Net valid totals (reconciles with Customer Details and Top Products)
+  const netValidOrdersCount = validOrders.length;
+  const netValidRevenue = validOrders.reduce((sum, o) => sum + (Number(o.price) || 0), 0);
+  const netValidUnits = validOrders.reduce((sum, o) => sum + (Number(o.total_quantity) || 0), 0);
+  const netAov = netValidOrdersCount > 0 ? Math.round(netValidRevenue / netValidOrdersCount) : 0;
+
   const paymentSummary = calculateWebsitePaymentSummary(orders);
   const {
     prepaidCount,
@@ -156,6 +169,12 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
   const rtoPrepaidValue = rtoMetrics.rtoPrepaidValue;
   const rtoOrders = rtoMetrics.rtoOrders || [];
 
+  const totalDeliveredOrders = rtoMetrics.totalDeliveredOrders;
+  const totalDeliveredValue = rtoMetrics.totalDeliveredValue;
+  const deliveryRate = `${rtoMetrics.deliveryRate}`;
+  const deliveredCodValue = rtoMetrics.deliveredCodValue;
+  const deliveredPrepaidValue = rtoMetrics.deliveredPrepaidValue;
+
   const s1Rows: (string | number)[][] = [
     ['WEBSITE SALES ANALYTICS SUMMARY'],
     ['Report Period', `${formatExcelDate(startDate)} to ${formatExcelDate(endDate)}`, 'Date Range (DD-MMM-YYYY)'],
@@ -164,10 +183,27 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
     ['METRIC NAME', 'VALUE', 'UNIT / DETAIL'],
     ['Selected Start Date', formatExcelDate(startDate), 'DD-MMM-YYYY'],
     ['Selected End Date', formatExcelDate(endDate), 'DD-MMM-YYYY'],
-    ['Total Orders', totalOrdersCount, 'Orders in Period'],
-    ['Total Revenue', Math.round(totalRevenue), '₹ (INR) Gross Placed Value'],
-    ['Total Units', totalUnits, 'Cumulative Items Ordered'],
+    ['Total Placed Orders (Gross)', totalOrdersCount, 'Orders Placed in Period (Matches Order Details)'],
+    ['Total Placed Revenue (Gross)', Math.round(totalRevenue), '₹ (INR) Gross Placed Value (Matches Order Details)'],
+    ['Total Placed Units (Gross)', totalUnits, 'Cumulative Items Ordered'],
     ['Average Order Value (AOV)', avgOrderValue, '₹ per Order Average Ticket'],
+    ['Cancelled / Voided Orders', cancelledOrdersCount, 'Excluded from Customer & Product Analytics'],
+    ['Cancelled Order Value', Math.round(cancelledRevenue), '₹ (INR) Cancelled / Refunded Value'],
+    ['Cancelled Units', cancelledUnits, 'Items in Cancelled Orders'],
+    ['Net Valid Orders', netValidOrdersCount, 'Valid Purchases (Matches Customer Details)'],
+    ['Net Valid Revenue', Math.round(netValidRevenue), '₹ (INR) Net Spend (Matches Customer Details)'],
+    ['Net Valid Units', netValidUnits, 'Valid Units Sold (Matches Product Details)'],
+    ['Delivered Orders', totalDeliveredOrders, 'Confirmed Delivered Shipments'],
+    ['Delivered Order Value', Math.round(totalDeliveredValue), '₹ (INR) Confirmed Delivered Value'],
+    ['Delivery Rate', deliveryRate, '% of Concluded Shipments'],
+    ['Delivered COD Value', Math.round(deliveredCodValue), '₹ Pure COD Delivered Value'],
+    ['Delivered Prepaid Value', Math.round(deliveredPrepaidValue), '₹ Prepaid & Partial COD Delivered Value'],
+    ['Total RTO Orders', totalRtoOrders, 'Returned to Origin Shipments'],
+    ['Total RTO Value', Math.round(totalRtoValue), '₹ (INR) Gross Returned Order Value'],
+    ['RTO Rate', rtoRate, '% of Concluded Shipments'],
+    ['RTO Average Value', rtoAvgValue, '₹ per RTO Order Average Ticket'],
+    ['RTO COD Value', Math.round(rtoCodValue), '₹ Pure COD Returned Value'],
+    ['RTO Prepaid Value', Math.round(rtoPrepaidValue), '₹ Prepaid & Partial COD Returned Value'],
     ['Prepaid Orders', prepaidCount, 'Orders with Full Advance Payment'],
     ['Prepaid Order Value', Math.round(prepaidRevenue), '₹ (INR) Received'],
     ['Partial COD Orders', partialCodCount, 'Orders with Advance + Pending Balance'],
@@ -907,7 +943,7 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
       const extra = (o as any).extra_data || {};
       const financialStatus = o.financial_status || extra.financial_status || (o.payment_mode === 'PREPAID' ? 'paid' : 'pending');
       const fulfillmentStatus = o.fulfillment_status || extra.fulfillment_status || o.dispatch_status || 'unfulfilled';
-      const orderPrice = Math.round(Number(o.price) || 0);
+      const orderPrice = Number(Number(o.price || 0).toFixed(2));
 
       return [
         o.order_id || o.id,
@@ -931,11 +967,109 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
   enhanceWorksheet(ws8, 0, true);
 
   // =========================================================================
-  // Assemble Workbook & Download (Exact 9 Sheets Order)
+  // SHEET 10: Courier Performance
+  // =========================================================================
+  const courierPerfList = rtoMetrics.courierPerformance || [];
+
+  const s10SummaryHeaders = [
+    'Courier Name',
+    'Total Shipments',
+    'Delivered Count',
+    'RTO Count',
+    'In Transit Count',
+    'Delivery Rate (%)',
+    'RTO Rate (%)'
+  ];
+
+  const s10SummaryRows: (string | number)[][] = [
+    ['COURIER PERFORMANCE BREAKDOWN'],
+    ['Report Period', `${formatExcelDate(startDate)} to ${formatExcelDate(endDate)}`, 'Date Range (DD-MMM-YYYY)'],
+    ['Generated On', new Date().toLocaleString('en-IN'), 'Timestamp'],
+    [],
+    ['SECTION A - COURIER SUMMARY'],
+    s10SummaryHeaders,
+    ...courierPerfList.map(c => [
+      c.courier,
+      c.total,
+      c.delivered,
+      c.rto,
+      c.inTransit,
+      c.deliveryRate,
+      c.rtoRate
+    ]),
+    [
+      'Total',
+      orders.length,
+      totalDeliveredOrders,
+      totalRtoOrders,
+      rtoMetrics.inTransitCount,
+      deliveryRate,
+      rtoRate
+    ]
+  ];
+
+  const s10ShipmentHeaders = [
+    'S.No',
+    'Order ID',
+    'Order Date',
+    'Customer Name',
+    'Phone',
+    'City',
+    'State',
+    'Courier',
+    'AWB Number',
+    'Shipment Status',
+    'Canonical Status',
+    'Payment Mode',
+    'Order Value (₹)'
+  ];
+
+  const s10ShipmentRows: (string | number)[][] = orders.map((o, idx) => {
+    const rawCourier = o.courier || (o as any).extra_data?.courier;
+    const normCourier = normalizeCourierName(rawCourier);
+    const awb = o.awb_number || (o as any).extra_data?.awb_number || '-';
+    const canonical = getCanonicalStatus(o);
+    const rawSt = (o as any).shipment_status || (o as any).raw_status || (o as any).extra_data?.delhivery_current_status || canonical;
+    const val = Number(Number(o.price || 0).toFixed(2));
+
+    return [
+      idx + 1,
+      o.order_id || o.id,
+      formatExcelDate(o.order_date),
+      o.customer_name || 'Customer',
+      o.phone ? String(o.phone) : '-',
+      normalizeCityName(o.city) || 'Unspecified',
+      normalizeStateName(o.state) || 'Unspecified',
+      normCourier,
+      awb || '-',
+      rawSt || '-',
+      canonical,
+      o.payment_mode || 'UNKNOWN',
+      val
+    ];
+  });
+
+  const s10Rows: (string | number)[][] = [
+    ...s10SummaryRows,
+    [],
+    ['SECTION B - SHIPMENT-LEVEL COURIER RECORDS'],
+    s10ShipmentHeaders,
+    ...s10ShipmentRows
+  ];
+
+  const ws10 = XLSX.utils.aoa_to_sheet(s10Rows);
+  const s10HeaderRowIndex = s10SummaryRows.length + 2;
+  enhanceWorksheet(ws10, s10HeaderRowIndex, true, {
+    s: { r: s10HeaderRowIndex, c: 0 },
+    e: { r: s10Rows.length - 1, c: s10ShipmentHeaders.length - 1 }
+  });
+
+  // =========================================================================
+  // Assemble Workbook & Download (Exact 10 Sheets Order)
   // =========================================================================
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws1, 'Website Sales Analytics');
-  XLSX.utils.book_append_sheet(wb, wsRto, 'RTO Summary & Details');
+  XLSX.utils.book_append_sheet(wb, wsRto, 'RTO Summary & Customer Details');
   XLSX.utils.book_append_sheet(wb, ws2, 'Repeat Customer Summary');
   XLSX.utils.book_append_sheet(wb, ws3, 'Payment Mode Breakdown');
   XLSX.utils.book_append_sheet(wb, ws4, 'Revenue Mix');
@@ -943,6 +1077,7 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
   XLSX.utils.book_append_sheet(wb, ws6, 'Top Performing Combos');
   XLSX.utils.book_append_sheet(wb, ws7, 'Customer Details');
   XLSX.utils.book_append_sheet(wb, ws8, 'Order Details');
+  XLSX.utils.book_append_sheet(wb, ws10, 'Courier Performance');
 
   const filename = startDate === endDate
     ? `Website_Sales_Analytics_${startDate}.xlsx`

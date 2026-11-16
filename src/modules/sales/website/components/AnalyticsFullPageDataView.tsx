@@ -24,6 +24,7 @@ import { AnalyticsProductCell } from './AnalyticsProductCell';
 import { OrderDetailsModal } from './OrderDetailsModal';
 import { resolveCanonicalLocation } from '../websiteSalesUtils';
 import { websiteSalesService } from '../websiteSalesService';
+import { getCanonicalStatus } from '../../../Logistics/utils/logisticsAnalyticsUtils';
 import toast from 'react-hot-toast';
 
 export interface CustomerPurchaseProfile {
@@ -93,6 +94,7 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
 
   // Filter-specific dropdowns
   const [filterPaymentMode, setFilterPaymentMode] = useState<string>('ALL');
+  const [filterShipmentOutcome, setFilterShipmentOutcome] = useState<'ALL' | 'DELIVERED' | 'RTO'>('ALL');
   const [filterFrequencyGroup, setFilterFrequencyGroup] = useState<string>('ALL');
   const [filterCourier, setFilterCourier] = useState<string>('ALL');
   const [filterShipmentStatus, setFilterShipmentStatus] = useState<string>('ALL');
@@ -100,7 +102,7 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
   // Reset page when search or filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, rowsPerPage, filterPaymentMode, filterFrequencyGroup, filterCourier, filterShipmentStatus]);
+  }, [searchQuery, rowsPerPage, filterPaymentMode, filterShipmentOutcome, filterFrequencyGroup, filterCourier, filterShipmentStatus]);
 
   // Handle order deletion
   const handleDeleteOrder = async (order: WebsiteConsolidatedOrder) => {
@@ -123,6 +125,12 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
 
     if (filterPaymentMode !== 'ALL') {
       list = list.filter(o => o.payment_mode === filterPaymentMode);
+    }
+
+    if (filterShipmentOutcome === 'DELIVERED') {
+      list = list.filter(o => getCanonicalStatus(o) === 'Delivered');
+    } else if (filterShipmentOutcome === 'RTO') {
+      list = list.filter(o => getCanonicalStatus(o).includes('RTO'));
     }
 
     if (searchQuery.trim()) {
@@ -156,7 +164,7 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
     }
 
     return list;
-  }, [viewType, orders, locallyDeletedIds, filterPaymentMode, searchQuery, sortField, sortOrder]);
+  }, [viewType, orders, locallyDeletedIds, filterPaymentMode, filterShipmentOutcome, searchQuery, sortField, sortOrder]);
 
   // 2. Process Customers View Dataset
   const filteredCustomers = useMemo(() => {
@@ -541,16 +549,28 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
         {/* Secondary Context Filters */}
         <div className="flex items-center gap-2">
           {viewType === 'orders' && (
-            <select
-              value={filterPaymentMode}
-              onChange={e => setFilterPaymentMode(e.target.value)}
-              className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 outline-none focus:border-purple-500 cursor-pointer"
-            >
-              <option value="ALL">All Payment Modes</option>
-              <option value="PREPAID">Prepaid</option>
-              <option value="PARTIAL COD">Partial COD</option>
-              <option value="COD">Full COD</option>
-            </select>
+            <>
+              <select
+                value={filterShipmentOutcome}
+                onChange={e => setFilterShipmentOutcome(e.target.value as any)}
+                className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 outline-none focus:border-purple-500 cursor-pointer"
+              >
+                <option value="ALL">All Outcomes</option>
+                <option value="DELIVERED">Delivered Only</option>
+                <option value="RTO">RTO Only</option>
+              </select>
+
+              <select
+                value={filterPaymentMode}
+                onChange={e => setFilterPaymentMode(e.target.value)}
+                className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 outline-none focus:border-purple-500 cursor-pointer"
+              >
+                <option value="ALL">All Payment Modes</option>
+                <option value="PREPAID">Prepaid</option>
+                <option value="PARTIAL COD">Partial COD</option>
+                <option value="COD">Full COD</option>
+              </select>
+            </>
           )}
 
           {viewType === 'customers' && (
