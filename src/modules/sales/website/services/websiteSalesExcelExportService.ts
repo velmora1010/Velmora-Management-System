@@ -1,7 +1,12 @@
 import * as XLSX from 'xlsx';
 import type { WebsiteConsolidatedOrder, WebsiteOrderItem } from '../types';
 import { calculateWebsitePaymentSummary, normalizeProductGroupingKey, resolveCanonicalProductName } from '../websiteSalesUtils';
-import { calculateCanonicalRtoMetrics } from '../../../Logistics/utils/logisticsAnalyticsUtils';
+import {
+  calculateCanonicalRtoMetrics,
+  getCanonicalStatus,
+  isCodOrder,
+  isPrepaidOrder
+} from '../../../Logistics/utils/logisticsAnalyticsUtils';
 import {
   normalizeCustomerPhone,
   normalizeCityName,
@@ -49,7 +54,12 @@ function getOrdinal(n: number): string {
 /**
  * Applies optimal column widths, freeze pane and auto-filter to an XLSX worksheet
  */
-function enhanceWorksheet(ws: XLSX.WorkSheet, headerRowIndex: number = 0, enableFilter: boolean = true) {
+function enhanceWorksheet(
+  ws: XLSX.WorkSheet,
+  headerRowIndex: number = 0,
+  enableFilter: boolean = true,
+  customFilterRange?: { s: { r: number; c: number }; e: { r: number; c: number } }
+) {
   if (!ws['!ref']) return;
   const range = XLSX.utils.decode_range(ws['!ref']);
 
@@ -61,6 +71,15 @@ function enhanceWorksheet(ws: XLSX.WorkSheet, headerRowIndex: number = 0, enable
       const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
       if (cell && cell.v != null) {
         const str = String(cell.v);
+        // Do not let section titles distort column widths
+        if (
+          str.startsWith('SECTION ') ||
+          str.startsWith('VELMORA -') ||
+          str.startsWith('REPEAT CUSTOMER') ||
+          str.startsWith('PAYMENT MODE SUMMARY')
+        ) {
+          continue;
+        }
         if (str.length > maxLen) {
           maxLen = Math.min(str.length, 60);
         }
@@ -76,7 +95,11 @@ function enhanceWorksheet(ws: XLSX.WorkSheet, headerRowIndex: number = 0, enable
   }
 
   // Enable auto-filter on data table
-  if (enableFilter && range.e.r > headerRowIndex) {
+  if (customFilterRange) {
+    ws['!autofilter'] = {
+      ref: XLSX.utils.encode_range(customFilterRange)
+    };
+  } else if (enableFilter && range.e.r > headerRowIndex) {
     ws['!autofilter'] = {
       ref: XLSX.utils.encode_range({
         s: { r: headerRowIndex, c: range.s.c },
@@ -106,7 +129,7 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
   });
 
   // =========================================================================
-  // SHEET 1: Website Sales Analytics (Overall Sales Summary)
+  // SHEET 1: Website Sales Analytics (Section A: Summary, Section B: RTO Summary, Section C: RTO Customer Details)
   // =========================================================================
   const totalOrdersCount = orders.length;
   const totalRevenue = orders.reduce((sum, o) => sum + (Number(o.price) || 0), 0);
@@ -126,38 +149,126 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
 
   const rtoMetrics = calculateCanonicalRtoMetrics(orders);
   const totalRtoOrders = rtoMetrics.totalRtoOrders;
+  const totalRtoValue = rtoMetrics.totalRtoValue;
   const rtoRate = `${rtoMetrics.rtoRate}%`;
   const rtoAvgValue = rtoMetrics.rtoAvgValue;
   const rtoCodValue = rtoMetrics.rtoCodValue;
   const rtoPrepaidValue = rtoMetrics.rtoPrepaidValue;
+  const rtoOrders = rtoMetrics.rtoOrders || [];
+
+  // Section A: Website Sales Analytics Summary (3 columns: METRIC NAME, VALUE, UNIT / DETAIL)
+  const s1SectionARows: (string | number)[][] = [
+    ['SECTION A - WEBSITE SALES ANALYTICS SUMMARY'],
+    ['Report Period', `${formatExcelDate(startDate)} to ${formatExcelDate(endDate)}`, 'Date Range (DD-MMM-YYYY)'],
+    ['Generated On', new Date().toLocaleString('en-IN'), 'Timestamp'],
+    [],
+    ['METRIC NAME', 'VALUE', 'UNIT / DETAIL'],
+    ['Selected Start Date', formatExcelDate(startDate), 'DD-MMM-YYYY'],
+    ['Selected End Date', formatExcelDate(endDate), 'DD-MMM-YYYY'],
+    ['Total Orders', totalOrdersCount, 'Orders in Period'],
+    ['Total Revenue', Math.round(totalRevenue), '₹ (INR) Gross Placed Value'],
+    ['Total Units', totalUnits, 'Cumulative Items Ordered'],
+    ['Average Order Value (AOV)', avgOrderValue, '₹ per Order Average Ticket'],
+    ['Prepaid Orders', prepaidCount, 'Orders with Full Advance Payment'],
+    ['Prepaid Order Value', Math.round(prepaidRevenue), '₹ (INR) Received'],
+    ['Partial COD Orders', partialCodCount, 'Orders with Advance + Pending Balance'],
+    ['Partial COD Order Value', Math.round(partialCodRevenue), '₹ (INR) Placed Value'],
+    ['Full COD Orders', fullCodCount, 'Orders with Zero Advance Payment'],
+    ['Full COD Order Value', Math.round(fullCodRevenue), '₹ (INR) Placed Value'],
+    ['Total COD Receivable', Math.round(totalCodReceivable), '₹ (INR) Pending from Courier/Customer']
+  ];
+
+  // Section B: RTO Summary (4 key RTO metrics + Total RTO Orders + RTO Rate)
+  const s1SectionBRows: (string | number)[][] = [
+    [],
+    ['SECTION B - RTO SUMMARY'],
+    ['RTO METRIC', 'VALUE', 'UNIT / DETAIL'],
+    ['Total RTO Orders', totalRtoOrders, 'Returned to Origin Shipments'],
+    ['Total RTO Value', Math.round(totalRtoValue), '₹ (INR) Gross Returned Order Value'],
+    ['RTO Rate', rtoRate, '% of Concluded Shipments'],
+    ['RTO Average Value', rtoAvgValue, '₹ per RTO Order Average Ticket'],
+    ['RTO COD Value', Math.round(rtoCodValue), '₹ Pure COD Returned Value'],
+    ['RTO Prepaid Value', Math.round(rtoPrepaidValue), '₹ Prepaid & Partial COD Returned Value']
+  ];
+
+  // Section C: RTO Customer Details
+  const rtoDetailHeaders = [
+    'S.No',
+    'Order ID',
+    'Order Date',
+    'RTO Date',
+    'Customer Name',
+    'Phone Number',
+    'City',
+    'State',
+    'Payment Mode',
+    'RTO Order Value (₹)',
+    'COD Value (₹)',
+    'Prepaid Value (₹)',
+    'RTO Status / Reason'
+  ];
+
+  const rtoDetailDataRows: (string | number)[][] = rtoOrders.length > 0
+    ? rtoOrders.map((o: any, idx: number) => {
+        const orderPrice = Math.round(Number(o.price) || Number(o.order_total) || 0);
+        const isCod = isCodOrder(o);
+        const isPrepaid = isPrepaidOrder(o);
+
+        // Reconciled with dashboard rules: Pure COD goes to COD Value, Prepaid & Partial COD go to Prepaid Value
+        const codVal = isCod ? orderPrice : 0;
+        const prepaidVal = isPrepaid ? orderPrice : 0;
+
+        const canonical = getCanonicalStatus(o);
+        const rawStatus = (o as any).shipment_status || (o as any).raw_status || (o as any).extra_data?.raw_status || canonical;
+        const reason = (o as any).reason || (o as any).extra_data?.rto_reason || (o as any).extra_data?.ndr_reason || (o as any).extra_data?.remarks || '';
+        const statusReason = reason ? `${rawStatus} - ${reason}` : rawStatus || 'RTO';
+
+        const rtoDateRaw =
+          (o as any).rto_date ||
+          (o as any).rtoDate ||
+          (o as any).extra_data?.rto_date ||
+          (o as any).extra_data?.rto_delivered_date ||
+          (o as any).extra_data?.rtoDeliveredDate ||
+          (o as any).delivered_date ||
+          (o as any).fulfilled_date;
+
+        return [
+          idx + 1,
+          o.order_id || o.id,
+          formatExcelDate(o.order_date),
+          formatExcelDate(rtoDateRaw),
+          o.customer_name || 'Customer',
+          o.phone ? String(o.phone) : '-',
+          normalizeCityName(o.city) || 'Unspecified',
+          normalizeStateName(o.state) || 'Unspecified',
+          o.payment_mode || 'UNKNOWN',
+          orderPrice,
+          codVal,
+          prepaidVal,
+          statusReason
+        ];
+      })
+    : [['-', '-', '-', '-', 'No RTO orders recorded in the selected period', '-', '-', '-', '-', 0, 0, 0, '-']];
+
+  const s1SectionCRows: (string | number)[][] = [
+    [],
+    ['SECTION C - RTO CUSTOMER DETAILS'],
+    rtoDetailHeaders,
+    ...rtoDetailDataRows
+  ];
 
   const s1Rows: (string | number)[][] = [
-    ['VELMORA - WEBSITE SALES ANALYTICS SUMMARY'],
-    ['Report Period', `${formatExcelDate(startDate)} to ${formatExcelDate(endDate)}`],
-    ['Generated On', new Date().toLocaleString('en-IN')],
-    [],
-    ['METRIC CATEGORY', 'METRIC NAME', 'VALUE', 'UNIT / DETAIL'],
-    ['Overall Performance', 'Selected Start Date', formatExcelDate(startDate), 'DD-MMM-YYYY'],
-    ['Overall Performance', 'Selected End Date', formatExcelDate(endDate), 'DD-MMM-YYYY'],
-    ['Overall Performance', 'Total Orders', totalOrdersCount, 'Orders in Period'],
-    ['Overall Performance', 'Total Revenue', Math.round(totalRevenue), '₹ (INR) Gross Placed Value'],
-    ['Overall Performance', 'Total Units', totalUnits, 'Cumulative Items Ordered'],
-    ['Overall Performance', 'Average Order Value (AOV)', avgOrderValue, '₹ per Order Average Ticket'],
-    ['Payment Performance', 'Prepaid Orders', prepaidCount, 'Orders with Full Advance Payment'],
-    ['Payment Performance', 'Prepaid Order Value', Math.round(prepaidRevenue), '₹ (INR) Received'],
-    ['Payment Performance', 'Partial COD Orders', partialCodCount, 'Orders with Advance + Pending Balance'],
-    ['Payment Performance', 'Partial COD Order Value', Math.round(partialCodRevenue), '₹ (INR) Placed Value'],
-    ['Payment Performance', 'Full COD Orders', fullCodCount, 'Orders with Zero Advance Payment'],
-    ['Payment Performance', 'Full COD Order Value', Math.round(fullCodRevenue), '₹ (INR) Placed Value'],
-    ['Payment Performance', 'Total COD Receivable', Math.round(totalCodReceivable), '₹ (INR) Pending from Courier/Customer'],
-    ['RTO Intelligence', 'Total RTO Orders', totalRtoOrders, 'Returned to Origin Shipments'],
-    ['RTO Intelligence', 'RTO Rate', rtoRate, '% of Concluded Shipments'],
-    ['RTO Intelligence', 'RTO Average Value', rtoAvgValue, '₹ per RTO Order'],
-    ['RTO Intelligence', 'RTO COD Value', rtoCodValue, '₹ Pure COD Returned Value'],
-    ['RTO Intelligence', 'RTO Prepaid Value', rtoPrepaidValue, '₹ Prepaid & Partial COD Returned Value']
+    ...s1SectionARows,
+    ...s1SectionBRows,
+    ...s1SectionCRows
   ];
+
   const ws1 = XLSX.utils.aoa_to_sheet(s1Rows);
-  enhanceWorksheet(ws1, 4, false);
+  const rtoHeaderRowIndex = s1SectionARows.length + s1SectionBRows.length + 2; // Row index of Section C table header
+  enhanceWorksheet(ws1, 4, true, {
+    s: { r: rtoHeaderRowIndex, c: 0 },
+    e: { r: s1Rows.length - 1, c: rtoDetailHeaders.length - 1 }
+  });
 
   // =========================================================================
   // SHEET 2: Repeat Customer Summary
