@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import type { WebsiteConsolidatedOrder, WebsiteOrderItem } from '../types';
-import { calculateWebsitePaymentSummary, normalizeProductGroupingKey, resolveCanonicalProductName } from '../websiteSalesUtils';
+import { calculateWebsitePaymentSummary, normalizeProductGroupingKey, resolveCanonicalProductName, resolveCanonicalLocation } from '../websiteSalesUtils';
 import {
   calculateCanonicalRtoMetrics,
   getCanonicalStatus,
@@ -305,6 +305,97 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
   enhanceWorksheet(wsRto, rtoHeaderRowIndex, true, {
     s: { r: rtoHeaderRowIndex, c: 0 },
     e: { r: s2RtoRows.length - 1, c: rtoDetailHeaders.length - 1 }
+  });
+
+  // =========================================================================
+  // WORKSHEET: Cancelled Orders (Pre-Dispatch Summary & Customer Audit)
+  // =========================================================================
+  const cancelledOrdersList = rtoMetrics.cancelledOrders || orders.filter(o => getCanonicalStatus(o) === 'Cancelled');
+  const totalCancelledOrders = rtoMetrics.cancelledCount ?? cancelledOrdersList.length;
+  const totalCancelledValue = rtoMetrics.cancelledValue ?? cancelledOrdersList.reduce((sum, o) => sum + (Number(o.price) || Number(o.order_total) || 0), 0);
+
+  const cancelledDetailHeaders = [
+    'S.No',
+    'Order ID',
+    'Order Date',
+    'Customer Name',
+    'Phone Number',
+    'State',
+    'City',
+    'Order Value (₹)',
+    'Payment Mode',
+    'Product / Items',
+    'Quantity',
+    'Cancellation Date',
+    'Cancellation Reason',
+    'Dispatch Status'
+  ];
+
+  const cancelledDetailDataRows: (string | number)[][] = cancelledOrdersList.length > 0
+    ? cancelledOrdersList.map((o: any, idx: number) => {
+        const orderPrice = Math.round(Number(o.price) || Number(o.order_total) || 0);
+        const resolvedLoc = resolveCanonicalLocation(o.state, o.city, o.pincode);
+        const cState = o.canonicalState || resolvedLoc.stateName || normalizeStateName(o.state) || 'Unspecified';
+        const cCity = o.canonicalCity || resolvedLoc.cityName || normalizeCityName(o.city) || 'Unspecified';
+
+        const cancelDateRaw =
+          o.cancellation?.cancelled_at ||
+          o.cancellation?.requested_at ||
+          o.extra_data?.cancellation?.cancelled_at ||
+          o.extra_data?.cancellation_date ||
+          o.order_date;
+
+        const cancelReason =
+          o.cancellation?.reason ||
+          o.extra_data?.cancellation?.reason ||
+          o.extra_data?.cancellation_reason ||
+          'Cancelled in source export (Shopify)';
+
+        const dStatus = o.dispatch_status || o.extra_data?.dispatch_status || 'Pre-Dispatch Cancelled';
+
+        const prodDesc = o.order_formatted || o.product_name || (o.items && o.items.length > 0 ? o.items.map((it: any) => `${it.product_name} × ${it.quantity}`).join(' | ') : 'Standard Products');
+
+        return [
+          idx + 1,
+          o.order_id || o.id,
+          formatExcelDate(o.order_date),
+          o.customer_name || 'N/A',
+          o.phone ? String(o.phone) : '-',
+          cState,
+          cCity,
+          orderPrice,
+          o.payment_mode || 'UNKNOWN',
+          prodDesc,
+          o.total_quantity || 1,
+          formatExcelDate(cancelDateRaw),
+          cancelReason,
+          dStatus
+        ];
+      })
+    : [['-', '-', '-', 'No cancelled orders recorded in the selected period', '-', '-', '-', 0, '-', '-', 0, '-', '-', '-']];
+
+  const sCancelledSummaryRows: (string | number)[][] = [
+    ['VELMORA - CANCELLED ORDERS (PRE-DISPATCH SUMMARY & AUDIT)'],
+    ['Report Period', `${formatExcelDate(startDate)} to ${formatExcelDate(endDate)}`, 'Date Range (DD-MMM-YYYY)'],
+    ['Generated On', new Date().toLocaleString('en-IN'), 'Timestamp'],
+    ['Total Cancelled Orders', totalCancelledOrders, 'Total pre-dispatch cancelled orders for period'],
+    ['Total Cancelled Value (₹)', totalCancelledValue, 'Cumulative monetary value of cancelled orders (₹)'],
+    ['Lifecycle Stage', 'Pre-Dispatch (Excluded from carrier fulfillment & delivery SLA)', 'Classification'],
+    [],
+    ['SECTION B - CANCELLED ORDER DETAILS']
+  ];
+
+  const sCancelledRows: (string | number)[][] = [
+    ...sCancelledSummaryRows,
+    cancelledDetailHeaders,
+    ...cancelledDetailDataRows
+  ];
+
+  const wsCancelled = XLSX.utils.aoa_to_sheet(sCancelledRows);
+  const cancelledHeaderRowIndex = sCancelledSummaryRows.length; // Row index of cancelledDetailHeaders
+  enhanceWorksheet(wsCancelled, cancelledHeaderRowIndex, true, {
+    s: { r: cancelledHeaderRowIndex, c: 0 },
+    e: { r: sCancelledRows.length - 1, c: cancelledDetailHeaders.length - 1 }
   });
 
   // =========================================================================
@@ -971,7 +1062,6 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
   // SHEET 10: Courier Reconciliation & Performance Breakdown
   // =========================================================================
   const courierPerfList = rtoMetrics.courierPerformance || [];
-  const cancelledOrdersList = rtoMetrics.cancelledOrders || orders.filter(o => getCanonicalStatus(o) === 'Cancelled');
   const activeOrdersCount = orders.length - cancelledOrdersList.length;
 
   let totalOtherStatuses = 0;
@@ -1227,6 +1317,7 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws1, 'Website Sales Analytics');
   XLSX.utils.book_append_sheet(wb, wsRto, 'RTO Summary & Customer Details');
+  XLSX.utils.book_append_sheet(wb, wsCancelled, 'Cancelled Orders');
   XLSX.utils.book_append_sheet(wb, ws2, 'Repeat Customer Summary');
   XLSX.utils.book_append_sheet(wb, ws3, 'Payment Mode Breakdown');
   XLSX.utils.book_append_sheet(wb, ws4, 'Revenue Mix');

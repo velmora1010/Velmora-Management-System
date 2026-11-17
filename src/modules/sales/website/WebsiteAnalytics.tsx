@@ -28,7 +28,8 @@ import {
   Eye,
   Search,
   SlidersHorizontal,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Ban
 } from 'lucide-react';
 import type { WebsiteConsolidatedOrder, WebsiteUploadBatch, WebsiteOrderItem } from './types';
 import { websiteSalesService } from './websiteSalesService';
@@ -245,7 +246,7 @@ export const WebsiteAnalytics: React.FC = () => {
   const [prodCompCardSlice, setProdCompCardSlice] = useState<string | null>(null);
   const [qtyCompCardSlice, setQtyCompCardSlice] = useState<string | null>(null);
   const [codCardSlice, setCodCardSlice] = useState<string | null>(null);
-  const [shipmentOutcomeFilter, setShipmentOutcomeFilter] = useState<'ALL' | 'DELIVERED' | 'RTO'>('ALL');
+  const [shipmentOutcomeFilter, setShipmentOutcomeFilter] = useState<'ALL' | 'DELIVERED' | 'RTO' | 'CANCELLED'>('ALL');
 
   const [selectedOrderForModal, setSelectedOrderForModal] = useState<WebsiteConsolidatedOrder | null>(null);
   const [fullPageView, setFullPageView] = useState<{
@@ -1498,6 +1499,18 @@ export const WebsiteAnalytics: React.FC = () => {
                 <RotateCcw size={12} />
                 <span>RTO ({rtoMetrics.totalRtoOrders})</span>
               </button>
+              <button
+                type="button"
+                onClick={() => setShipmentOutcomeFilter('CANCELLED')}
+                className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  shipmentOutcomeFilter === 'CANCELLED'
+                    ? 'bg-red-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-red-300'
+                }`}
+              >
+                <Ban size={12} />
+                <span>Cancelled ({rtoMetrics.cancelledCount})</span>
+              </button>
             </div>
           </div>
 
@@ -1690,12 +1703,133 @@ export const WebsiteAnalytics: React.FC = () => {
                 </div>
               </div>
             </div>
-          ) : (
+          ) : shipmentOutcomeFilter === 'CANCELLED' ? (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 animate-in fade-in duration-200">
-              {/* Card 1: Delivered Orders */}
-              <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-emerald-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
+              {/* Card 1: Total Cancelled Orders */}
+              <div 
+                onClick={() => handleOpenOrdersFullPage('Cancelled Orders', rtoMetrics.cancelledOrders)}
+                className="p-4 bg-slate-900/80 border border-slate-800 hover:border-red-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group cursor-pointer"
+              >
                 <div className="flex items-center justify-between text-slate-400">
-                  <span className="text-[11px] font-bold uppercase tracking-wider">Delivered Shipments</span>
+                  <span className="text-[11px] font-bold uppercase tracking-wider group-hover:text-red-400 transition-colors">Cancelled Orders</span>
+                  <div className="w-7 h-7 rounded-lg bg-red-500/10 text-red-400 flex items-center justify-center">
+                    <Ban size={14} />
+                  </div>
+                </div>
+                <div className="text-2xl font-bold text-red-400 font-mono mt-2">
+                  {rtoMetrics.cancelledCount.toLocaleString('en-IN')}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span>Lifecycle: <strong className="text-red-300 font-mono">Pre-Dispatch</strong></span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenOrdersFullPage('Cancelled Orders', rtoMetrics.cancelledOrders);
+                    }}
+                    className="text-red-400 hover:text-red-300 font-bold hover:underline cursor-pointer"
+                  >
+                    View All →
+                  </button>
+                </div>
+              </div>
+
+              {/* Card 2: Cancelled Order Value */}
+              <div 
+                onClick={() => handleOpenOrdersFullPage('Cancelled Orders', rtoMetrics.cancelledOrders)}
+                className="p-4 bg-slate-900/80 border border-slate-800 hover:border-red-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group cursor-pointer"
+              >
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[11px] font-bold uppercase tracking-wider group-hover:text-red-400 transition-colors">Cancelled Order Value</span>
+                  <div className="w-7 h-7 rounded-lg bg-red-500/10 text-red-400 flex items-center justify-center">
+                    <CreditCard size={14} />
+                  </div>
+                </div>
+                <div className="text-2xl font-bold text-red-300 font-mono mt-2">
+                  {formatINR(rtoMetrics.cancelledValue)}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span>Avg: <strong className="text-amber-300 font-mono">{formatINR(rtoMetrics.cancelledCount > 0 ? Math.round(rtoMetrics.cancelledValue / rtoMetrics.cancelledCount) : 0)}</strong> / order</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenOrdersFullPage('Cancelled Orders', rtoMetrics.cancelledOrders);
+                    }}
+                    className="text-red-400 hover:text-red-300 font-bold hover:underline cursor-pointer"
+                  >
+                    View All →
+                  </button>
+                </div>
+              </div>
+
+              {/* Card 3: Cancelled Prepaid Orders */}
+              <div 
+                onClick={() => handleOpenOrdersFullPage('Cancelled Orders', rtoMetrics.cancelledOrders)}
+                className="p-4 bg-slate-900/80 border border-slate-800 hover:border-red-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group cursor-pointer"
+              >
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[11px] font-bold uppercase tracking-wider group-hover:text-red-400 transition-colors">Prepaid Cancelled</span>
+                  <div className="w-7 h-7 rounded-lg bg-red-500/10 text-red-400 flex items-center justify-center">
+                    <CreditCard size={14} />
+                  </div>
+                </div>
+                <div className="text-2xl font-bold text-white font-mono mt-2">
+                  {rtoMetrics.cancelledOrders.filter(o => isPrepaidOrder(o)).length}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span>Value: <strong className="text-purple-300 font-mono">{formatINR(rtoMetrics.cancelledOrders.filter(o => isPrepaidOrder(o)).reduce((sum, o) => sum + (Number(o.price) || 0), 0))}</strong></span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenOrdersFullPage('Cancelled Orders', rtoMetrics.cancelledOrders);
+                    }}
+                    className="text-red-400 hover:text-red-300 font-bold hover:underline cursor-pointer"
+                  >
+                    View All →
+                  </button>
+                </div>
+              </div>
+
+              {/* Card 4: Cancelled COD Orders */}
+              <div 
+                onClick={() => handleOpenOrdersFullPage('Cancelled Orders', rtoMetrics.cancelledOrders)}
+                className="p-4 bg-slate-900/80 border border-slate-800 hover:border-red-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group cursor-pointer"
+              >
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[11px] font-bold uppercase tracking-wider group-hover:text-red-400 transition-colors">COD Cancelled</span>
+                  <div className="w-7 h-7 rounded-lg bg-red-500/10 text-red-400 flex items-center justify-center">
+                    <CreditCard size={14} />
+                  </div>
+                </div>
+                <div className="text-2xl font-bold text-white font-mono mt-2">
+                  {rtoMetrics.cancelledOrders.filter(o => isCodOrder(o)).length}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span>Value: <strong className="text-amber-300 font-mono">{formatINR(rtoMetrics.cancelledOrders.filter(o => isCodOrder(o)).reduce((sum, o) => sum + (Number(o.price) || 0), 0))}</strong></span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenOrdersFullPage('Cancelled Orders', rtoMetrics.cancelledOrders);
+                    }}
+                    className="text-red-400 hover:text-red-300 font-bold hover:underline cursor-pointer"
+                  >
+                    View All →
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 animate-in fade-in duration-200">
+              {/* Card 1: Delivered Shipments */}
+              <div 
+                onClick={() => handleOpenOrdersFullPage('Delivered Website Orders', rtoMetrics.deliveredOrders)}
+                className="p-4 bg-slate-900/80 border border-slate-800 hover:border-emerald-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group cursor-pointer hover:bg-slate-900/90"
+              >
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[11px] font-bold uppercase tracking-wider group-hover:text-emerald-400 transition-colors">Delivered Shipments</span>
                   <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
                     <CheckCircle2 size={14} />
                   </div>
@@ -1707,7 +1841,10 @@ export const WebsiteAnalytics: React.FC = () => {
                   <span>Rate: <strong className="text-emerald-300 font-mono">{rtoMetrics.deliveryRate}</strong></span>
                   <button
                     type="button"
-                    onClick={() => handleOpenOrdersFullPage('Delivered Website Orders', rtoMetrics.deliveredOrders)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenOrdersFullPage('Delivered Website Orders', rtoMetrics.deliveredOrders);
+                    }}
                     className="text-emerald-400 hover:text-emerald-300 font-bold hover:underline cursor-pointer"
                   >
                     View All →
@@ -1716,9 +1853,12 @@ export const WebsiteAnalytics: React.FC = () => {
               </div>
 
               {/* Card 2: Delivered Revenue */}
-              <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-emerald-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
+              <div 
+                onClick={() => handleOpenOrdersFullPage('Delivered Website Orders', rtoMetrics.deliveredOrders)}
+                className="p-4 bg-slate-900/80 border border-slate-800 hover:border-emerald-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group cursor-pointer hover:bg-slate-900/90"
+              >
                 <div className="flex items-center justify-between text-slate-400">
-                  <span className="text-[11px] font-bold uppercase tracking-wider">Delivered Revenue</span>
+                  <span className="text-[11px] font-bold uppercase tracking-wider group-hover:text-emerald-400 transition-colors">Delivered Revenue</span>
                   <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
                     <TrendingUp size={14} />
                   </div>
@@ -1730,7 +1870,10 @@ export const WebsiteAnalytics: React.FC = () => {
                   <span>Avg: <strong className="text-emerald-300 font-mono">{formatINR(rtoMetrics.deliveredAvgValue)}</strong></span>
                   <button
                     type="button"
-                    onClick={() => handleOpenOrdersFullPage('Delivered Website Orders', rtoMetrics.deliveredOrders)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenOrdersFullPage('Delivered Website Orders', rtoMetrics.deliveredOrders);
+                    }}
                     className="text-emerald-400 hover:text-emerald-300 font-bold hover:underline cursor-pointer"
                   >
                     View All →
@@ -1739,9 +1882,12 @@ export const WebsiteAnalytics: React.FC = () => {
               </div>
 
               {/* Card 3: Total RTO Orders */}
-              <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-rose-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
+              <div 
+                onClick={() => handleOpenOrdersFullPage('All RTO Orders', rtoMetrics.rtoOrders)}
+                className="p-4 bg-slate-900/80 border border-slate-800 hover:border-rose-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group cursor-pointer hover:bg-slate-900/90"
+              >
                 <div className="flex items-center justify-between text-slate-400">
-                  <span className="text-[11px] font-bold uppercase tracking-wider">Total RTO Orders</span>
+                  <span className="text-[11px] font-bold uppercase tracking-wider group-hover:text-rose-400 transition-colors">Total RTO Orders</span>
                   <div className="w-7 h-7 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center">
                     <RotateCcw size={14} />
                   </div>
@@ -1753,7 +1899,10 @@ export const WebsiteAnalytics: React.FC = () => {
                   <span>Rate: <strong className="text-rose-300 font-mono">{rtoMetrics.rtoRate}%</strong></span>
                   <button
                     type="button"
-                    onClick={() => handleOpenOrdersFullPage('All RTO Orders', rtoMetrics.rtoOrders)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenOrdersFullPage('All RTO Orders', rtoMetrics.rtoOrders);
+                    }}
                     className="text-rose-400 hover:text-rose-300 font-bold hover:underline cursor-pointer"
                   >
                     View All →
@@ -1762,9 +1911,12 @@ export const WebsiteAnalytics: React.FC = () => {
               </div>
 
               {/* Card 4: RTO Revenue Loss */}
-              <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-purple-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group">
+              <div 
+                onClick={() => handleOpenOrdersFullPage('All RTO Orders', rtoMetrics.rtoOrders)}
+                className="p-4 bg-slate-900/80 border border-slate-800 hover:border-purple-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group cursor-pointer hover:bg-slate-900/90"
+              >
                 <div className="flex items-center justify-between text-slate-400">
-                  <span className="text-[11px] font-bold uppercase tracking-wider">RTO Revenue Loss</span>
+                  <span className="text-[11px] font-bold uppercase tracking-wider group-hover:text-purple-400 transition-colors">RTO Revenue Loss</span>
                   <div className="w-7 h-7 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center">
                     <CreditCard size={14} />
                   </div>
@@ -1776,8 +1928,45 @@ export const WebsiteAnalytics: React.FC = () => {
                   <span>Avg ticket: <strong className="text-amber-300 font-mono">{formatINR(rtoMetrics.rtoAvgValue)}</strong></span>
                   <button
                     type="button"
-                    onClick={() => handleOpenOrdersFullPage('All RTO Orders', rtoMetrics.rtoOrders)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenOrdersFullPage('All RTO Orders', rtoMetrics.rtoOrders);
+                    }}
                     className="text-purple-400 hover:text-purple-300 font-bold hover:underline cursor-pointer"
+                  >
+                    View All →
+                  </button>
+                </div>
+              </div>
+
+              {/* Card 5: Cancelled Orders */}
+              <div 
+                onClick={() => handleOpenOrdersFullPage('Cancelled Orders', rtoMetrics.cancelledOrders)}
+                className="p-4 bg-slate-900/80 border border-slate-800 hover:border-red-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group cursor-pointer hover:bg-slate-900/90"
+              >
+                <div className="flex items-center justify-between text-slate-400">
+                  <span className="text-[11px] font-bold uppercase tracking-wider group-hover:text-red-400 transition-colors">Cancelled Orders</span>
+                  <div className="w-7 h-7 rounded-lg bg-red-500/10 text-red-400 flex items-center justify-center">
+                    <Ban size={14} />
+                  </div>
+                </div>
+                <div className="mt-2">
+                  <div className="text-2xl font-bold text-red-400 font-mono">
+                    {rtoMetrics.cancelledCount.toLocaleString('en-IN')}
+                  </div>
+                  <div className="text-xs font-semibold text-slate-300 font-mono mt-0.5">
+                    {formatINR(rtoMetrics.cancelledValue)}
+                  </div>
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500 mt-2">
+                  <span className="truncate">Cancelled before dispatch</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenOrdersFullPage('Cancelled Orders', rtoMetrics.cancelledOrders);
+                    }}
+                    className="text-red-400 hover:text-red-300 font-bold hover:underline cursor-pointer shrink-0 ml-1"
                   >
                     View All →
                   </button>
@@ -1813,9 +2002,11 @@ export const WebsiteAnalytics: React.FC = () => {
             const statusLabel = filterStatus && filterStatus !== 'ALL'
               ? (filterStatus === 'DELIVERED' ? 'Delivered' : filterStatus === 'RTO' ? 'RTO' : filterStatus === 'IN_TRANSIT' ? 'In Transit' : filterStatus === 'OTHER' ? 'Other Statuses' : 'Cancelled')
               : '';
-            const label = statusLabel
-              ? `${courierName} – ${statusLabel} Records`
-              : `${courierName} Shipments`;
+            const label = filterStatus === 'CANCELLED'
+              ? 'Cancelled Orders'
+              : statusLabel
+                ? `${courierName} – ${statusLabel} Records`
+                : `${courierName} Shipments`;
             handleOpenOrdersFullPage(label, list);
           }}
         />
