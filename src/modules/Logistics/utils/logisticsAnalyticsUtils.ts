@@ -729,9 +729,25 @@ export function normalizeCourierName(courierName?: string | null): string {
   if (lower.includes('ekart')) return 'Ekart';
   if (lower.includes('amazon')) return 'Amazon Shipping';
   if (lower.includes('india post') || lower.includes('speed post')) return 'India Post';
-  if (lower.includes('st courier') || lower.includes('stcourier')) return 'ST Courier';
+  if (
+    lower === 'st' ||
+    lower.startsWith('st ') ||
+    lower.includes('st courier') ||
+    lower.includes('st-courier') ||
+    lower.includes('st_courier') ||
+    lower.includes('stcourier')
+  ) return 'ST Courier';
   if (lower.includes('delhivery')) return 'Delhivery';
-  if (lower === 'house' || lower.includes('house') || lower.includes('direct')) return 'House';
+  if (
+    lower === 'house' ||
+    lower === 'house courier' ||
+    lower === 'in-house' ||
+    lower === 'in house' ||
+    lower === 'internal' ||
+    lower === 'internal courier' ||
+    lower === 'direct delivery' ||
+    lower === 'self delivery'
+  ) return 'House';
   return courierName.trim();
 }
 
