@@ -726,15 +726,12 @@ export interface CourierPerformanceSummary {
 export function normalizeCourierName(courierName?: string | null): string {
   if (!courierName || !courierName.trim()) return 'Unknown / Not Available';
   const lower = courierName.toLowerCase().trim();
-  if (lower.includes('ithink') && lower.includes('ekart')) return 'iThink Logistics – Ekart';
-  if (lower.includes('ithink') && lower.includes('delhivery')) return 'iThink Logistics – Delhivery';
-  if (lower.includes('ithink') && lower.includes('amazon')) return 'iThink Logistics – Amazon';
-  if (lower.includes('india post')) return 'India Post';
+  if (lower.includes('ekart')) return 'Ekart';
+  if (lower.includes('amazon')) return 'Amazon Shipping';
+  if (lower.includes('india post') || lower.includes('speed post')) return 'India Post';
   if (lower.includes('st courier') || lower.includes('stcourier')) return 'ST Courier';
   if (lower.includes('delhivery')) return 'Delhivery';
-  if (lower.includes('ekart')) return 'iThink Logistics – Ekart';
-  if (lower.includes('amazon')) return 'iThink Logistics – Amazon';
-  if (lower === 'house') return 'House';
+  if (lower === 'house' || lower.includes('house') || lower.includes('direct')) return 'House';
   return courierName.trim();
 }
 

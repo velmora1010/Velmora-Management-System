@@ -260,13 +260,11 @@ export const OrderTableView: React.FC<OrderTableViewProps> = ({
 
   const getCourierBadgeClass = (courier?: string) => {
     const c = (courier || '').toLowerCase();
-    if (c.includes('ithink') && c.includes('ekart')) return 'bg-amber-950/60 border-amber-800/60 text-amber-300';
-    if (c.includes('ithink') && c.includes('delhivery')) return 'bg-indigo-950/60 border-indigo-800/60 text-indigo-300';
-    if (c.includes('ithink') && c.includes('amazon')) return 'bg-orange-950/60 border-orange-800/60 text-orange-300';
+    if (c.includes('ekart')) return 'bg-amber-950/60 border-amber-800/60 text-amber-300';
+    if (c.includes('amazon')) return 'bg-orange-950/60 border-orange-800/60 text-orange-300';
     if (c.includes('india post')) return 'bg-rose-950/60 border-rose-800/60 text-rose-300';
     if (c.includes('delhivery')) return 'bg-cyan-950/60 border-cyan-800/60 text-cyan-300';
     if (c.includes('st courier') || c.includes('stcourier')) return 'bg-purple-950/60 border-purple-800/60 text-purple-300';
-    if (c.includes('amazon')) return 'bg-amber-950/60 border-amber-800/60 text-amber-300';
     return 'bg-slate-900 border-slate-800 text-slate-300';
   };
 

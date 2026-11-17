@@ -20,6 +20,7 @@ import { WebsiteSalesDateRangeProvider } from './context/WebsiteSalesDateRangeCo
 import { WebsiteOrderFilesModal } from './components/WebsiteOrderFilesModal';
 import { WebsiteUploadChoiceModal } from './components/WebsiteUploadChoiceModal';
 import { DelhiveryUploadModal } from './components/DelhiveryUploadModal';
+import { DedicatedCourierUploadModal } from './components/DedicatedCourierUploadModal';
 
 export const WebsiteSalesLayout: React.FC = () => {
   const navigate = useNavigate();
@@ -27,6 +28,9 @@ export const WebsiteSalesLayout: React.FC = () => {
   const [isChoiceModalOpen, setIsChoiceModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isDelhiveryModalOpen, setIsDelhiveryModalOpen] = useState(false);
+  const [isAmazonModalOpen, setIsAmazonModalOpen] = useState(false);
+  const [isSTCourierModalOpen, setIsSTCourierModalOpen] = useState(false);
+  const [isIndiaPostModalOpen, setIsIndiaPostModalOpen] = useState(false);
 
   // Required 3-tab navigation: Dashboard, Orders, Analytics
   const tabs = [
@@ -138,6 +142,9 @@ export const WebsiteSalesLayout: React.FC = () => {
           onClose={() => setIsChoiceModalOpen(false)}
           onChooseShopify={() => setIsUploadModalOpen(true)}
           onChooseDelhivery={() => setIsDelhiveryModalOpen(true)}
+          onChooseAmazonShipping={() => setIsAmazonModalOpen(true)}
+          onChooseSTCourier={() => setIsSTCourierModalOpen(true)}
+          onChooseIndiaPost={() => setIsIndiaPostModalOpen(true)}
         />
 
         {/* DELHIVERY ONE DEDICATED UPLOAD MODAL */}
@@ -146,6 +153,51 @@ export const WebsiteSalesLayout: React.FC = () => {
           onClose={() => setIsDelhiveryModalOpen(false)}
           onBackToSourceSelect={() => {
             setIsDelhiveryModalOpen(false);
+            setIsChoiceModalOpen(true);
+          }}
+          onImportSuccess={() => {
+            window.dispatchEvent(new CustomEvent('velmora:website_sales_updated'));
+            window.dispatchEvent(new CustomEvent('velmora:logistics_updated'));
+          }}
+        />
+
+        {/* AMAZON SHIPPING DEDICATED UPLOAD MODAL */}
+        <DedicatedCourierUploadModal
+          isOpen={isAmazonModalOpen}
+          courierType="amazon_shipping"
+          onClose={() => setIsAmazonModalOpen(false)}
+          onBackToSourceSelect={() => {
+            setIsAmazonModalOpen(false);
+            setIsChoiceModalOpen(true);
+          }}
+          onImportSuccess={() => {
+            window.dispatchEvent(new CustomEvent('velmora:website_sales_updated'));
+            window.dispatchEvent(new CustomEvent('velmora:logistics_updated'));
+          }}
+        />
+
+        {/* ST COURIER DEDICATED UPLOAD MODAL */}
+        <DedicatedCourierUploadModal
+          isOpen={isSTCourierModalOpen}
+          courierType="st_courier"
+          onClose={() => setIsSTCourierModalOpen(false)}
+          onBackToSourceSelect={() => {
+            setIsSTCourierModalOpen(false);
+            setIsChoiceModalOpen(true);
+          }}
+          onImportSuccess={() => {
+            window.dispatchEvent(new CustomEvent('velmora:website_sales_updated'));
+            window.dispatchEvent(new CustomEvent('velmora:logistics_updated'));
+          }}
+        />
+
+        {/* INDIA POST DEDICATED UPLOAD MODAL */}
+        <DedicatedCourierUploadModal
+          isOpen={isIndiaPostModalOpen}
+          courierType="india_post"
+          onClose={() => setIsIndiaPostModalOpen(false)}
+          onBackToSourceSelect={() => {
+            setIsIndiaPostModalOpen(false);
             setIsChoiceModalOpen(true);
           }}
           onImportSuccess={() => {

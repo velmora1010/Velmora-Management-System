@@ -23,6 +23,7 @@ import {
 import type { WebsiteConsolidatedOrder } from '../types';
 import type { CourierPerformanceSummary } from '../../../Logistics/utils/logisticsAnalyticsUtils';
 import { formatINR, getCanonicalStatus } from '../../../Logistics/utils/logisticsAnalyticsUtils';
+import { isCourierActive } from '../../../../config/courierConfig';
 
 export interface DiagnosticCategorySummary {
   key: string;
@@ -105,7 +106,7 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
 
     const categories: Record<string, { label: string; description: string; orders: WebsiteConsolidatedOrder[] }> = {
       MISSING_SHIPMENT_REPORT: {
-        label: 'No Tracking File Uploaded (Missing Shipment Records)',
+        label: 'No Tracking File Uploaded (Missing Shipment Metadata)',
         description: 'Orders with no AWB and no courier assigned in tracking data. Awaiting carrier tracking upload.',
         orders: []
       },
@@ -152,6 +153,10 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
         categories.MISSING_AWB_WITH_COURIER.orders.push(o);
       } else if (awb && !courier) {
         categories.AWB_NO_COURIER.orders.push(o);
+      } else if (awb && courier && !isCourierActive(courier)) {
+        categories.UNRECOGNIZED_COURIER.orders.push(o);
+      } else if (awb && (!o.raw_status && !o.shipment_status && !o.delhivery_remarks)) {
+        categories.AWB_UNMATCHED.orders.push(o);
       }
     });
 
@@ -245,6 +250,12 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
     }
     if (awb && !courier) {
       return `Waybill (${awb}) present but carrier name is unrecognized.`;
+    }
+    if (awb && courier && !isCourierActive(courier)) {
+      return `Carrier (${courier}) not recognized in configured carrier list.`;
+    }
+    if (awb && (!order.raw_status && !order.shipment_status && !order.delhivery_remarks)) {
+      return `Waybill (${awb}) present but no tracking events found in manifests.`;
     }
     return 'Carrier tracking data awaiting synchronization.';
   };
