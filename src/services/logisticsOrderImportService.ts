@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx';
 import db from '../lib/db';
 import { supabase } from '../lib/supabase';
 import type { LogisticsOrder } from '../types/logistics';
-import { cleanOrderId } from './unifiedLogisticsService';
+import { cleanOrderId, resolveTrackingStatus } from './unifiedLogisticsService';
 import { normalizeCourier } from '../config/courierConfig';
 import { parseAndFormatLogisticsDate } from '../utils/logisticsDateUtils';
 import { 
@@ -512,8 +512,11 @@ export const parseAndValidateCustomerOrders = async (
       if (!inDispatchOrTracking && parsedOrder.awbNumber && !existing.awbNumber) {
         patch.awbNumber = parsedOrder.awbNumber;
         patch.courier = parsedOrder.courier || existing.courier || 'Delhivery';
-        patch.stage = 'dispatched';
-        patch.status = 'Awaiting Tracking Update';
+        const rem = parsedOrder.remarks || (parsedOrder as any).lastEvent || '';
+        const raw = (parsedOrder as any).rawStatus || parsedOrder.status || '';
+        const resolved = resolveTrackingStatus(raw, true, rem);
+        patch.status = resolved;
+        patch.stage = resolved === 'In Transit' || resolved === 'Out for Delivery' ? 'tracking' : 'dispatched';
         changedFields.push('AWB Number');
       }
 

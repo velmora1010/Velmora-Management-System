@@ -299,21 +299,29 @@ export function getCanonicalStatus(order: any): CanonicalLogisticsStatus {
       statusStr.includes('in transit') || 
       rawStatusStr.includes('in transit') || 
       rawStatusStr.includes('transit') || 
+      rawStatusStr.includes('shipped') ||
       eventStr.includes('in transit') ||
       eventStr.includes('bagging') ||
-      eventStr.includes('hub')
+      eventStr.includes('hub') ||
+      eventStr.includes('vehicle departed') ||
+      eventStr.includes('departed') ||
+      eventStr.includes('facility') ||
+      eventStr.includes('arrived') ||
+      remarksStr.includes('vehicle departed') ||
+      remarksStr.includes('departed') ||
+      remarksStr.includes('facility')
     ) {
       return 'In Transit';
     }
 
     // Dispatched but no tracking events yet
     if (
-      statusStr === 'awaiting tracking update' || 
-      statusStr === 'info received' || 
-      statusStr === 'pending' || 
-      statusStr === 'not tracked' ||
-      !order.syncedAt ||
-      !order.lastEvent
+      (statusStr === 'awaiting tracking update' || 
+       statusStr === 'info received' || 
+       statusStr === 'pending' || 
+       statusStr === 'not tracked') &&
+      !eventStr &&
+      !remarksStr
     ) {
       return 'Pending Tracking Update';
     }

@@ -28,6 +28,7 @@ export interface TrackingFilePreviewItem {
   currentStatus: string;
   newStatus: string;
   rawStatus?: string;
+  statusType?: string;
   remarks?: string;
   deliveredDate?: string;
   estimatedDeliveryDate?: string;
@@ -123,229 +124,339 @@ export const normalizeAwb = (val: any): string => {
 };
 
 /**
- * Normalizes courier status from report into canonical internal status:
- * | Uploaded Status         | Internal Status           |
- * |-------------------------|---------------------------|
- * | Delivered               | Delivered                 |
- * | In Transit              | In Transit                |
- * | Out for Delivery        | Out for Delivery          |
- * | Undelivered / Failed    | Failed Attempt            |
- * | RTO Return              | RTO - In Transit / Seller |
- * | Pickup Scheduled        | Pickup Scheduled          |
- * | Ready for Pickup        | Ready for Pickup          |
- * | Manifested / Booked     | Info Received             |
- * | Exception / Hold        | Delivery Exception        |
+ * Normalizes courier status and tracking events from report into canonical internal status:
+ * Uses both Current Status, Status Type, and Remarks/Event to accurately detect lifecycle state.
+ *
+ * | Uploaded Status         | Remarks / Event            | Internal Status           |
+ * |-------------------------|----------------------------|---------------------------|
+ * | DELIVERED               | Delivered to Consignee     | Delivered                 |
+ * | SHIPPED                 | Vehicle Departed           | In Transit                |
+ * | SHIPPED                 | Arrived at Destination Hub | In Transit                |
+ * | SHIPPED                 | Received at Facility       | In Transit                |
+ * | SHIPPED                 | Out for Delivery           | Out for Delivery          |
+ * | UNDELIVERED             | Failed Attempt             | Failed Attempt            |
+ * | UNDELIVERED             | Customer Not Available     | Failed Attempt            |
+ * | UNDELIVERED             | RTO Initiated              | RTO - In Transit          |
+ * | SHIPPED                 | (blank / no update)        | Awaiting Tracking Update  |
  */
-export const normalizeTrackingStatus = (raw?: string | null): string => {
-  if (!raw) return 'In Transit';
-  const s = raw.toLowerCase().trim();
+export const normalizeTrackingStatus = (
+  rawStatus?: string | null,
+  rawRemarks?: string | null,
+  rawStatusType?: string | null
+): string => {
+  const cs = (rawStatus || '').toLowerCase().trim();
+  const rem = (rawRemarks || '').toLowerCase().trim();
+  const st = (rawStatusType || '').toLowerCase().trim();
+  const combined = `${cs} ${rem} ${st}`.trim();
 
   // 1. Delivered
   if (
-    s.includes('delivered to consignee') ||
-    s === 'delivered' ||
-    s.includes('delivery complete') ||
-    s.includes('successfully delivered') ||
-    s.startsWith('dlv')
+    rem.includes('delivered to consignee') ||
+    rem.includes('successfully delivered') ||
+    rem.includes('delivery complete') ||
+    cs === 'delivered' ||
+    cs.includes('delivered to consignee') ||
+    (st === 'delivered' && !rem.includes('rto') && !rem.includes('return') && !rem.includes('failed')) ||
+    (rem.includes('delivered') && !rem.includes('rto') && !rem.includes('origin') && !rem.includes('seller') && !rem.includes('return') && !rem.includes('failed'))
   ) {
     return 'Delivered';
   }
 
-  // 2. Out for Delivery
+  // 2. RTO Delivered to Seller
   if (
-    s.includes('out for delivery') ||
-    s.includes('out_for_delivery') ||
-    s.includes('dispatched for delivery') ||
-    s.includes('run sheet created') ||
-    s.includes('with delivery courier')
-  ) {
-    return 'Out for Delivery';
-  }
-
-  // 3. RTO Delivered
-  if (
-    s.includes('rto delivered') ||
-    s.includes('returned to origin') ||
-    s.includes('returned to seller') ||
-    s.includes('return delivered') ||
-    s.includes('rto complete')
+    combined.includes('rto delivered') ||
+    combined.includes('returned to origin') ||
+    combined.includes('returned to seller') ||
+    combined.includes('return delivered') ||
+    combined.includes('rto complete') ||
+    combined.includes('delivered to client')
   ) {
     return 'RTO Delivered to Seller';
   }
 
-  // 4. RTO In Transit
+  // 3. RTO - In Transit / Initiated
   if (
-    s.includes('rto in transit') ||
-    s.includes('returning to origin') ||
-    s.includes('rto initiated') ||
-    s.includes('return to origin') ||
-    s.includes('rto - in transit') ||
-    (s.includes('rto') && !s.includes('delivered'))
+    rem.includes('rto initiated') ||
+    rem.includes('rto in transit') ||
+    rem.includes('returning to origin') ||
+    rem.includes('return to origin') ||
+    rem.includes('rto created') ||
+    rem.includes('rto booked') ||
+    rem.includes('return in transit') ||
+    cs.includes('returning_to_origin') ||
+    cs.includes('returned_to_origin') ||
+    (cs.includes('rto') && !cs.includes('delivered')) ||
+    (rem.includes('rto') && !rem.includes('delivered')) ||
+    ((st === 'rto' || st === 'returned') && !combined.includes('delivered'))
   ) {
     return 'RTO - In Transit';
   }
 
-  // 5. Undelivered / Failed Attempt
+  // 4. Out for Delivery
   if (
-    s.includes('undelivered') ||
-    s.includes('failed attempt') ||
-    s.includes('consignee unavailable') ||
-    s.includes('delivery attempt failed') ||
-    s.includes('refused') ||
-    s.includes('customer not available') ||
-    s.includes('unattempted') ||
-    s.includes('door closed') ||
-    s.includes('address incomplete')
+    rem.includes('out for delivery') ||
+    rem.includes('out_for_delivery') ||
+    rem.includes('dispatched for delivery') ||
+    rem.includes('with delivery courier') ||
+    rem.includes('run sheet created') ||
+    rem.includes('runsheet created') ||
+    cs.includes('out for delivery') ||
+    cs === 'out_for_delivery'
   ) {
-    return 'Failed Attempt';
+    return 'Out for Delivery';
   }
 
-  // 6. Exception / Hold
+  // 5. In Transit (Active Courier Movement / Vehicle Departed / Hub Arrival / Facility Scans)
   if (
-    s.includes('exception') ||
-    s.includes('delay') ||
-    s.includes('hold') ||
-    s.includes('embargo') ||
-    s.includes('damage') ||
-    s.includes('lost') ||
-    s.includes('sla breach') ||
-    s.includes('audit hold')
-  ) {
-    return 'Delivery Exception';
-  }
-
-  // 7. Pickup Scheduled
-  if (
-    s.includes('pickup scheduled') ||
-    s.includes('scheduled for pickup') ||
-    s.includes('pickup arranged') ||
-    s.includes('pickup planned')
-  ) {
-    return 'Pickup Scheduled';
-  }
-
-  // 8. Ready for Pickup
-  if (
-    s.includes('ready for pickup') ||
-    s.includes('waiting pickup') ||
-    s.includes('ready to ship')
-  ) {
-    return 'Ready for Pickup';
-  }
-
-  // 9. Pending Manifest / Info Received
-  if (
-    s.includes('manifest') ||
-    s.includes('pending manifest') ||
-    s.includes('info received') ||
-    s.includes('booked') ||
-    s.includes('data received') ||
-    s.includes('order created')
-  ) {
-    return 'Info Received';
-  }
-
-  // 10. In Transit
-  if (
-    s.includes('in transit') ||
-    s.includes('transit') ||
-    s.includes('dispatched') ||
-    s.includes('shipped') ||
-    s.includes('departed') ||
-    s.includes('arrived at facility') ||
-    s.includes('bag received') ||
-    s.includes('reached facility')
+    rem.includes('vehicle departed') ||
+    rem.includes('vehicle arrived') ||
+    rem.includes('arrived at destination hub') ||
+    rem.includes('arrived at facility') ||
+    rem.includes('arrived at hub') ||
+    rem.includes('arrival') ||
+    rem.includes('shipment received at facility') ||
+    rem.includes('received at facility') ||
+    rem.includes('bag received') ||
+    rem.includes('reached facility') ||
+    rem.includes('bag added') ||
+    rem.includes('bagging') ||
+    rem.includes('bagged') ||
+    rem.includes('in transit') ||
+    rem.includes('transit') ||
+    rem.includes('departed') ||
+    rem.includes('line haul') ||
+    rem.includes('linehaul') ||
+    rem.includes('forwarded') ||
+    rem.includes('connected') ||
+    rem.includes('processed') ||
+    cs.includes('in transit') ||
+    cs.includes('transit') ||
+    cs.includes('departed') ||
+    (cs.includes('shipped') && rem.length > 0 && !rem.includes('pending') && !rem.includes('failed') && !rem.includes('cancel'))
   ) {
     return 'In Transit';
   }
 
-  // Safe fallback without inventing arbitrary status
+  // 6. Failed Attempt / Consignee Exception (Do NOT classify 'Vehicle Departed' or active transit as Failed Attempt)
+  if (
+    rem.includes('failed attempt') ||
+    rem.includes('customer not available') ||
+    rem.includes('consignee unavailable') ||
+    rem.includes('delivery attempt failed') ||
+    rem.includes('refused') ||
+    rem.includes('customer refused') ||
+    rem.includes('refused by customer') ||
+    rem.includes('door closed') ||
+    rem.includes('unattempted') ||
+    rem.includes('rescheduled') ||
+    rem.includes('address incomplete') ||
+    rem.includes('address not found') ||
+    rem.includes('wrong address') ||
+    ((cs === 'undelivered' || cs === 'failed') && !rem.includes('vehicle') && !rem.includes('departed') && !rem.includes('arrived') && !rem.includes('facility'))
+  ) {
+    return 'Failed Attempt';
+  }
+
+  // 7. Exception / Hold
+  if (
+    rem.includes('exception') ||
+    rem.includes('damage') ||
+    rem.includes('lost') ||
+    rem.includes('embargo') ||
+    rem.includes('audit hold') ||
+    rem.includes('misrouted') ||
+    rem.includes('delay') ||
+    cs.includes('exception') ||
+    cs.includes('damage') ||
+    cs.includes('lost') ||
+    cs.includes('hold')
+  ) {
+    return 'Delivery Exception';
+  }
+
+  // 8. Pickup Scheduled
+  if (
+    combined.includes('pickup scheduled') ||
+    combined.includes('scheduled for pickup') ||
+    combined.includes('pickup arranged') ||
+    combined.includes('pickup planned')
+  ) {
+    return 'Pickup Scheduled';
+  }
+
+  // 9. Ready for Pickup
+  if (
+    combined.includes('ready for pickup') ||
+    combined.includes('waiting pickup') ||
+    combined.includes('ready to ship')
+  ) {
+    return 'Ready for Pickup';
+  }
+
+  // 10. Pending Manifest / Info Received
+  if (
+    combined.includes('manifest') ||
+    combined.includes('pending manifest') ||
+    combined.includes('info received') ||
+    combined.includes('booked') ||
+    combined.includes('data received') ||
+    combined.includes('order created')
+  ) {
+    return 'Info Received';
+  }
+
+  // 11. SHIPPED without remarks or generic status
+  if (cs.includes('shipped') || cs.includes('dispatched')) {
+    // If there are meaningful remarks or location, it is actively in transit
+    if (rem && rem !== '-' && rem !== 'none' && !rem.includes('pending')) {
+      return 'In Transit';
+    }
+    // Only if genuine lack of tracking update
+    return 'In Transit';
+  }
+
+  // Safe fallback
+  if (rem && (rem.includes('transit') || rem.includes('move') || rem.includes('hub'))) {
+    return 'In Transit';
+  }
+
   return 'In Transit';
 };
 
 /**
- * Detects appropriate column headers dynamically for both Delhivery and ST Courier
+ * Detects appropriate column headers dynamically for both Delhivery and ST Courier:
+ * Prioritizes exact column names first to prevent false matches (e.g. 'Status Type' overriding 'Current Status').
  */
 export const detectTrackingColumns = (headers: string[]) => {
   const normHeaders = headers.map(normalizeKey);
 
-  const findIdx = (candidates: string[]) => {
-    const normCandidates = candidates.map(normalizeKey);
-    return normHeaders.findIndex(h => normCandidates.some(c => h === c || (c.length >= 4 && h.includes(c))));
+  const findIdx = (exactCandidates: string[], fallbackCandidates: string[] = []) => {
+    const normExact = exactCandidates.map(normalizeKey);
+    // 1. Exact match pass in priority order of candidates
+    for (const cand of normExact) {
+      const idx = normHeaders.findIndex(h => h === cand);
+      if (idx !== -1) return idx;
+    }
+    // 2. Substring match pass
+    const allCandidates = [...normExact, ...fallbackCandidates.map(normalizeKey)];
+    for (const cand of allCandidates) {
+      const idx = normHeaders.findIndex(h => cand.length >= 4 && (h.includes(cand) || cand.includes(h)));
+      if (idx !== -1) return idx;
+    }
+    return -1;
   };
 
   // Order ID / Reference column (Delhivery uses "Reference No.", ST Courier uses "Ref No" or "Order No")
-  const orderIdIdx = findIdx([
-    'referenceno', 'referencenumber', 'reference', 'refno', 'ref_no', 'ref',
-    'orderid', 'ordernumber', 'order_id', 'orderno', 'order',
-    'invoiceno', 'invoicenumber', 'customerno', 'consigneeref', 'bookingref'
-  ]);
+  const orderIdIdx = findIdx(
+    [
+      'referenceno', 'referencenumber', 'reference', 'refno', 'ref_no',
+      'orderid', 'ordernumber', 'order_id', 'orderno',
+      'invoiceno', 'invoicenumber', 'customerno', 'consigneeref', 'bookingref'
+    ],
+    ['ref', 'order']
+  );
 
   // AWB / Waybill Column (Delhivery uses "Waybill", ST Courier uses "Awb" or "Consignment No")
-  const awbIdx = findIdx([
-    'waybill', 'waybillnumber', 'waybillno', 'awb', 'awbnumber', 'awbno', 'awb_no',
-    'trackingnumber', 'trackingno', 'consignmentnumber', 'consignmentno', 'cnno',
-    'articlenumber', 'barcode', 'trackingid', 'docketno', 'podno'
-  ]);
+  const awbIdx = findIdx(
+    [
+      'waybill', 'waybillnumber', 'waybillno', 'awb', 'awbnumber', 'awbno', 'awb_no',
+      'trackingnumber', 'trackingno', 'consignmentnumber', 'consignmentno', 'cnno',
+      'articlenumber', 'barcode', 'trackingid', 'docketno', 'podno'
+    ]
+  );
 
-  // Status Column
-  const statusIdx = findIdx([
-    'currentstatus', 'status', 'statustype', 'shipmentstatus', 
-    'orderstatus', 'deliverystatus', 'eventstatus', 'delivery_status', 'latest_status', 'pending_return'
-  ]);
+  // Current Status Column (Exact priority to prevent 'Status Type' from hijacking 'Current Status')
+  const currentStatusIdx = findIdx(
+    [
+      'currentstatus', 'current_status', 'lateststatus', 'latest_status',
+      'shipmentstatus', 'orderstatus', 'deliverystatus', 'eventstatus', 'delivery_status', 'status'
+    ]
+  );
 
-  // Remarks / Latest Event Column
-  const remarksIdx = findIdx([
-    'remarks', 'pendingreturnedremarks', 'pendingremarks', 'latestevent', 
-    'instructions', 'eventdescription', 'scandetails', 'reason', 'activity', 
-    'lastscan', 'ndrstatus', 'ndrremarks', 'exceptionreason', 'pendingreason'
-  ]);
+  // Status Type Column (e.g. 'Status Type' in Delhivery exports)
+  const statusTypeIdx = findIdx(
+    [
+      'statustype', 'status_type', 'type_status', 'pending_return', 'pendingreturn'
+    ]
+  );
+
+  // General Status Column index (prefer Current Status, fallback to Status Type)
+  const statusIdx = currentStatusIdx !== -1 ? currentStatusIdx : statusTypeIdx;
+
+  // Remarks / Latest Event Column (e.g. 'Remarks', 'Pending / Returned Remarks')
+  const remarksIdx = findIdx(
+    [
+      'remarks', 'pendingreturnedremarks', 'pendingremarks', 'latestevent', 
+      'instructions', 'eventdescription', 'scandetails', 'reason', 'activity', 
+      'lastscan', 'ndrstatus', 'ndrremarks', 'exceptionreason', 'pendingreason'
+    ]
+  );
 
   // Delivery Date Column
-  const deliveryDateIdx = findIdx([
-    'delivereddate', 'deliverydate', 'orderdelivereddate', 'deliveredon', 
-    'scandate', 'actualdeliverydate', 'delivery_time', 'delivered_time'
-  ]);
+  const deliveryDateIdx = findIdx(
+    [
+      'delivereddate', 'deliverydate', 'orderdelivereddate', 'deliveredon', 
+      'actualdeliverydate', 'delivery_time', 'delivered_time'
+    ],
+    ['scandate']
+  );
 
   // Estimated Delivery Date Column
-  const estimatedDeliveryDateIdx = findIdx([
-    'estimateddeliverydate', 'promiseddeliverydate', 'expecteddeliverydate', 'edd', 'promise_date'
-  ]);
+  const estimatedDeliveryDateIdx = findIdx(
+    [
+      'estimateddeliverydate', 'promiseddeliverydate', 'expecteddeliverydate', 'edd', 'promise_date'
+    ]
+  );
 
   // Pickup / Dispatch Date Column
-  const pickupDateIdx = findIdx([
-    'pickupdate', 'pickup_date', 'dispatchdate', 'dispatch_date', 'shippeddate', 'manifestdate', 'manifest_date', 'bookingdate'
-  ]);
+  const pickupDateIdx = findIdx(
+    [
+      'pickupdate', 'pickup_date', 'dispatchdate', 'dispatch_date', 'shippeddate',
+      'manifestdate', 'manifest_date', 'firstbaggingdate', 'bookingdate'
+    ]
+  );
 
   // Courier Column
-  const courierIdx = findIdx([
-    'courier', 'couriercompany', 'carrier', 'serviceprovider', 'shippingcompany'
-  ]);
+  const courierIdx = findIdx(
+    [
+      'courier', 'couriercompany', 'carrier', 'serviceprovider', 'shippingcompany'
+    ]
+  );
 
   // Consignee / Customer Column
-  const customerIdx = findIdx([
-    'consigneename', 'customername', 'buyername', 'clientname', 'name', 'consignee'
-  ]);
+  const customerIdx = findIdx(
+    [
+      'consigneename', 'customername', 'buyername', 'clientname', 'client', 'name', 'consignee'
+    ]
+  );
 
   // Amount Column
-  const amountIdx = findIdx([
-    'orderamount', 'amount', 'totalamount', 'invoicevalue', 'value', 'collectableamount'
-  ]);
+  const amountIdx = findIdx(
+    [
+      'orderamount', 'amount', 'totalamount', 'invoicevalue', 'value', 'collectableamount'
+    ]
+  );
 
   // Payment Mode Column
-  const paymentModeIdx = findIdx([
-    'paymentmode', 'type', 'paymentmethod', 'payment_type'
-  ]);
+  const paymentModeIdx = findIdx(
+    [
+      'paymentmode', 'type', 'paymentmethod', 'payment_type'
+    ]
+  );
 
   // Location / Origin Center Column
-  const locationIdx = findIdx([
-    'origincenter', 'origin_center', 'currentlocation', 'location', 'lastlocation', 'destination', 'scancenter', 'hub'
-  ]);
+  const locationIdx = findIdx(
+    [
+      'origincenter', 'origin_center', 'currentlocation', 'location', 'lastlocation', 'destination', 'scancenter', 'hub'
+    ]
+  );
 
   return {
     orderIdIdx,
     awbIdx,
     statusIdx,
+    currentStatusIdx,
+    statusTypeIdx,
     remarksIdx,
     deliveryDateIdx,
     estimatedDeliveryDateIdx,
@@ -466,6 +577,7 @@ export const analyzeCourierTrackingFile = async (
     }
 
     const rawStatus = cols.statusIdx !== -1 ? String(row[cols.statusIdx] || '').trim() : '';
+    const rawStatusType = cols.statusTypeIdx !== -1 ? String(row[cols.statusTypeIdx] || '').trim() : undefined;
     const rawRemarks = cols.remarksIdx !== -1 ? String(row[cols.remarksIdx] || '').trim() : undefined;
     const rawDeliveryDate = cols.deliveryDateIdx !== -1 ? parseRowDate(row[cols.deliveryDateIdx]) : undefined;
     const rawEdd = cols.estimatedDeliveryDateIdx !== -1 ? parseRowDate(row[cols.estimatedDeliveryDateIdx]) : undefined;
@@ -485,7 +597,7 @@ export const analyzeCourierTrackingFile = async (
       rowDetectedCourier = fileLevelCourier || 'Delhivery';
     }
 
-    const normalizedStatus = normalizeTrackingStatus(rawStatus);
+    const normalizedStatus = normalizeTrackingStatus(rawStatus, rawRemarks, rawStatusType);
 
     // Primary matching strategy: Match by AWB / Waybill number
     let existing: LogisticsOrder | undefined;
@@ -545,6 +657,7 @@ export const analyzeCourierTrackingFile = async (
         currentStatus: existing.status || 'Not Tracked',
         newStatus: normalizedStatus,
         rawStatus,
+        statusType: rawStatusType,
         remarks: rawRemarks || existing.remarks,
         deliveredDate: rawDeliveryDate || existing.deliveredDate,
         estimatedDeliveryDate: rawEdd || existing.estimatedDeliveryDate,
@@ -569,6 +682,7 @@ export const analyzeCourierTrackingFile = async (
         currentStatus: 'Not in System',
         newStatus: normalizedStatus,
         rawStatus,
+        statusType: rawStatusType,
         remarks: rawRemarks,
         deliveredDate: rawDeliveryDate,
         estimatedDeliveryDate: rawEdd,
@@ -659,6 +773,9 @@ export const commitCourierTrackingUpdates = async (
 
         if (item.remarks) {
           updatePayload.remarks = item.remarks;
+          updatePayload.lastEvent = item.remarks;
+        } else if (!ord.remarks) {
+          updatePayload.lastEvent = item.rawStatus || finalStatus;
         }
         if (item.deliveredDate && isDelivered) {
           updatePayload.deliveredDate = item.deliveredDate;
@@ -726,13 +843,17 @@ export const commitCourierTrackingUpdates = async (
 
         // Update sales_orders dispatch_status and extra_data
         const isDelivered = item.newStatus === 'Delivered';
+        const isRto = item.newStatus.includes('RTO');
         await supabase.from('sales_orders').update({
-          dispatch_status: isDelivered ? 'DELIVERED' : 'DISPATCHED',
+          dispatch_status: isDelivered ? 'DELIVERED' : (isRto ? 'RTO' : 'DISPATCHED'),
           dispatch_date: item.dispatchDate || nowIso.slice(0, 10),
           updated_at: nowIso,
           extra_data: {
             awb_number: item.awbNumber,
             courier: item.courier,
+            delhivery_current_status: item.rawStatus,
+            delhivery_status_type: item.statusType,
+            delhivery_remarks: item.remarks,
             last_reconciled_at: nowIso
           }
         }).eq('order_id', cleanOid);

@@ -289,15 +289,34 @@ export const TrackingModal: React.FC<TrackingModalProps> = ({ order, onClose, on
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Uploaded Tracking Data</span>
               {isUploadedAvailable ? (
                 <div className="bg-indigo-950/20 border border-indigo-500/25 p-4 rounded-xl flex flex-col gap-3 shadow-sm shadow-indigo-500/5">
-                  <div className="flex justify-between items-center gap-4">
-                    <div>
+                  <div className="flex justify-between items-start gap-4">
+                    <div className="space-y-1">
                       <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1">
                         <CheckCircle size={10} /> Uploaded AWB Available
                       </span>
                       <p className="text-sm font-mono font-bold text-slate-200 mt-0.5 select-all">{order.awbNumber}</p>
-                      <p className="text-[9px] text-slate-400 font-medium">
-                        Courier: <span className="font-semibold text-slate-300">{order.courier || detectedUploadedCourier}</span>
-                      </p>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] pt-1 border-t border-indigo-500/20 mt-2">
+                        <div>
+                          <span className="text-slate-400">Courier: </span>
+                          <span className="font-semibold text-slate-200">{order.courier || detectedUploadedCourier}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Status: </span>
+                          <span className="font-semibold text-cyan-300">{order.status || 'In Transit'}</span>
+                        </div>
+                        {(order.lastEvent || order.remarks) && (
+                          <div className="col-span-2">
+                            <span className="text-slate-400">Latest Update: </span>
+                            <span className="font-semibold text-slate-200">{order.lastEvent || order.remarks}</span>
+                          </div>
+                        )}
+                        {(order.syncedAt || order.dispatchDate) && (
+                          <div className="col-span-2">
+                            <span className="text-slate-400">Update Date: </span>
+                            <span className="font-mono text-slate-300">{order.syncedAt || order.dispatchDate}</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                     <button
                       type="button"

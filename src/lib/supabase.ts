@@ -7,4 +7,15 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error("Missing Supabase environment variables");
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+if (typeof globalThis.WebSocket === 'undefined') {
+  (globalThis as any).WebSocket = class MockWebSocket {};
+}
+
+const isBrowser = typeof window !== 'undefined';
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: isBrowser,
+    autoRefreshToken: isBrowser,
+  }
+});
