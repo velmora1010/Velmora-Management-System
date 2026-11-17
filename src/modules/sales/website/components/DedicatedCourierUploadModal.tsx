@@ -68,7 +68,26 @@ export const DedicatedCourierUploadModal: React.FC<DedicatedCourierUploadModalPr
     phase: ''
   });
 
-  if (!isOpen) return null;
+  // Filtered preview items hook - must be declared before any conditional returns
+  const filteredItems = useMemo(() => {
+    if (!analysisResult) return [];
+    return analysisResult.previewItems.filter(item => {
+      if (filterType === 'MATCHED' && !item.isMatched) return false;
+      if (filterType === 'UNMATCHED' && item.isMatched) return false;
+
+      if (searchTerm.trim()) {
+        const q = searchTerm.toLowerCase().trim();
+        const mOid = item.orderId.toLowerCase().includes(q) || item.cleanOrderId.toLowerCase().includes(q);
+        const mAwb = item.awbNumber.toLowerCase().includes(q);
+        const mCust = (item.customerName || '').toLowerCase().includes(q);
+        const mCity = (item.city || '').toLowerCase().includes(q);
+        const mCourier = (item.courier || '').toLowerCase().includes(q);
+        return mOid || mAwb || mCust || mCity || mCourier;
+      }
+
+      return true;
+    });
+  }, [analysisResult, filterType, searchTerm]);
 
   // Courier Theme Details
   const courierConfig = getCourierTheme(courierType);
@@ -158,25 +177,7 @@ export const DedicatedCourierUploadModal: React.FC<DedicatedCourierUploadModalPr
     }
   };
 
-  const filteredItems = useMemo(() => {
-    if (!analysisResult) return [];
-    return analysisResult.previewItems.filter(item => {
-      if (filterType === 'MATCHED' && !item.isMatched) return false;
-      if (filterType === 'UNMATCHED' && item.isMatched) return false;
-
-      if (searchTerm.trim()) {
-        const q = searchTerm.toLowerCase().trim();
-        const mOid = item.orderId.toLowerCase().includes(q) || item.cleanOrderId.toLowerCase().includes(q);
-        const mAwb = item.awbNumber.toLowerCase().includes(q);
-        const mCust = (item.customerName || '').toLowerCase().includes(q);
-        const mCity = (item.city || '').toLowerCase().includes(q);
-        const mCourier = (item.courier || '').toLowerCase().includes(q);
-        return mOid || mAwb || mCust || mCity || mCourier;
-      }
-
-      return true;
-    });
-  }, [analysisResult, filterType, searchTerm]);
+  if (!isOpen) return null;
 
   return (
     <div 

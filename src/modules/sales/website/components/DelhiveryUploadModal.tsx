@@ -60,8 +60,6 @@ export const DelhiveryUploadModal: React.FC<DelhiveryUploadModalProps> = ({
     phase: ''
   });
 
-  if (!isOpen) return null;
-
   const handleReset = () => {
     setStep('select');
     setFile(null);
@@ -150,6 +148,8 @@ export const DelhiveryUploadModal: React.FC<DelhiveryUploadModalProps> = ({
     }
     return true;
   });
+
+  if (!isOpen) return null;
 
   return (
     <div 
