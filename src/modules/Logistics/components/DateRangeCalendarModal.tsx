@@ -279,8 +279,6 @@ export const DateRangeCalendarModal: React.FC<DateRangeCalendarModalProps> = ({
     onClose();
   };
 
-  if (!isOpen) return null;
-
   // Build grid data for a month
   const buildMonthGrid = (year: number, month: number) => {
     const firstDay = new Date(year, month, 1).getDay(); // 0 is Sunday
@@ -407,6 +405,8 @@ export const DateRangeCalendarModal: React.FC<DateRangeCalendarModalProps> = ({
 
   const headerRangeTitle = `${MONTH_NAMES_FULL[viewMonth]} ${viewYear} — ${MONTH_NAMES_FULL[m2Month]} ${m2Year}`.toUpperCase();
   const selectedRangeDisplayText = formatRangeDisplay(draftStart, draftEnd);
+
+  if (!isOpen) return null;
 
   return (
     <div 

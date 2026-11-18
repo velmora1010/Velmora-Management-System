@@ -151,6 +151,8 @@ export interface WebsiteConsolidatedOrder {
   delivered_date?: string;
   order_status?: string;
   cancellation?: OrderCancellationData;
+  delhivery_remarks?: string;
+  extra_data?: Record<string, any>;
 }
 
 export interface WebsiteFullOrderDetails {

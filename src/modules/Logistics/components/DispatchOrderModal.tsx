@@ -27,10 +27,8 @@ export const DispatchOrderModal: React.FC<DispatchOrderModalProps> = ({
   onClose,
   onSuccess
 }) => {
-  if (!order) return null;
-
-  const [courier, setCourier] = useState(order.courier || ACTIVE_COURIERS[0] || 'ST Courier');
-  const [awbNumber, setAwbNumber] = useState(order.awbNumber || '');
+  const [courier, setCourier] = useState(order?.courier || ACTIVE_COURIERS[0] || 'ST Courier');
+  const [awbNumber, setAwbNumber] = useState(order?.awbNumber || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,6 +72,8 @@ export const DispatchOrderModal: React.FC<DispatchOrderModalProps> = ({
       setIsSubmitting(false);
     }
   };
+
+  if (!order) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">

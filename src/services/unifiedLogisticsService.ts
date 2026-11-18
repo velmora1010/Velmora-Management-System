@@ -74,9 +74,11 @@ export const mapToUnifiedWorkflowStage = (
   awbNumber?: string | null,
   hasRequiredInfo?: boolean,
   fulfillmentStatus?: string | null,
-  financialStatus?: string | null
+  financialStatus?: string | null,
+  remarks?: string | null
 ): { status: UnifiedTrackingStatus; workflowStage: UnifiedWorkflowStage } => {
   const s = (rawStatus || '').trim().toLowerCase();
+  const rem = (remarks || '').trim().toLowerCase();
   const currentStage = (stage || '').trim().toLowerCase();
   const fStatus = (fulfillmentStatus || '').trim().toLowerCase();
   const finStatus = (financialStatus || '').trim().toLowerCase();
@@ -99,11 +101,12 @@ export const mapToUnifiedWorkflowStage = (
 
   // 1. Fulfilled orders (source fulfillment status = 'fulfilled' or stage = 'fulfilled')
   if (currentStage === 'fulfilled' || fStatus === 'fulfilled') {
-    const isReturn = s.includes('rto') || s.includes('return');
-    const trackingStatus = hasAwb || isReturn ? resolveTrackingStatus(s, true) : 'Delivered';
+    const isReturn = s.includes('rto') || s.includes('return') || rem.includes('rto') || rem.includes('return');
+    const trackingStatus = hasAwb || isReturn ? resolveTrackingStatus(s, true, rem) : 'Delivered';
+    const isActivelyInTransit = trackingStatus === 'In Transit' || trackingStatus === 'Out for Delivery';
     return {
       status: trackingStatus || 'Delivered',
-      workflowStage: isReturn ? 'tracking' : 'fulfilled'
+      workflowStage: isReturn || isActivelyInTransit ? 'tracking' : 'fulfilled'
     };
   }
 
@@ -116,7 +119,7 @@ export const mapToUnifiedWorkflowStage = (
   }
 
   if (currentStage === 'dispatched') {
-    const trackingStatus = resolveTrackingStatus(s, hasAwb);
+    const trackingStatus = resolveTrackingStatus(s, hasAwb, rem);
     return {
       status: trackingStatus || 'Awaiting Tracking Update',
       workflowStage: 'dispatched'
@@ -125,7 +128,7 @@ export const mapToUnifiedWorkflowStage = (
 
   // 3. Stage 'tracking'
   if (currentStage === 'tracking') {
-    const trackingStatus = resolveTrackingStatus(s, hasAwb);
+    const trackingStatus = resolveTrackingStatus(s, hasAwb, rem);
     return {
       status: trackingStatus || 'Awaiting Tracking Update',
       workflowStage: 'tracking'
@@ -137,14 +140,24 @@ export const mapToUnifiedWorkflowStage = (
     s.includes('delivered') ||
     s.includes('in transit') ||
     s.includes('transit') ||
+    s.includes('shipped') ||
+    s.includes('departed') ||
     s.includes('out for delivery') ||
     s.includes('rto') ||
     s.includes('returned') ||
     s.includes('exception') ||
-    s.includes('failed attempt')
+    s.includes('failed attempt') ||
+    (rem && (
+      rem.includes('vehicle departed') ||
+      rem.includes('arrived') ||
+      rem.includes('facility') ||
+      rem.includes('out for delivery') ||
+      rem.includes('delivered') ||
+      rem.includes('rto')
+    ))
   ) {
     return {
-      status: resolveTrackingStatus(s, hasAwb),
+      status: resolveTrackingStatus(s, hasAwb, rem),
       workflowStage: 'tracking'
     };
   }
@@ -159,7 +172,7 @@ export const mapToUnifiedWorkflowStage = (
   // If order has an AWB number, keep courier tracking attached
   if (hasAwb && (currentStage === 'dispatched' || currentStage === 'tracking')) {
     return {
-      status: resolveTrackingStatus(s, true),
+      status: resolveTrackingStatus(s, true, rem),
       workflowStage: 'tracking'
     };
   }
@@ -179,52 +192,144 @@ export const mapToUnifiedWorkflowStage = (
   };
 };
 
-export const resolveTrackingStatus = (s: string, hasAwb: boolean): UnifiedTrackingStatus => {
-  if (s.includes('rto') || s.includes('returned') || s.includes('return to origin')) {
-    return 'RTO';
-  }
-  if (s.includes('delivered')) {
+export const resolveTrackingStatus = (
+  s: string, 
+  hasAwb: boolean, 
+  remarks?: string
+): UnifiedTrackingStatus => {
+  const normS = (s || '').toLowerCase().trim();
+  const normR = (remarks || '').toLowerCase().trim();
+  const combined = `${normS} ${normR}`.trim();
+
+  // 1. Delivered
+  if (
+    combined.includes('delivered to consignee') ||
+    combined.includes('successfully delivered') ||
+    combined.includes('delivery complete') ||
+    normS === 'delivered' ||
+    (normR.includes('delivered') && !normR.includes('rto') && !normR.includes('seller') && !normR.includes('origin') && !normR.includes('return'))
+  ) {
     return 'Delivered';
   }
-  if (s.includes('out for delivery') || s.includes('out_for_delivery')) {
+
+  // 2. RTO (Delivered to Seller or In Transit / Initiated)
+  if (
+    combined.includes('rto') || 
+    combined.includes('returned') || 
+    combined.includes('return to origin') ||
+    combined.includes('returning to origin') ||
+    combined.includes('returning_to_origin') ||
+    combined.includes('returned_to_origin')
+  ) {
+    return 'RTO';
+  }
+
+  // 3. Out for Delivery
+  if (
+    combined.includes('out for delivery') || 
+    combined.includes('out_for_delivery') ||
+    combined.includes('dispatched for delivery') ||
+    combined.includes('with delivery courier') ||
+    combined.includes('run sheet created') ||
+    combined.includes('runsheet')
+  ) {
     return 'Out for Delivery';
   }
+
+  // 4. In Transit (Active Courier Movement, Vehicle Departed, Facility Scans, SHIPPED)
   if (
-    s.includes('in transit') ||
-    s.includes('transit') ||
-    s.includes('processed') ||
-    s.includes('forwarded') ||
-    s.includes('hub reached')
+    combined.includes('vehicle departed') ||
+    combined.includes('vehicle arrived') ||
+    combined.includes('arrived at destination hub') ||
+    combined.includes('arrived at facility') ||
+    combined.includes('arrived at hub') ||
+    combined.includes('shipment received at facility') ||
+    combined.includes('received at facility') ||
+    combined.includes('bag received') ||
+    combined.includes('reached facility') ||
+    combined.includes('bag added') ||
+    combined.includes('bagging') ||
+    combined.includes('bagged') ||
+    combined.includes('in transit') ||
+    combined.includes('transit') ||
+    combined.includes('departed') ||
+    combined.includes('line haul') ||
+    combined.includes('linehaul') ||
+    combined.includes('processed') ||
+    combined.includes('forwarded') ||
+    combined.includes('connected') ||
+    combined.includes('hub reached') ||
+    normS.includes('shipped') ||
+    normS.includes('dispatched') ||
+    normS.includes('picked up')
   ) {
     return 'In Transit';
   }
-  if (s.includes('failed attempt') || s.includes('undelivered') || s.includes('attempted')) {
+
+  // 5. Failed Attempt / Consignee Unavailable
+  if (
+    combined.includes('failed attempt') || 
+    combined.includes('customer not available') ||
+    combined.includes('consignee unavailable') ||
+    combined.includes('delivery attempt failed') ||
+    combined.includes('customer refused') ||
+    combined.includes('refused by customer') ||
+    combined.includes('door closed') ||
+    combined.includes('unattempted') ||
+    combined.includes('rescheduled') ||
+    combined.includes('address incomplete') ||
+    ((normS === 'undelivered' || normS === 'failed') && !combined.includes('vehicle') && !combined.includes('arrived') && !combined.includes('facility'))
+  ) {
     return 'Failed Attempt';
   }
+
+  // 6. Delivery Exception / Delay
   if (
-    s.includes('exception') ||
-    s.includes('error') ||
-    s.includes('unable to fetch') ||
-    s.includes('sync failed') ||
-    s.includes('expired')
+    combined.includes('exception') ||
+    combined.includes('error') ||
+    combined.includes('unable to fetch') ||
+    combined.includes('sync failed') ||
+    combined.includes('expired') ||
+    combined.includes('delay') ||
+    combined.includes('damage') ||
+    combined.includes('lost') ||
+    combined.includes('hold')
   ) {
     return 'Delivery Exception';
   }
-  if (s.includes('cancelled') || s.includes('canceled')) {
+
+  // 7. Cancelled
+  if (combined.includes('cancelled') || combined.includes('canceled')) {
     return 'Cancelled';
   }
-  if (s.includes('ready for pickup') || s.includes('pickup scheduled') || s.includes('waiting_pickup') || s.includes('waiting pickup')) {
+
+  // 8. Ready for Pickup
+  if (
+    combined.includes('ready for pickup') || 
+    combined.includes('pickup scheduled') || 
+    combined.includes('waiting_pickup') || 
+    combined.includes('waiting pickup')
+  ) {
     return 'Ready for Pickup';
   }
-  if (s.includes('ready to ship') || s.includes('booked') || s.includes('manifest')) {
+
+  // 9. Ready to Ship / Manifest / Info Received
+  if (
+    combined.includes('ready to ship') || 
+    combined.includes('booked') || 
+    combined.includes('manifest')
+  ) {
     return 'Ready to Ship';
   }
-  if (s.includes('awaiting') || s.includes('awaiting tracking update')) {
-    return 'Awaiting Tracking Update';
-  }
-  if (s.includes('info received')) {
+
+  if (combined.includes('info received') || combined.includes('data received')) {
     return 'Info Received';
   }
+
+  if (combined.includes('awaiting') || combined.includes('awaiting tracking update')) {
+    return 'Awaiting Tracking Update';
+  }
+
   return hasAwb ? 'Awaiting Tracking Update' : 'Not Tracked';
 };
 
@@ -274,13 +379,16 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
     ? 'DELIVERED' 
     : ((order as any).rawStatus || order.status);
 
+  const effectiveRemarks = (order.remarks || order.lastEvent || (order as any).delhivery_remarks || '').trim();
+
   const { status, workflowStage } = mapToUnifiedWorkflowStage(
     effectiveStatusInput,
     order.stage,
     order.awbNumber,
     hasRequiredInfo,
     order.fulfillmentStatus,
-    order.financialStatus
+    order.financialStatus,
+    effectiveRemarks
   );
 
   const parsedOrderDate = parseAndFormatLogisticsDate(order.orderDate || order.uploadedAt);
@@ -325,7 +433,7 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
     estimatedDeliveryDateIso: parsedEstDeliveryDate.isoDate || undefined,
     deliveredDate: parsedDeliveredDate.displayDate || order.deliveredDate || '',
     deliveredDateIso: parsedDeliveredDate.isoDate || undefined,
-    remarks: decodeHtmlEntities(order.remarks || order.lastEvent || order.sourceStatus || order.sourceSubStatus),
+    remarks: decodeHtmlEntities(order.remarks || order.lastEvent || (order as any).delhivery_remarks || order.sourceStatus || order.sourceSubStatus || ''),
     batchId: order.batchId,
     batchName: order.batchName,
     fulfillmentStatus: order.fulfillmentStatus,
@@ -338,7 +446,7 @@ export const fromDexieOrder = (order: LogisticsOrder): UnifiedLogisticsOrder => 
     status,
     rawStatus: (order as any).rawStatus || order.status,
     lastLocation: (order as any).lastLocation,
-    lastEvent: order.lastEvent,
+    lastEvent: decodeHtmlEntities(order.lastEvent || order.remarks || (order as any).delhivery_remarks || ''),
     syncedAt: order.syncedAt,
     trackingError: order.trackingError,
     syncState: order.syncState || 'idle',
@@ -1077,12 +1185,19 @@ export const syncSalesUploadToLogistics = async (
         fulfilledCount++;
       } else if (order.stage === 'tracking' || order.awb_number) {
         patch.stage = 'tracking';
-        patch.status = order.status || existing.status || 'Awaiting Tracking Update';
+        const effectiveRem = order.remarks || (order as any).lastEvent || existing.remarks || (existing as any).lastEvent || '';
+        const effectiveRaw = order.rawStatus || (order as any).raw_status || existing.rawStatus || '';
+        const resolved = resolveTrackingStatus(order.status || effectiveRaw, true, effectiveRem);
+        patch.status = resolved;
         if (order.awb_number) patch.awbNumber = order.awb_number;
         if (order.courier) patch.courier = normalizeCourier(order.courier);
         if (order.dispatch_date) patch.dispatchDate = order.dispatch_date;
         if (order.estimated_delivery_date) patch.estimatedDeliveryDate = order.estimated_delivery_date;
         if (order.delivered_date) patch.deliveredDate = order.delivered_date;
+        if (effectiveRem) {
+          patch.remarks = effectiveRem;
+          patch.lastEvent = effectiveRem;
+        }
       } else if (existing.stage === 'fulfilled') {
         patch.stage = 'fulfilled';
         patch.status = 'Fulfilled';
@@ -1095,8 +1210,9 @@ export const syncSalesUploadToLogistics = async (
       if ((order.rawStatus || (order as any).raw_status) && !patch.rawStatus) {
         patch.rawStatus = order.rawStatus || (order as any).raw_status;
       }
-      if (order.remarks && !existing.remarks) {
+      if (order.remarks) {
         patch.remarks = order.remarks;
+        patch.lastEvent = order.remarks;
       }
       if (((order as any).lastLocation || (order as any).last_location) && !(existing as any).lastLocation) {
         (patch as any).lastLocation = (order as any).lastLocation || (order as any).last_location;
@@ -1455,6 +1571,12 @@ export const syncSalesOrdersFromSupabase = async (options?: { force?: boolean })
       } else if (existingShipment?.status) {
         status = existingShipment.status;
         rawStatus = existingShipment.raw_status || existingShipment.status;
+      } else if (isDispatched && (extra.delhivery_remarks || extra.delhivery_current_status)) {
+        const extraRem = extra.delhivery_remarks || '';
+        const extraCs = extra.delhivery_current_status || '';
+        const resolved = resolveTrackingStatus(extraCs || 'In Transit', true, extraRem);
+        status = resolved;
+        rawStatus = extraCs || resolved;
       } else if (isSourceFulfilled) {
         status = 'Fulfilled';
         rawStatus = 'Fulfilled';
@@ -1469,7 +1591,9 @@ export const syncSalesOrdersFromSupabase = async (options?: { force?: boolean })
             ? 'tracking'
             : (isShipmentDelivered
                 ? 'fulfilled'
-                : (isSourceFulfilled ? (hasShipment ? 'tracking' : 'fulfilled') : (isDispatched ? 'tracking' : undefined))));
+                : (status === 'In Transit' || status === 'Out for Delivery' || hasShipment || (isDispatched && extra.awb_number)
+                    ? 'tracking'
+                    : (isSourceFulfilled ? 'fulfilled' : undefined))));
 
       const cancellationStatus = isConfirmedCancelled 
         ? 'Completed' 
@@ -1514,13 +1638,17 @@ export const syncSalesOrdersFromSupabase = async (options?: { force?: boolean })
         cancellationDate: cData.cancelled_at || cData.confirmed_at || so.updated_at,
         previousShipmentStatus: cData.previous_shipment_status || (hasShipment ? 'Dispatched' : 'Not manifested'),
         cancellation: cData,
-        remarks: existingShipment?.remarks || extra.cancellation_notes
+        remarks: existingShipment?.remarks || extra.delhivery_remarks || extra.cancellation_notes,
+        lastEvent: existingShipment?.remarks || extra.delhivery_remarks || undefined,
+        lastLocation: existingShipment?.last_location || extra.delhivery_origin_center || undefined
       };
     });
 
     const transformed = transformedSales;
 
-    return await syncSalesUploadToLogistics(transformed);
+    const syncRes = await syncSalesUploadToLogistics(transformed);
+    await healLogisticsTrackingStatuses();
+    return syncRes;
     } catch (err) {
       console.warn('syncSalesOrdersFromSupabase warning:', err);
       return {
@@ -1540,6 +1668,59 @@ export const syncSalesOrdersFromSupabase = async (options?: { force?: boolean })
   })();
 
   return syncPromise;
+};
+
+/**
+ * Automatically inspects and reconciles existing Dexie shipment records whose status was
+ * incorrectly assigned 'Awaiting Tracking Update' or 'Pending' despite containing valid courier events
+ * (such as 'Vehicle Departed', 'Arrived at Destination Hub', 'SHIPPED', etc.) in remarks or rawStatus.
+ */
+export const healLogisticsTrackingStatuses = async (): Promise<number> => {
+  try {
+    const orders = await db.logistics_orders.toArray();
+    const toUpdate: LogisticsOrder[] = [];
+
+    for (const ord of orders) {
+      if (!ord.id || ord.stage === 'trash' || ord.status === 'Deleted' || ord.status === 'Cancelled') continue;
+      if (!ord.awbNumber || ord.awbNumber.trim().length === 0) continue;
+
+      const rem = (ord.remarks || ord.lastEvent || (ord as any).delhivery_remarks || '').trim();
+      const raw = ((ord as any).rawStatus || ord.status || '').trim();
+      const curStatus = (ord.status || '').trim();
+
+      // Check if this record has a valid tracking event but is marked as Awaiting Tracking Update or Not Tracked
+      const isStuckStatus = curStatus === 'Awaiting Tracking Update' || 
+                            curStatus === 'Not Tracked' || 
+                            curStatus === 'Pending' ||
+                            curStatus === 'Info Received';
+
+      if (isStuckStatus && (rem.length > 0 || raw.toUpperCase() === 'SHIPPED')) {
+        const resolved = resolveTrackingStatus(raw, true, rem);
+        if (resolved !== curStatus) {
+          toUpdate.push({
+            ...ord,
+            status: resolved,
+            stage: resolved === 'Delivered' ? 'fulfilled' : 'tracking',
+            remarks: rem || ord.remarks,
+            lastEvent: rem || ord.lastEvent || resolved
+          });
+        }
+      }
+    }
+
+    if (toUpdate.length > 0) {
+      const CHUNK = 300;
+      for (let i = 0; i < toUpdate.length; i += CHUNK) {
+        await db.logistics_orders.bulkPut(toUpdate.slice(i, i + CHUNK));
+      }
+      console.log(`[LOGISTICS HEALING] Reconciled ${toUpdate.length} shipment statuses with valid courier events.`);
+    }
+
+    return toUpdate.length;
+  } catch (err) {
+    console.warn('healLogisticsTrackingStatuses error:', err);
+    return 0;
+  }
 };
 
 /**

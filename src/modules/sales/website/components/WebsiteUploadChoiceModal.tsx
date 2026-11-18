@@ -1,133 +1,163 @@
 import React from 'react';
-import { ShoppingBag, Truck, X, ArrowRight, UploadCloud, Layers } from 'lucide-react';
+import { ShoppingBag, Truck, X, ArrowRight, UploadCloud, Package, Send, Mail } from 'lucide-react';
 
 interface WebsiteUploadChoiceModalProps {
   isOpen: boolean;
   onClose: () => void;
   onChooseShopify: () => void;
   onChooseDelhivery: () => void;
+  onChooseAmazonShipping: () => void;
+  onChooseSTCourier: () => void;
+  onChooseIndiaPost: () => void;
 }
 
 export const WebsiteUploadChoiceModal: React.FC<WebsiteUploadChoiceModalProps> = ({
   isOpen,
   onClose,
   onChooseShopify,
-  onChooseDelhivery
+  onChooseDelhivery,
+  onChooseAmazonShipping,
+  onChooseSTCourier,
+  onChooseIndiaPost
 }) => {
   if (!isOpen) return null;
 
+  const uploadOptions = [
+    {
+      id: 'shopify',
+      title: 'Shopify Upload',
+      badge: 'Active',
+      badgeColor: 'bg-purple-500/15 text-purple-300 border-purple-500/30',
+      icon: <ShoppingBag size={20} />,
+      iconBg: 'bg-purple-500/10 border-purple-500/20 text-purple-400',
+      hoverBorder: 'hover:border-purple-500/50 hover:bg-slate-800/40',
+      actionColor: 'text-purple-400 group-hover:text-purple-300',
+      onClick: () => {
+        onClose();
+        onChooseShopify();
+      }
+    },
+    {
+      id: 'delhivery',
+      title: 'Delhivery One',
+      badge: 'Active',
+      badgeColor: 'bg-orange-500/15 text-orange-300 border-orange-500/30',
+      icon: <Truck size={20} />,
+      iconBg: 'bg-orange-500/10 border-orange-500/20 text-orange-400',
+      hoverBorder: 'hover:border-orange-500/50 hover:bg-slate-800/40',
+      actionColor: 'text-orange-400 group-hover:text-orange-300',
+      onClick: () => {
+        onClose();
+        onChooseDelhivery();
+      }
+    },
+    {
+      id: 'amazon_shipping',
+      title: 'Amazon Shipping',
+      badge: 'Active',
+      badgeColor: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+      icon: <Package size={20} />,
+      iconBg: 'bg-amber-500/10 border-amber-500/20 text-amber-400',
+      hoverBorder: 'hover:border-amber-500/50 hover:bg-slate-800/40',
+      actionColor: 'text-amber-400 group-hover:text-amber-300',
+      onClick: () => {
+        onClose();
+        onChooseAmazonShipping();
+      }
+    },
+    {
+      id: 'st_courier',
+      title: 'ST Courier',
+      badge: 'Active',
+      badgeColor: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
+      icon: <Send size={20} />,
+      iconBg: 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400',
+      hoverBorder: 'hover:border-cyan-500/50 hover:bg-slate-800/40',
+      actionColor: 'text-cyan-400 group-hover:text-cyan-300',
+      onClick: () => {
+        onClose();
+        onChooseSTCourier();
+      }
+    },
+    {
+      id: 'india_post',
+      title: 'India Post',
+      badge: 'Active',
+      badgeColor: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
+      icon: <Mail size={20} />,
+      iconBg: 'bg-rose-500/10 border-rose-500/20 text-rose-400',
+      hoverBorder: 'hover:border-rose-500/50 hover:bg-slate-800/40',
+      actionColor: 'text-rose-400 group-hover:text-rose-300',
+      onClick: () => {
+        onClose();
+        onChooseIndiaPost();
+      }
+    }
+  ];
+
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div 
-        className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden p-6 sm:p-7 text-white relative animate-in zoom-in-95 duration-200"
+        className="w-full max-w-xl sm:max-w-2xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden p-4 sm:p-5 text-white relative animate-in zoom-in-95 duration-200 flex flex-col"
         onClick={e => e.stopPropagation()}
       >
-        {/* Top Header */}
-        <div className="flex items-start justify-between pb-5 border-b border-slate-800/80">
-          <div className="flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-purple-500/20 to-indigo-500/20 border border-purple-500/30 text-purple-400 flex items-center justify-center shadow-inner">
-              <UploadCloud size={22} />
+        {/* Compact Header */}
+        <div className="flex items-center justify-between pb-3 border-b border-slate-800/80 shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center justify-center">
+              <UploadCloud size={17} />
             </div>
-            <div>
-              <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
-                Select Upload Format / Source
-              </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Choose the order file format you wish to import into Website Sales
-              </p>
-            </div>
+            <h2 className="text-base font-bold text-white tracking-tight">
+              Select Upload Format
+            </h2>
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
+            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
             title="Close"
           >
-            <X size={18} />
+            <X size={16} />
           </button>
         </div>
 
-        {/* Two Choices Container */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-6">
-          {/* OPTION 1: SHOPIFY UPLOAD */}
-          <div
-            onClick={() => {
-              onClose();
-              onChooseShopify();
-            }}
-            className="group relative p-5 rounded-2xl bg-slate-950/70 border border-slate-800 hover:border-purple-500/50 hover:bg-slate-800/40 transition-all duration-200 cursor-pointer flex flex-col justify-between shadow-sm hover:shadow-lg hover:shadow-purple-500/10 active:scale-[0.98]"
-          >
-            <div className="space-y-3.5">
-              <div className="w-12 h-12 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
-                <ShoppingBag size={24} />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="text-base font-bold text-white group-hover:text-purple-300 transition-colors">
-                    Shopify Upload
-                  </h3>
-                  <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 text-[10px] font-bold uppercase tracking-wider border border-purple-500/30">
-                    Active
-                  </span>
+        {/* Five Choices Grid Container */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 sm:gap-3 py-4">
+          {uploadOptions.map(opt => (
+            <div
+              key={opt.id}
+              onClick={opt.onClick}
+              className={`group relative p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 ${opt.hoverBorder} transition-all duration-150 cursor-pointer flex flex-col justify-between gap-3 shadow-sm hover:shadow-md active:scale-[0.98]`}
+            >
+              {/* Top row: Carrier Icon and ACTIVE indicator */}
+              <div className="flex items-center justify-between">
+                <div className={`w-9 h-9 rounded-lg ${opt.iconBg} flex items-center justify-center group-hover:scale-105 transition-transform duration-150`}>
+                  {opt.icon}
                 </div>
-                <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
-                  Import Shopify standard orders export spreadsheets (CSV/XLSX). Consolidates line items, customers, pricing, and syncs directly into Logistics.
-                </p>
+                <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border leading-none ${opt.badgeColor}`}>
+                  {opt.badge}
+                </span>
+              </div>
+
+              {/* Bottom row: Upload option name and Selection arrow */}
+              <div className="flex items-center justify-between gap-2 pt-1">
+                <h3 className="text-xs sm:text-sm font-semibold text-white group-hover:text-slate-100 transition-colors truncate">
+                  {opt.title}
+                </h3>
+                <ArrowRight size={14} className={`${opt.actionColor} group-hover:translate-x-0.5 transition-transform shrink-0`} />
               </div>
             </div>
-
-            <div className="mt-5 pt-3.5 border-t border-slate-800/80 flex items-center justify-between text-xs font-bold text-purple-400 group-hover:text-purple-300">
-              <span>Open Shopify Uploader</span>
-              <ArrowRight size={15} className="group-hover:translate-x-1 transition-transform" />
-            </div>
-          </div>
-
-          {/* OPTION 2: DELHIVERY ONE UPLOAD */}
-          <div
-            onClick={() => {
-              onClose();
-              onChooseDelhivery();
-            }}
-            className="group relative p-5 rounded-2xl bg-slate-950/70 border border-slate-800 hover:border-orange-500/50 hover:bg-slate-800/40 transition-all duration-200 cursor-pointer flex flex-col justify-between shadow-sm hover:shadow-lg hover:shadow-orange-500/10 active:scale-[0.98]"
-          >
-            <div className="space-y-3.5">
-              <div className="w-12 h-12 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
-                <Truck size={24} />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="text-base font-bold text-white group-hover:text-orange-300 transition-colors">
-                    Delhivery One Upload
-                  </h3>
-                  <span className="px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 text-[10px] font-bold uppercase tracking-wider border border-orange-500/30">
-                    Active
-                  </span>
-                </div>
-                <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
-                  Import carrier dispatch manifests, waybill records, and delivery scan reports directly from Delhivery One logistics portal.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-5 pt-3.5 border-t border-slate-800/80 flex items-center justify-between text-xs font-bold text-orange-400 group-hover:text-orange-300">
-              <span>Open Delhivery Uploader</span>
-              <ArrowRight size={15} className="group-hover:translate-x-1 transition-transform" />
-            </div>
-          </div>
+          ))}
         </div>
 
-        {/* Footer info */}
-        <div className="pt-4 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
-          <div className="flex items-center gap-2">
-            <Layers size={14} className="text-slate-400" />
-            <span>Multiple formats supported with separate dedicated import workflows.</span>
-          </div>
+        {/* Compact Footer */}
+        <div className="pt-3 border-t border-slate-800/80 flex items-center justify-end shrink-0">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold transition-all cursor-pointer"
+            className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-medium transition-colors cursor-pointer"
           >
             Cancel
           </button>

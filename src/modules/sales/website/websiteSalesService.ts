@@ -641,10 +641,27 @@ export class WebsiteSalesService {
       });
     });
 
-    // Attach live logistics tracking, courier, and RTO status from Dexie
+    // Attach live logistics tracking, courier, and RTO status from Supabase & Dexie
+    const trackingMap = new Map<string, any>();
     const logisticsMap = new Map<string, any>();
     try {
-      const rawIds = orderRows.map(o => cleanOrderId(o.order_id));
+      const rawIds = orderRows.map(o => cleanOrderId(o.order_id)).filter(Boolean);
+
+      // 1. Fetch authoritative shipments from Supabase customer_tracking_shipments in safe chunks
+      for (let i = 0; i < rawIds.length; i += 100) {
+        const chunk = rawIds.slice(i, i + 100);
+        const { data: shipments } = await supabase
+          .from('customer_tracking_shipments')
+          .select('order_id, display_order_id, awb_number, courier, status, raw_status, dispatch_date, delivered_date, remarks, last_location')
+          .in('order_id', chunk);
+
+        (shipments || []).forEach(s => {
+          const cid = cleanOrderId(s.order_id || s.display_order_id).toLowerCase();
+          if (cid) trackingMap.set(cid, s);
+        });
+      }
+
+      // 2. Fetch local Dexie db.logistics_orders as secondary/staging cache
       for (let i = 0; i < rawIds.length; i += 300) {
         const chunk = rawIds.slice(i, i + 300);
         const dbRecs = await db.logistics_orders.where('orderId').anyOfIgnoreCase(chunk).toArray();
@@ -654,13 +671,15 @@ export class WebsiteSalesService {
         });
       }
     } catch (e) {
-      // Dexie read fallback
+      console.warn('Logistics tracking fetch fallback:', e);
     }
 
     const orders: WebsiteConsolidatedOrder[] = orderRows.map(o => {
+      const cid = cleanOrderId(o.order_id).toLowerCase();
+      const trackRec = trackingMap.get(cid);
+      const logRec = logisticsMap.get(cid);
       const extra = o.extra_data || {};
       const items = itemsByOrderId.get(o.id) || [];
-      const logRec = logisticsMap.get(cleanOrderId(o.order_id).toLowerCase());
 
       const productNames = items.length > 0
         ? Array.from(new Set(items.map(it => it.product_name))).join(', ')
@@ -709,11 +728,13 @@ export class WebsiteSalesService {
         items,
         fulfillment_status: extra.fulfillment_status || o.dispatch_status || o.order_status || 'unfulfilled',
         financial_status: extra.financial_status || '',
-        awb_number: logRec?.awbNumber || extra.awb_number || o.awb_number || '',
-        courier: logRec?.courier || extra.courier || o.courier || '',
-        shipment_status: logRec?.status || logRec?.stage || (logRec?.awbNumber || extra.awb_number || o.awb_number ? 'Dispatched' : (o.dispatch_status === 'DELIVERED' ? 'Delivered' : 'Pending Manifest')),
-        raw_status: logRec?.rawStatus || (logRec as any)?.raw_status || extra.raw_status || '',
-        fulfilled_date: extra.fulfilled_date || o.dispatch_date || '',
+        awb_number: trackRec?.awb_number || logRec?.awbNumber || extra.awb_number || o.awb_number || '',
+        courier: trackRec?.courier || logRec?.courier || extra.courier || o.courier || '',
+        shipment_status: trackRec?.status || logRec?.status || logRec?.stage || (trackRec?.awb_number || logRec?.awbNumber || extra.awb_number || o.awb_number ? 'Dispatched' : (o.dispatch_status === 'DELIVERED' ? 'Delivered' : 'Pending Manifest')),
+        raw_status: trackRec?.raw_status || logRec?.rawStatus || (logRec as any)?.raw_status || extra.delhivery_current_status || extra.raw_status || '',
+        delhivery_remarks: trackRec?.remarks || extra.delhivery_remarks || '',
+        extra_data: extra,
+        fulfilled_date: trackRec?.delivered_date || trackRec?.dispatch_date || extra.fulfilled_date || o.dispatch_date || '',
         order_status: o.order_status,
         cancellation: extra.cancellation || (o.order_status === 'CANCELLED' ? {
           status: 'CANCELLED',
@@ -1481,6 +1502,9 @@ export class WebsiteSalesService {
         awb_number: awb,
         courier: courier,
         shipment_status: shipmentStatus,
+        raw_status: extra.delhivery_current_status || extra.raw_status || '',
+        delhivery_remarks: extra.delhivery_remarks || '',
+        extra_data: extra,
         fulfilled_date: extra.fulfilled_date || o.dispatch_date || '',
         order_status: o.order_status,
         cancellation: extra.cancellation || (o.order_status === 'CANCELLED' ? {

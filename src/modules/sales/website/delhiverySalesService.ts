@@ -71,14 +71,23 @@ export function parseDelhiveryDate(raw?: any): string {
 }
 
 /**
- * Maps Delhivery current_status and status_type to Velmora shipment lifecycle model.
+ * Maps Delhivery current_status, status_type, and remarks to Velmora shipment lifecycle model.
  */
-export function mapDelhiveryStatus(currentStatus?: string, statusType?: string) {
+export function mapDelhiveryStatus(currentStatus?: string, statusType?: string, remarks?: string) {
   const cs = (currentStatus || '').toUpperCase().trim();
   const st = (statusType || '').toUpperCase().trim();
+  const rem = (remarks || '').toLowerCase().trim();
 
-  // Return to origin must take precedence over statusType === 'DELIVERED'
-  if (cs === 'RETURNED_TO_ORIGIN' || cs.includes('RETURNED_TO_ORIGIN') || cs.includes('RETURN TO ORIGIN')) {
+  // 1. Return to origin / RTO Delivered
+  if (
+    cs === 'RETURNED_TO_ORIGIN' || 
+    cs.includes('RETURNED_TO_ORIGIN') || 
+    cs.includes('RETURN TO ORIGIN') ||
+    rem.includes('returned to origin') ||
+    rem.includes('returned to seller') ||
+    rem.includes('rto complete') ||
+    rem.includes('delivered to client')
+  ) {
     return {
       canonicalStatus: 'Returned to Origin',
       logisticsStage: 'fulfilled' as const,
@@ -88,7 +97,18 @@ export function mapDelhiveryStatus(currentStatus?: string, statusType?: string) 
     };
   }
 
-  if (cs === 'RETURNING_TO_ORIGIN' || cs.includes('RETURNING') || st === 'RETURNED' || st.includes('RTO')) {
+  // 2. RTO - In Transit / Initiated
+  if (
+    cs === 'RETURNING_TO_ORIGIN' || 
+    cs.includes('RETURNING') || 
+    st === 'RETURNED' || 
+    st.includes('RTO') ||
+    rem.includes('rto initiated') ||
+    rem.includes('rto in transit') ||
+    rem.includes('returning to origin') ||
+    rem.includes('return to origin') ||
+    (rem.includes('rto') && !rem.includes('delivered'))
+  ) {
     return {
       canonicalStatus: 'RTO - In Transit',
       logisticsStage: 'tracking' as const,
@@ -98,7 +118,15 @@ export function mapDelhiveryStatus(currentStatus?: string, statusType?: string) 
     };
   }
 
-  if (cs === 'DELIVERED' || st === 'DELIVERED') {
+  // 3. Delivered
+  if (
+    cs === 'DELIVERED' || 
+    st === 'DELIVERED' ||
+    rem.includes('delivered to consignee') ||
+    rem.includes('successfully delivered') ||
+    rem.includes('delivery complete') ||
+    (rem.includes('delivered') && !rem.includes('rto') && !rem.includes('seller') && !rem.includes('origin'))
+  ) {
     return {
       canonicalStatus: 'Delivered',
       logisticsStage: 'fulfilled' as const,
@@ -108,7 +136,15 @@ export function mapDelhiveryStatus(currentStatus?: string, statusType?: string) 
     };
   }
 
-  if (cs === 'OUT_FOR_DELIVERY') {
+  // 4. Out for Delivery
+  if (
+    cs === 'OUT_FOR_DELIVERY' ||
+    rem.includes('out for delivery') ||
+    rem.includes('out_for_delivery') ||
+    rem.includes('dispatched for delivery') ||
+    rem.includes('run sheet created') ||
+    rem.includes('with delivery courier')
+  ) {
     return {
       canonicalStatus: 'Out for Delivery',
       logisticsStage: 'tracking' as const,
@@ -118,16 +154,62 @@ export function mapDelhiveryStatus(currentStatus?: string, statusType?: string) 
     };
   }
 
-  if (cs === 'SHIPPED') {
+  // 5. In Transit (Vehicle Departed / Hub Arrival / Facility Scans / SHIPPED)
+  if (
+    cs === 'SHIPPED' ||
+    cs === 'IN_TRANSIT' ||
+    cs === 'TRANSIT' ||
+    cs === 'DISPATCHED' ||
+    rem.includes('vehicle departed') ||
+    rem.includes('vehicle arrived') ||
+    rem.includes('arrived at destination hub') ||
+    rem.includes('arrived at facility') ||
+    rem.includes('shipment received at facility') ||
+    rem.includes('received at facility') ||
+    rem.includes('bag received') ||
+    rem.includes('reached facility') ||
+    rem.includes('bag added') ||
+    rem.includes('bagging') ||
+    rem.includes('bagged') ||
+    rem.includes('in transit') ||
+    rem.includes('transit') ||
+    rem.includes('departed') ||
+    rem.includes('line haul') ||
+    rem.includes('forwarded') ||
+    rem.includes('connected') ||
+    rem.includes('processed')
+  ) {
     return {
       canonicalStatus: 'In Transit',
-      logisticsStage: 'dispatched' as const,
+      logisticsStage: 'tracking' as const,
       salesDispatchStatus: 'DISPATCHED' as const,
       fulfillmentStatus: 'unfulfilled' as const,
       priorityRank: 60
     };
   }
 
+  // 6. Failed Attempt / Consignee Unavailable
+  if (
+    rem.includes('failed attempt') ||
+    rem.includes('customer not available') ||
+    rem.includes('consignee unavailable') ||
+    rem.includes('delivery attempt failed') ||
+    rem.includes('door closed') ||
+    rem.includes('unattempted') ||
+    rem.includes('customer refused') ||
+    rem.includes('address incomplete') ||
+    (cs === 'UNDELIVERED' && !rem.includes('vehicle') && !rem.includes('arrived') && !rem.includes('facility'))
+  ) {
+    return {
+      canonicalStatus: 'Failed Attempt',
+      logisticsStage: 'tracking' as const,
+      salesDispatchStatus: 'DISPATCHED' as const,
+      fulfillmentStatus: 'unfulfilled' as const,
+      priorityRank: 55
+    };
+  }
+
+  // 7. Cancelled
   if (cs === 'CANCELLED' || cs === 'CANCELED') {
     return {
       canonicalStatus: 'Cancelled',
@@ -140,7 +222,7 @@ export function mapDelhiveryStatus(currentStatus?: string, statusType?: string) 
 
   // Fallback for unknown statuses
   return {
-    canonicalStatus: cs ? cs : 'In Transit',
+    canonicalStatus: cs ? (cs === 'UNDELIVERED' ? 'In Transit' : cs) : 'In Transit',
     logisticsStage: 'tracking' as const,
     salesDispatchStatus: 'DISPATCHED' as const,
     fulfillmentStatus: 'unfulfilled' as const,
@@ -213,10 +295,10 @@ class DelhiverySalesService {
 
       const rawStatusType = String(getColumnValue(row, ['Status Type', 'StatusType']) || '').trim();
       const rawCurrentStatus = String(getColumnValue(row, ['Current Status', 'Status']) || '').trim();
-      const mapped = mapDelhiveryStatus(rawCurrentStatus, rawStatusType);
-
       const remarks = String(getColumnValue(row, ['Remarks']) || '').trim();
       const pendingReturnedRemarks = String(getColumnValue(row, ['Pending / Returned Remarks', 'Pending Remarks']) || '').trim();
+      const effectiveRemarks = remarks || pendingReturnedRemarks;
+      const mapped = mapDelhiveryStatus(rawCurrentStatus, rawStatusType, effectiveRemarks);
 
       const pickUpDate = parseDelhiveryDate(getColumnValue(row, ['Pick Up Date', 'Pickup Date']));
       const estimatedDeliveryDate = parseDelhiveryDate(getColumnValue(row, ['Estimated Delivery Date', 'Promised Delivery Date']));
@@ -584,6 +666,10 @@ class DelhiverySalesService {
             awbNumber: rec.waybill,
             courier: 'Delhivery',
             status: rec.canonicalStatus,
+            rawStatus: rec.currentStatus || 'SHIPPED',
+            remarks: rec.remarks || existingLogistics.remarks,
+            lastEvent: rec.remarks || existingLogistics.lastEvent || rec.canonicalStatus,
+            lastLocation: rec.originCenter || (existingLogistics as any).lastLocation,
             stage: rec.logisticsStage,
             pickupLocation: rec.pickupLocation || existingLogistics.pickupLocation,
             deliveredDate: rec.deliveredDate || existingLogistics.deliveredDate,

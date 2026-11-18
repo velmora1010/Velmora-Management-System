@@ -30,8 +30,6 @@ export const OrderImportModal: React.FC<OrderImportModalProps> = ({
   onClose,
   onImportSuccess
 }) => {
-  if (!isOpen) return null;
-
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [isParsing, setIsParsing] = useState(false);
@@ -91,6 +89,8 @@ export const OrderImportModal: React.FC<OrderImportModalProps> = ({
       setIsProcessing(false);
     }
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200">

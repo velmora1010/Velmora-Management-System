@@ -35,8 +35,6 @@ export const CourierTrackingImportModal: React.FC<CourierTrackingImportModalProp
   onSyncSuccess,
   onImportSuccess
 }) => {
-  if (!isOpen) return null;
-
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedCourier, setSelectedCourier] = useState<string>('Delhivery');
   const [file, setFile] = useState<File | null>(null);
@@ -107,6 +105,8 @@ export const CourierTrackingImportModal: React.FC<CourierTrackingImportModalProp
     }
     return true;
   });
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200">

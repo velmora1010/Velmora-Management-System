@@ -80,7 +80,9 @@ import {
 
   syncSalesOrdersFromSupabase,
 
-  deleteLogisticsOrderByOrderId
+  deleteLogisticsOrderByOrderId,
+
+  healLogisticsTrackingStatuses
 
 } from '../../services/unifiedLogisticsService';
 
@@ -423,6 +425,8 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
         // Automatically sync canonical Sales orders from Supabase into Dexie (guarded by cooldown)
 
         await syncSalesOrdersFromSupabase();
+
+        await healLogisticsTrackingStatuses();
 
         if (isCancelled) return;
 
@@ -1207,7 +1211,8 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
           return stLower === 'delivered' || !!order.deliveredDate;
         }
         if (selectedStatusTab === 'In Transit') {
-          return stLower === 'in transit' || stLower === 'in-transit' || stLower === 'picked up' || stLower === 'transit';
+          const rem = ((order.lastEvent || order.remarks || '') as string).toLowerCase();
+          return stLower === 'in transit' || stLower === 'in-transit' || stLower === 'picked up' || stLower === 'transit' || rem.includes('vehicle departed') || rem.includes('arrived') || rem.includes('facility');
         }
         if (selectedStatusTab === 'Out for Delivery') {
           return stLower === 'out for delivery' || stLower === 'out_for_delivery';

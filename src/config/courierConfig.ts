@@ -40,6 +40,32 @@ export const CONFIGURED_COURIERS: CourierOption[] = [
     }
   },
   {
+    id: 'amazon_shipping',
+    name: 'Amazon Shipping',
+    shortName: 'Amazon Shipping',
+    integrationType: 'file_sync',
+    trackingUrlTemplate: (awb: string) => `https://track.amazon.in/tracking/${encodeURIComponent(awb)}`,
+    badgeColor: {
+      bg: 'bg-orange-950/60',
+      border: 'border-orange-800/60',
+      text: 'text-orange-300',
+      indicator: 'bg-orange-400'
+    }
+  },
+  {
+    id: 'ekart',
+    name: 'Ekart',
+    shortName: 'Ekart',
+    integrationType: 'file_sync',
+    trackingUrlTemplate: (awb: string) => `https://ekartlogistics.com/shipmenttrack/${encodeURIComponent(awb)}`,
+    badgeColor: {
+      bg: 'bg-amber-950/60',
+      border: 'border-amber-800/60',
+      text: 'text-amber-300',
+      indicator: 'bg-amber-400'
+    }
+  },
+  {
     id: 'india_post',
     name: 'India Post',
     shortName: 'India Post',
@@ -53,42 +79,16 @@ export const CONFIGURED_COURIERS: CourierOption[] = [
     }
   },
   {
-    id: 'ithink_ekart',
-    name: 'iThink Logistics – Ekart',
-    shortName: 'iThink Ekart',
+    id: 'house',
+    name: 'House',
+    shortName: 'House / Other',
     integrationType: 'file_sync',
-    trackingUrlTemplate: (awb: string) => `https://ithinklogistics.com/`,
+    trackingUrlTemplate: () => '',
     badgeColor: {
-      bg: 'bg-amber-950/60',
-      border: 'border-amber-800/60',
-      text: 'text-amber-300',
-      indicator: 'bg-amber-400'
-    }
-  },
-  {
-    id: 'ithink_delhivery',
-    name: 'iThink Logistics – Delhivery',
-    shortName: 'iThink Delhivery',
-    integrationType: 'file_sync',
-    trackingUrlTemplate: (awb: string) => `https://ithinklogistics.com/`,
-    badgeColor: {
-      bg: 'bg-indigo-950/60',
-      border: 'border-indigo-800/60',
-      text: 'text-indigo-300',
-      indicator: 'bg-indigo-400'
-    }
-  },
-  {
-    id: 'ithink_amazon',
-    name: 'iThink Logistics – Amazon',
-    shortName: 'iThink Amazon',
-    integrationType: 'file_sync',
-    trackingUrlTemplate: (awb: string) => `https://track.amazon.in/tracking/${encodeURIComponent(awb)}`,
-    badgeColor: {
-      bg: 'bg-orange-950/60',
-      border: 'border-orange-800/60',
-      text: 'text-orange-300',
-      indicator: 'bg-orange-400'
+      bg: 'bg-slate-900/60',
+      border: 'border-slate-700/60',
+      text: 'text-slate-300',
+      indicator: 'bg-slate-400'
     }
   }
 ];
@@ -105,21 +105,36 @@ export const isCourierActive = (courierName: string | undefined | null): boolean
     c.name.toLowerCase() === lower || 
     c.shortName.toLowerCase() === lower ||
     c.id === lower
-  );
+  ) || lower.includes('delhivery') || lower.includes('st courier') || lower.includes('amazon') || lower.includes('ekart') || lower.includes('india post');
 };
 
 export const normalizeCourier = (courierName?: string | null): string => {
   if (!courierName || !courierName.trim()) return '';
   const lower = courierName.toLowerCase().trim();
   
-  if (lower.includes('ithink') && lower.includes('ekart')) return 'iThink Logistics – Ekart';
-  if (lower.includes('ithink') && lower.includes('delhivery')) return 'iThink Logistics – Delhivery';
-  if (lower.includes('ithink') && lower.includes('amazon')) return 'iThink Logistics – Amazon';
-  if (lower.includes('india post')) return 'India Post';
-  if (lower.includes('st courier') || lower.includes('stcourier')) return 'ST Courier';
+  // Specific checks (Ekart before Amazon/iThink)
+  if (lower.includes('ekart')) return 'Ekart';
+  if (lower.includes('amazon')) return 'Amazon Shipping';
+  if (lower.includes('india post') || lower.includes('speed post')) return 'India Post';
+  if (
+    lower === 'st' ||
+    lower.startsWith('st ') ||
+    lower.includes('st courier') ||
+    lower.includes('st-courier') ||
+    lower.includes('st_courier') ||
+    lower.includes('stcourier')
+  ) return 'ST Courier';
   if (lower.includes('delhivery')) return 'Delhivery';
-  if (lower.includes('ekart')) return 'iThink Logistics – Ekart';
-  if (lower.includes('amazon')) return 'iThink Logistics – Amazon';
+  if (
+    lower === 'house' ||
+    lower === 'house courier' ||
+    lower === 'in-house' ||
+    lower === 'in house' ||
+    lower === 'internal' ||
+    lower === 'internal courier' ||
+    lower === 'direct delivery' ||
+    lower === 'self delivery'
+  ) return 'House';
 
   return courierName.trim();
 };
