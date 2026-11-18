@@ -22,6 +22,7 @@ import {
 import {
   annotateCombinedRowsWithDuplicates,
   buildCombinedImportHistory,
+  reconstructHistoryPreviewRows,
   saveCombinedStatementTransactions,
   type AnnotatedCombinedRow,
   type CombinedSaveSummary
@@ -87,6 +88,7 @@ export const UploadDrCrStatement = ({ onClose }: UploadDrCrStatementProps) => {
 
   const [stagedFiles, setStagedFiles] = useState<CombinedStatementFileEntry[]>([]);
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
+  const [selectedHistoryKey, setSelectedHistoryKey] = useState<string | null>(null);
   const [rowsByFile, setRowsByFile] = useState<Record<string, AnnotatedCombinedRow[]>>({});
   const [sectionFilter, setSectionFilter] = useState<
     'all' | 'debit' | 'credit' | 'review'
@@ -106,16 +108,25 @@ export const UploadDrCrStatement = ({ onClose }: UploadDrCrStatementProps) => {
     [stagedFiles, activeFileId]
   );
 
-  const activeRows = useMemo(
-    () => (activeFileId ? rowsByFile[activeFileId] || [] : []),
-    [rowsByFile, activeFileId]
-  );
-
   // Unified combined statement history (Debit-only, Credit-only, and merged Dr + Cr)
   const savedCombinedHistory = useMemo(
     () => buildCombinedImportHistory(expenseImports, creditImports, drCrCreditHashes),
     [expenseImports, creditImports, drCrCreditHashes]
   );
+
+  const activeHistoryRecord = useMemo(
+    () => savedCombinedHistory.find(h => h.key === selectedHistoryKey) || null,
+    [savedCombinedHistory, selectedHistoryKey]
+  );
+
+  const isHistoryView = Boolean(activeHistoryRecord);
+
+  const activeRows = useMemo(() => {
+    if (activeHistoryRecord) {
+      return reconstructHistoryPreviewRows(activeHistoryRecord, expenses, credits);
+    }
+    return activeFileId ? rowsByFile[activeFileId] || [] : [];
+  }, [activeHistoryRecord, expenses, credits, activeFileId, rowsByFile]);
 
   const summary = useMemo(() => {
     const debits = activeRows.filter(tx => tx.classification === 'debit');
@@ -224,6 +235,7 @@ export const UploadDrCrStatement = ({ onClose }: UploadDrCrStatementProps) => {
 
         setStagedFiles(prev => [entry, ...prev]);
         setRowsByFile(prev => ({ ...prev, [fileId]: annotatedRows }));
+        setSelectedHistoryKey(null);
         setActiveFileId(fileId);
         setSectionFilter('all');
 
@@ -331,6 +343,7 @@ export const UploadDrCrStatement = ({ onClose }: UploadDrCrStatementProps) => {
   };
 
   const canConfirmSave =
+    !isHistoryView &&
     Boolean(activeFile) &&
     activeFile?.status !== 'saved' &&
     (summary.readyDebits.length > 0 || summary.readyCredits.length > 0) &&
@@ -520,7 +533,11 @@ export const UploadDrCrStatement = ({ onClose }: UploadDrCrStatementProps) => {
                   return (
                     <div
                       key={file.id}
-                      onClick={() => setActiveFileId(file.id)}
+                      onClick={() => {
+                        setSelectedHistoryKey(null);
+                        setActiveFileId(file.id);
+                        setSectionFilter('all');
+                      }}
                       className={`border rounded-xl p-3 transition-all cursor-pointer flex items-center justify-between gap-3 group ${
                         isSelected
                           ? 'border-purple-500/50 bg-purple-600/15 shadow-sm'
@@ -592,29 +609,49 @@ export const UploadDrCrStatement = ({ onClose }: UploadDrCrStatementProps) => {
                       Saved Combined Statements (Database)
                     </div>
                     <div className="space-y-2">
-                      {savedCombinedHistory.map(imp => (
-                        <div
-                          key={imp.key}
-                          className="border border-slate-700/50 bg-slate-800/30 rounded-xl p-2.5 flex items-center gap-2.5"
-                        >
-                          <div className="w-8 h-8 rounded-lg bg-slate-800 text-slate-400 border border-slate-700/70 flex items-center justify-center shrink-0">
-                            <FileText size={15} />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p
-                              className="text-xs font-semibold text-slate-200 truncate"
-                              title={imp.fileName}
+                      {savedCombinedHistory.map(imp => {
+                        const isSelected = selectedHistoryKey === imp.key;
+                        return (
+                          <div
+                            key={imp.key}
+                            onClick={() => {
+                              setActiveFileId(null);
+                              setSelectedHistoryKey(imp.key);
+                              setSectionFilter('all');
+                            }}
+                            className={`border rounded-xl p-2.5 flex items-center gap-2.5 transition-all cursor-pointer group ${
+                              isSelected
+                                ? 'border-purple-500/50 bg-purple-600/15 shadow-sm'
+                                : 'border-slate-700/50 bg-slate-800/30 hover:border-slate-600/80 hover:bg-slate-800/60'
+                            }`}
+                          >
+                            <div
+                              className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border transition-transform group-hover:scale-105 ${
+                                isSelected
+                                  ? 'bg-purple-500/20 text-purple-300 border-purple-500/30'
+                                  : 'bg-slate-800 text-slate-400 border-slate-700/70'
+                              }`}
                             >
-                              {imp.fileName}
-                            </p>
-                            <p className="text-[11px] text-slate-400 truncate">
-                              {formatDate(imp.importedAt)} • {imp.totalSavedRows} row(s) (
-                              {imp.expenseRows} Dr, {imp.creditRows} Cr) •{' '}
-                              <span className="text-emerald-400">{imp.status}</span>
-                            </p>
+                              <FileText size={15} />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p
+                                className={`text-xs font-semibold truncate ${
+                                  isSelected ? 'text-purple-200' : 'text-slate-200 group-hover:text-white'
+                                }`}
+                                title={imp.fileName}
+                              >
+                                {imp.fileName}
+                              </p>
+                              <p className="text-[11px] text-slate-400 truncate">
+                                {formatDate(imp.importedAt)} • {imp.totalSavedRows} row(s) (
+                                {imp.expenseRows} Dr, {imp.creditRows} Cr) •{' '}
+                                <span className="text-emerald-400">{imp.status}</span>
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -652,9 +689,12 @@ export const UploadDrCrStatement = ({ onClose }: UploadDrCrStatementProps) => {
               </h3>
             </div>
 
-            {activeFile && (
+            {(activeFile || activeHistoryRecord) && (
               <div className="flex flex-wrap items-center gap-2">
-                {(['all', 'debit', 'credit', 'review'] as const).map(filterKey => (
+                {(isHistoryView
+                  ? (['all', 'debit', 'credit'] as const)
+                  : (['all', 'debit', 'credit', 'review'] as const)
+                ).map(filterKey => (
                   <button
                     key={filterKey}
                     type="button"
@@ -754,6 +794,26 @@ export const UploadDrCrStatement = ({ onClose }: UploadDrCrStatementProps) => {
               </div>
             </div>
 
+            {/* Read-Only Saved Statement Summary Banner */}
+            {activeHistoryRecord && (
+              <div className="p-3.5 rounded-xl border bg-purple-500/10 border-purple-500/30 text-slate-200 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <div className="flex flex-col gap-0.5 min-w-0">
+                  <span className="text-xs font-semibold text-purple-200 truncate">
+                    Saved Statement Summary (Read-Only): {activeHistoryRecord.fileName}
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    Imported {formatDate(activeHistoryRecord.importedAt)} • Status:{' '}
+                    <span className="text-emerald-400 font-semibold">{activeHistoryRecord.status}</span>
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-3 font-mono text-[11px] text-slate-200">
+                  <span>Total Saved: {activeHistoryRecord.totalSavedRows}</span>
+                  <span className="text-rose-300">Debit: {activeHistoryRecord.expenseRows}</span>
+                  <span className="text-emerald-300">Credit: {activeHistoryRecord.creditRows}</span>
+                </div>
+              </div>
+            )}
+
             {/* Save Summary Banner */}
             {activeFile?.saveSummary && (
               <div
@@ -807,7 +867,7 @@ export const UploadDrCrStatement = ({ onClose }: UploadDrCrStatementProps) => {
             )}
 
             {/* Preview Table / Empty State */}
-            {!activeFile ? (
+            {!activeFile && !activeHistoryRecord ? (
               <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-slate-700/60 rounded-2xl bg-slate-900/30 p-8 text-center">
                 <div className="w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center mb-3.5 text-slate-400">
                   <ArrowLeftRight size={26} />
