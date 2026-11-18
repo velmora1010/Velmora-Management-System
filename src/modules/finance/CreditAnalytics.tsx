@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
   PieChart,
   Pie,
@@ -302,6 +303,57 @@ export const CreditAnalytics = ({ credits, onRefresh, isRefreshing }: CreditAnal
   const [appliedRange, setAppliedRange] = useState<{ from: Date | null; to: Date | null }>({ from: null, to: null });
   const [tempRange, setTempRange] = useState<{ from: Date | null; to: Date | null }>({ from: null, to: null });
   const [viewDate, setViewDate] = useState(new Date());
+  const dateButtonRef = useRef<HTMLButtonElement>(null);
+  const [popoverPos, setPopoverPos] = useState<{
+    top: number;
+    left?: number;
+    right?: number;
+    maxHeight: number;
+  }>({
+    top: 80,
+    right: 16,
+    maxHeight: 600
+  });
+
+  const updatePopoverPosition = useCallback(() => {
+    const btn = dateButtonRef.current;
+    if (!btn || typeof window === 'undefined') return;
+    const rect = btn.getBoundingClientRect();
+    const margin = 12;
+    const gap = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    const spaceBelow = vh - rect.bottom - gap - margin;
+    const spaceAbove = rect.top - gap - margin;
+    const openAbove = spaceBelow < 300 && spaceAbove > spaceBelow;
+
+    const availableHeight = openAbove ? spaceAbove : spaceBelow;
+    const maxHeight = Math.max(160, Math.min(540, availableHeight));
+    const top = openAbove
+      ? Math.max(margin, rect.top - gap - maxHeight)
+      : Math.max(margin, rect.bottom + gap);
+
+    if (vw < 768) {
+      setPopoverPos({ top, left: margin, right: margin, maxHeight });
+    } else {
+      const estimatedWidth = Math.min(760, vw - margin * 2);
+      const maxRight = Math.max(margin, vw - estimatedWidth - margin);
+      const right = Math.max(margin, Math.min(vw - rect.right, maxRight));
+      setPopoverPos({ top, right, maxHeight });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isDatePickerOpen) return;
+    updatePopoverPosition();
+    window.addEventListener('resize', updatePopoverPosition);
+    window.addEventListener('scroll', updatePopoverPosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePopoverPosition);
+      window.removeEventListener('scroll', updatePopoverPosition, true);
+    };
+  }, [isDatePickerOpen, updatePopoverPosition]);
 
   const data = useCreditAnalytics(credits, appliedRange, selectedMain, selectedSub1, selectedSub2);
 
@@ -428,19 +480,32 @@ export const CreditAnalytics = ({ credits, onRefresh, isRefreshing }: CreditAnal
 
           <div className="relative">
             <button
+              ref={dateButtonRef}
               type="button"
-              onClick={() => { setTempRange(appliedRange); setIsDatePickerOpen(true); }}
+              onClick={() => {
+                setTempRange(appliedRange);
+                updatePopoverPosition();
+                setIsDatePickerOpen(true);
+              }}
               className="flex items-center gap-2 px-3.5 py-2 bg-slate-800/80 border border-slate-700/80 rounded-xl text-xs font-semibold text-slate-200 hover:bg-slate-700/80 hover:border-slate-600 transition-all shadow-sm group"
             >
               <Calendar size={14} className="text-purple-400 group-hover:text-purple-300 transition-colors" />
               <span>{getAppliedRangeText()}</span>
             </button>
-            {isDatePickerOpen && (
+            {isDatePickerOpen && typeof document !== 'undefined' && createPortal(
               <>
-                <div className="fixed inset-0 z-40" onClick={() => setIsDatePickerOpen(false)} />
-                <div className="absolute right-0 mt-3 p-6 bg-slate-900/95 backdrop-blur-xl border border-slate-700/80 rounded-2xl shadow-2xl z-50 flex gap-8 fade-in min-w-[720px] ring-1 ring-black/40">
-                  <div className="flex flex-col gap-1.5 w-48 border-r border-slate-700/60 pr-6">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 pl-2">Quick Ranges</span>
+                <div className="fixed inset-0 z-[9998]" onClick={() => setIsDatePickerOpen(false)} />
+                <div
+                  style={{
+                    top: `${popoverPos.top}px`,
+                    ...(popoverPos.left !== undefined ? { left: `${popoverPos.left}px` } : {}),
+                    ...(popoverPos.right !== undefined ? { right: `${popoverPos.right}px` } : {}),
+                    maxHeight: `${popoverPos.maxHeight}px`
+                  }}
+                  className="fixed p-5 sm:p-6 bg-slate-900/95 backdrop-blur-xl border border-slate-700/80 rounded-2xl shadow-2xl z-[9999] flex flex-col md:flex-row gap-6 md:gap-8 fade-in md:w-auto md:min-w-[720px] max-w-[calc(100vw-24px)] overflow-y-auto ring-1 ring-black/40"
+                >
+                  <div className="flex flex-row md:flex-col flex-wrap md:flex-nowrap gap-1.5 w-full md:w-48 border-b md:border-b-0 md:border-r border-slate-700/60 pb-4 md:pb-0 md:pr-6 shrink-0">
+                    <span className="w-full text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 md:mb-3 pl-2">Quick Ranges</span>
                     {['Today', 'Yesterday', 'This Week', 'Last 7 Days', 'This Month', 'Previous Month', 'Last 30 Days', 'This Year'].map(range => (
                       <button
                         key={range}
@@ -452,23 +517,23 @@ export const CreditAnalytics = ({ credits, onRefresh, isRefreshing }: CreditAnal
                       </button>
                     ))}
                   </div>
-                  <div className="flex flex-col flex-1 pl-2">
-                    <div className="flex justify-between items-center mb-6">
+                  <div className="flex flex-col flex-1 md:pl-2 min-w-0">
+                    <div className="flex justify-between items-start sm:items-center mb-6 gap-2">
                       <button
                         type="button"
                         onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))}
-                        className="p-1.5 hover:bg-white/5 rounded-full transition-colors text-slate-400 hover:text-white active:scale-95"
+                        className="p-1.5 hover:bg-white/5 rounded-full transition-colors text-slate-400 hover:text-white active:scale-95 shrink-0"
                       >
                         <ChevronLeft size={20} />
                       </button>
-                      <div className="flex gap-14">
+                      <div className="flex flex-col sm:flex-row gap-6 sm:gap-10 md:gap-14 overflow-x-auto">
                         {renderCalendarMonth(viewDate.getFullYear(), viewDate.getMonth())}
                         {renderCalendarMonth(viewDate.getFullYear(), viewDate.getMonth() + 1)}
                       </div>
                       <button
                         type="button"
                         onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))}
-                        className="p-1.5 hover:bg-white/5 rounded-full transition-colors text-slate-400 hover:text-white active:scale-95"
+                        className="p-1.5 hover:bg-white/5 rounded-full transition-colors text-slate-400 hover:text-white active:scale-95 shrink-0"
                       >
                         <ChevronRight size={20} />
                       </button>
@@ -500,7 +565,8 @@ export const CreditAnalytics = ({ credits, onRefresh, isRefreshing }: CreditAnal
                     </div>
                   </div>
                 </div>
-              </>
+              </>,
+              document.body
             )}
           </div>
         </div>
