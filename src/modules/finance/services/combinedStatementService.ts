@@ -290,6 +290,90 @@ export function buildCombinedImportHistory(
   );
 }
 
+export function reconstructHistoryPreviewRows(
+  record: CombinedHistoryRecord,
+  expenses: FinanceExpense[],
+  credits: FinanceCredit[]
+): AnnotatedCombinedRow[] {
+  const rows: AnnotatedCombinedRow[] = [];
+
+  if (record.expenseBatchId) {
+    const matchedExpenses = expenses.filter(
+      e => e.import_batch_id === record.expenseBatchId && e.status !== 'archived'
+    );
+    for (const exp of matchedExpenses) {
+      const seq = typeof exp.sequence === 'number' ? exp.sequence : 0;
+      rows.push({
+        id: exp.id || `hist_exp_${record.expenseBatchId}_${seq}_${rows.length}`,
+        sequence: seq,
+        transactionDate: exp.transaction_date || '-',
+        normalizedDate: exp.transaction_date || null,
+        createdAtIso: exp.created_at || null,
+        postedDateTime: exp.posted_datetime || '',
+        postedDateTimeIso: exp.posted_datetime || null,
+        chequeRef: '',
+        description: exp.notes || '-',
+        withdrawalAmount: exp.amount !== null && exp.amount !== undefined ? Number(exp.amount) : null,
+        depositAmount: null,
+        balance: null,
+        rawWithdrawalText: exp.amount !== null && exp.amount !== undefined ? String(exp.amount) : '',
+        rawDepositText: '',
+        rawBalanceText: '',
+        classification: 'debit',
+        targetModule: 'Expense',
+        reviewStatus: 'ready',
+        saveState: 'saved',
+        isDuplicate: false,
+        fingerprint: `hist_exp_${exp.id || rows.length}`
+      });
+    }
+  }
+
+  if (record.creditBatchId) {
+    const matchedCredits = credits.filter(
+      c => c.import_batch_id === record.creditBatchId && c.status !== 'archived'
+    );
+    for (const cred of matchedCredits) {
+      const seq = typeof cred.sequence === 'number' ? cred.sequence : 0;
+      rows.push({
+        id: cred.id || `hist_cred_${record.creditBatchId}_${seq}_${rows.length}`,
+        sequence: seq,
+        transactionDate: cred.transaction_date || '-',
+        normalizedDate: cred.transaction_date || null,
+        createdAtIso: cred.created_at || null,
+        postedDateTime: cred.posted_datetime || '',
+        postedDateTimeIso: cred.posted_datetime || null,
+        chequeRef: '',
+        description: cred.notes || '-',
+        withdrawalAmount: null,
+        depositAmount: cred.amount !== null && cred.amount !== undefined ? Number(cred.amount) : null,
+        balance: null,
+        rawWithdrawalText: '',
+        rawDepositText: cred.amount !== null && cred.amount !== undefined ? String(cred.amount) : '',
+        rawBalanceText: '',
+        classification: 'credit',
+        targetModule: 'Credit',
+        reviewStatus: 'ready',
+        saveState: 'saved',
+        isDuplicate: false,
+        fingerprint: `hist_cred_${cred.id || rows.length}`
+      });
+    }
+  }
+
+  return rows.sort((a, b) => {
+    if (a.sequence > 0 && b.sequence > 0 && a.sequence !== b.sequence) {
+      return a.sequence - b.sequence;
+    }
+    const timeA = a.normalizedDate ? new Date(a.normalizedDate).getTime() : 0;
+    const timeB = b.normalizedDate ? new Date(b.normalizedDate).getTime() : 0;
+    if (!isNaN(timeA) && !isNaN(timeB) && timeA !== timeB) {
+      return timeA - timeB;
+    }
+    return 0;
+  });
+}
+
 export function mapDebitRowsToExpenses(
   debitRows: AnnotatedCombinedRow[],
   activeRules: Awaited<ReturnType<typeof ExpenseRuleEngine.fetchActiveRules>>
