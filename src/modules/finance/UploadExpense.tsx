@@ -245,7 +245,8 @@ export const UploadExpense = ({ onClose }: UploadExpenseProps) => {
     replaceInputRef.current?.click();
   };
 
-  const activeImport = imports.find(i => i.batch_id === activeBatchId);
+  const displayedImports = imports.filter(i => i.document_type !== 'COMBINED_DR_CR_STATEMENT');
+  const activeImport = displayedImports.find(i => i.batch_id === activeBatchId);
   const activeFileExpenses = expenses
     .filter(e => e.import_batch_id === activeBatchId)
     .sort((a, b) => {
@@ -343,7 +344,7 @@ export const UploadExpense = ({ onClose }: UploadExpenseProps) => {
               </h3>
             </div>
             <span className="text-[11px] font-medium text-slate-400 bg-slate-800 px-2 py-0.5 rounded border border-slate-700/60">
-              {imports.length} {imports.length === 1 ? 'file' : 'files'}
+              {displayedImports.length} {displayedImports.length === 1 ? 'file' : 'files'}
             </span>
           </div>
 
@@ -353,7 +354,7 @@ export const UploadExpense = ({ onClose }: UploadExpenseProps) => {
                 <div className="animate-spin rounded-full h-5 w-5 border-2 border-purple-500/20 border-t-purple-500 mx-auto mb-2"></div>
                 <p className="text-xs text-slate-400">Loading history...</p>
               </div>
-            ) : imports.length === 0 ? (
+            ) : displayedImports.length === 0 ? (
               <div className="text-center p-8 bg-slate-900/30 rounded-xl border border-dashed border-slate-700/60">
                 <div className="w-12 h-12 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center mx-auto mb-3 text-slate-400">
                   <FileSpreadsheet size={22} />
@@ -362,7 +363,7 @@ export const UploadExpense = ({ onClose }: UploadExpenseProps) => {
                 <p className="text-xs text-slate-400 mt-1">Click &apos;Upload Files&apos; to begin importing.</p>
               </div>
             ) : (
-              imports.map(file => {
+              displayedImports.map(file => {
                 const isPdf = file.file_name.toLowerCase().endsWith('.pdf');
                 const isSelected = activeBatchId === file.batch_id;
                 return (
