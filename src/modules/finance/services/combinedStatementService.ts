@@ -61,6 +61,14 @@ export type UploadCreditBatchFn = (
   creditsData: FinanceCredit[]
 ) => Promise<{ success: boolean; batch_id?: string; error?: string }>;
 
+export type DeleteBatchFn = (
+  batch_id: string
+) => Promise<{ success: boolean; error?: string }>;
+
+export function filterStandardExpenseImports(imports: ExpenseImport[]): ExpenseImport[] {
+  return imports.filter(imp => imp.document_type !== 'COMBINED_DR_CR_STATEMENT');
+}
+
 function normalizeDbDate(raw: string | null | undefined): string {
   if (!raw) return '';
   const trimmed = String(raw).trim();
@@ -132,6 +140,8 @@ export function annotateCombinedRowsWithDuplicates(params: {
   existingCredits: FinanceCredit[];
   expenseImports: ExpenseImport[];
   creditImports: CreditImport[];
+  excludeExpenseBatchId?: string;
+  excludeCreditBatchId?: string;
 }): {
   annotatedRows: AnnotatedCombinedRow[];
   fileAlreadyImportedInExpenses: boolean;
@@ -143,19 +153,34 @@ export function annotateCombinedRowsWithDuplicates(params: {
     existingExpenses,
     existingCredits,
     expenseImports,
-    creditImports
+    creditImports,
+    excludeExpenseBatchId,
+    excludeCreditBatchId
   } = params;
 
+  const filteredExpenses = excludeExpenseBatchId
+    ? existingExpenses.filter(e => e.import_batch_id !== excludeExpenseBatchId)
+    : existingExpenses;
+  const filteredCredits = excludeCreditBatchId
+    ? existingCredits.filter(c => c.import_batch_id !== excludeCreditBatchId)
+    : existingCredits;
+
   const fileAlreadyImportedInExpenses = expenseImports.some(
-    imp => imp.file_hash === fileHash && imp.status !== 'archived'
+    imp =>
+      imp.file_hash === fileHash &&
+      imp.batch_id !== excludeExpenseBatchId &&
+      imp.status !== 'archived'
   );
   const fileAlreadyImportedInCredits = creditImports.some(
-    imp => imp.file_hash === fileHash && imp.import_status !== 'archived'
+    imp =>
+      imp.file_hash === fileHash &&
+      imp.batch_id !== excludeCreditBatchId &&
+      imp.import_status !== 'archived'
   );
 
   const existingFingerprints = buildExistingTransactionFingerprints(
-    existingExpenses,
-    existingCredits
+    filteredExpenses,
+    filteredCredits
   );
   const seenInCurrentFile = new Set<string>();
 
@@ -385,14 +410,7 @@ export function mapDebitRowsToExpenses(
       postedDateTime: row.postedDateTime || undefined,
       date: row.transactionDate,
       amount: row.withdrawalAmount || 0,
-      notes: row.description,
-      vendor: 'Unknown Vendor',
-      main_category: 'Uncategorized',
-      sub_category1: null,
-      sub_category2: null,
-      sub_category3: null,
-      gst_status: 'Unregistered',
-      payment_mode: 'Bank Transfer'
+      notes: row.description
     };
 
     const ruled = ExpenseRuleEngine.applyExpenseRules(baseTx, activeRules);
@@ -431,12 +449,7 @@ export function mapCreditRowsToCredits(
       postedDateTime: row.postedDateTime || undefined,
       date: row.transactionDate,
       amount: row.depositAmount || 0,
-      notes: row.description,
-      source: 'Unknown Source',
-      main_category: 'Uncategorized',
-      sub_category1: null,
-      sub_category2: null,
-      payment_mode: 'Bank Transfer'
+      notes: row.description
     };
 
     const ruled = CreditRuleEngine.applyCreditRules(baseTx, activeRules);
@@ -609,5 +622,99 @@ export async function saveCombinedStatementTransactions(params: {
     errors,
     status,
     updatedRows
+  };
+}
+
+export async function deleteCombinedStatementBatches(params: {
+  record: CombinedHistoryRecord;
+  deleteExpenseBatch: DeleteBatchFn;
+  deleteCreditBatch: DeleteBatchFn;
+}): Promise<{
+  success: boolean;
+  expenseArchived: boolean;
+  creditArchived: boolean;
+  errors: string[];
+}> {
+  const { record, deleteExpenseBatch, deleteCreditBatch } = params;
+  const errors: string[] = [];
+  let expenseArchived = false;
+  let creditArchived = false;
+
+  if (record.expenseBatchId) {
+    const res = await deleteExpenseBatch(record.expenseBatchId);
+    if (res.success) {
+      expenseArchived = true;
+    } else {
+      errors.push(`Expense batch archive failed: ${res.error || 'Unknown error'}`);
+    }
+  }
+
+  if (record.creditBatchId) {
+    const res = await deleteCreditBatch(record.creditBatchId);
+    if (res.success) {
+      creditArchived = true;
+    } else if (expenseArchived) {
+      errors.push(
+        `Partial archive: Expense batch (${record.expenseBatchId}) was moved to Recycle Bin, while Credit batch (${record.creditBatchId}) remains active (${res.error || 'Unknown error'}). You can restore the Expense batch from Finance Recycle Bin.`
+      );
+    } else {
+      errors.push(`Credit batch archive failed: ${res.error || 'Unknown error'}`);
+    }
+  }
+
+  return {
+    success: errors.length === 0,
+    expenseArchived,
+    creditArchived,
+    errors
+  };
+}
+
+export async function replaceCombinedStatementBatches(params: {
+  oldRecord: CombinedHistoryRecord;
+  newFileName: string;
+  newFileHash: string;
+  newRows: AnnotatedCombinedRow[];
+  deleteExpenseBatch: DeleteBatchFn;
+  deleteCreditBatch: DeleteBatchFn;
+  uploadExpenseBatch: UploadExpenseBatchFn;
+  uploadCreditBatch: UploadCreditBatchFn;
+  fetchExpenseRules?: typeof ExpenseRuleEngine.fetchActiveRules;
+  fetchCreditRules?: typeof CreditRuleEngine.fetchActiveRules;
+}): Promise<{
+  archiveResult: {
+    success: boolean;
+    expenseArchived: boolean;
+    creditArchived: boolean;
+    errors: string[];
+  };
+  saveSummary: CombinedSaveSummary | null;
+}> {
+  const archiveResult = await deleteCombinedStatementBatches({
+    record: params.oldRecord,
+    deleteExpenseBatch: params.deleteExpenseBatch,
+    deleteCreditBatch: params.deleteCreditBatch
+  });
+
+  if (!archiveResult.success) {
+    return {
+      archiveResult,
+      saveSummary: null
+    };
+  }
+
+  const saveSummary = await saveCombinedStatementTransactions({
+    fileName: params.newFileName,
+    fileHash: params.newFileHash,
+    rows: params.newRows,
+    uploadExpenseBatch: params.uploadExpenseBatch,
+    uploadCreditBatch: params.uploadCreditBatch,
+    fetchExpenseRules: params.fetchExpenseRules,
+    fetchCreditRules: params.fetchCreditRules
+  });
+
+  return {
+    archiveResult,
+    saveSummary
   };
 }

@@ -4,6 +4,7 @@ import {
   FileText,
   X,
   Trash2,
+  RefreshCw,
   AlertCircle,
   ArrowDownLeft,
   ArrowUpRight,
@@ -22,9 +23,12 @@ import {
 import {
   annotateCombinedRowsWithDuplicates,
   buildCombinedImportHistory,
+  deleteCombinedStatementBatches,
   reconstructHistoryPreviewRows,
+  replaceCombinedStatementBatches,
   saveCombinedStatementTransactions,
   type AnnotatedCombinedRow,
+  type CombinedHistoryRecord,
   type CombinedSaveSummary
 } from './services/combinedStatementService';
 import toast from 'react-hot-toast';
@@ -77,12 +81,14 @@ export const UploadDrCrStatement = ({ onClose }: UploadDrCrStatementProps) => {
     expenses,
     imports: expenseImports,
     uploadBatch: uploadExpenseBatch,
+    deleteBatch: deleteExpenseBatch,
     isLoadingImports: isLoadingExpenseImports
   } = useExpenses();
   const {
     credits,
     imports: creditImports,
     uploadBatch: uploadCreditBatch,
+    deleteBatch: deleteCreditBatch,
     isLoadingImports: isLoadingCreditImports
   } = useCredits();
 
@@ -97,11 +103,27 @@ export const UploadDrCrStatement = ({ onClose }: UploadDrCrStatementProps) => {
   const [isSaving, setIsSaving] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
   const [isConfirmSaveOpen, setIsConfirmSaveOpen] = useState(false);
+  const [historyRecordToDelete, setHistoryRecordToDelete] =
+    useState<CombinedHistoryRecord | null>(null);
+  const [replaceTargetRecord, setReplaceTargetRecord] =
+    useState<CombinedHistoryRecord | null>(null);
+  const [pendingReplacement, setPendingReplacement] = useState<{
+    oldRecord: CombinedHistoryRecord;
+    newFileName: string;
+    newFileSize: number;
+    newFileHash: string;
+    newRows: AnnotatedCombinedRow[];
+    debitCount: number;
+    creditCount: number;
+    reviewCount: number;
+    duplicateCount: number;
+  } | null>(null);
   const [drCrCreditHashes, setDrCrCreditHashes] = useState<string[]>(() =>
     readStoredDrCrCreditHashes()
   );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const replaceHistoryInputRef = useRef<HTMLInputElement>(null);
 
   const activeFile = useMemo(
     () => stagedFiles.find(f => f.id === activeFileId) || null,
@@ -271,6 +293,166 @@ export const UploadDrCrStatement = ({ onClose }: UploadDrCrStatementProps) => {
     }
   };
 
+  const handleDeleteHistoryConfirm = async () => {
+    if (!historyRecordToDelete) return;
+    setIsSaving(true);
+    try {
+      const res = await deleteCombinedStatementBatches({
+        record: historyRecordToDelete,
+        deleteExpenseBatch,
+        deleteCreditBatch
+      });
+      if (res.success) {
+        toast.success(`"${historyRecordToDelete.fileName}" moved to Recycle Bin.`);
+        if (selectedHistoryKey === historyRecordToDelete.key) {
+          setSelectedHistoryKey(null);
+        }
+      } else {
+        toast.error(res.errors.join(' | ') || 'Failed to archive combined statement.');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to archive combined statement.');
+    } finally {
+      setIsSaving(false);
+      setHistoryRecordToDelete(null);
+    }
+  };
+
+  const handleReplaceFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    const target = replaceTargetRecord;
+    setReplaceTargetRecord(null);
+    if (!file || !target) return;
+
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    if (!isPdf) {
+      const msg = `Unsupported file "${file.name}". Please select a combined bank statement PDF (.pdf).`;
+      setParseError(msg);
+      toast.error(msg);
+      return;
+    }
+
+    setParseError(null);
+    setIsParsing(true);
+    try {
+      const { rows, fileHash } = await CombinedStatementExtractor.extractFromFile(file);
+      const { annotatedRows } = annotateCombinedRowsWithDuplicates({
+        rows,
+        fileHash,
+        existingExpenses: expenses,
+        existingCredits: credits,
+        expenseImports,
+        creditImports,
+        excludeExpenseBatchId: target.expenseBatchId,
+        excludeCreditBatchId: target.creditBatchId
+      });
+
+      const debitCount = annotatedRows.filter(r => r.classification === 'debit' && !r.isDuplicate).length;
+      const creditCount = annotatedRows.filter(r => r.classification === 'credit' && !r.isDuplicate).length;
+      const reviewCount = annotatedRows.filter(r => r.classification === 'unclassified').length;
+      const duplicateCount = annotatedRows.filter(r => r.isDuplicate).length;
+
+      setPendingReplacement({
+        oldRecord: target,
+        newFileName: file.name,
+        newFileSize: file.size,
+        newFileHash: fileHash,
+        newRows: annotatedRows,
+        debitCount,
+        creditCount,
+        reviewCount,
+        duplicateCount
+      });
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to parse replacement PDF. Existing statement remains untouched.';
+      setParseError(msg);
+      toast.error(msg);
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
+  const handleReplaceConfirm = async () => {
+    if (!pendingReplacement) return;
+    setIsSaving(true);
+    try {
+      const { archiveResult, saveSummary } = await replaceCombinedStatementBatches({
+        oldRecord: pendingReplacement.oldRecord,
+        newFileName: pendingReplacement.newFileName,
+        newFileHash: pendingReplacement.newFileHash,
+        newRows: pendingReplacement.newRows,
+        deleteExpenseBatch,
+        deleteCreditBatch,
+        uploadExpenseBatch,
+        uploadCreditBatch
+      });
+
+      if (!archiveResult.success || !saveSummary) {
+        const archiveErrMsg =
+          archiveResult.errors.join(' | ') || 'Failed to archive previous statement batches.';
+        setParseError(archiveErrMsg);
+        toast.error(archiveErrMsg);
+        return;
+      }
+
+      const fileId = `drcr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const finalRows = saveSummary.updatedRows || pendingReplacement.newRows;
+
+      const entry: CombinedStatementFileEntry = {
+        id: fileId,
+        fileName: pendingReplacement.newFileName,
+        fileSize: pendingReplacement.newFileSize,
+        uploadedAt: new Date().toISOString(),
+        fileHash: pendingReplacement.newFileHash,
+        status:
+          saveSummary.status === 'success'
+            ? 'saved'
+            : saveSummary.status === 'partial'
+              ? 'partial'
+              : saveSummary.status === 'failed'
+                ? 'error'
+                : 'parsed',
+        errorMessage: saveSummary.errors.length > 0 ? saveSummary.errors.join(' | ') : undefined,
+        totalRows: finalRows.length,
+        debitCount: pendingReplacement.debitCount,
+        creditCount: pendingReplacement.creditCount,
+        reviewCount: pendingReplacement.reviewCount,
+        duplicateCount: pendingReplacement.duplicateCount,
+        saveSummary
+      };
+
+      if (saveSummary.creditSavedDone && pendingReplacement.newFileHash) {
+        setDrCrCreditHashes(recordDrCrCreditHash(pendingReplacement.newFileHash));
+      }
+
+      setStagedFiles(prev => [entry, ...prev]);
+      setRowsByFile(prev => ({ ...prev, [fileId]: finalRows }));
+      setSelectedHistoryKey(null);
+      setActiveFileId(fileId);
+      setSectionFilter('all');
+
+      if (saveSummary.status === 'success') {
+        toast.success(
+          `Replaced "${pendingReplacement.oldRecord.fileName}" with "${pendingReplacement.newFileName}".`
+        );
+      } else if (saveSummary.status === 'partial') {
+        toast.error(
+          `Old statement moved to Recycle Bin. Partial save: ${saveSummary.expensesSaved} Dr, ${saveSummary.creditsSaved} Cr saved; ${saveSummary.failedCount} failed (use Retry Failed).`
+        );
+      } else if (saveSummary.status === 'failed') {
+        toast.error(
+          `Old statement moved to Recycle Bin, but saving replacement failed: ${saveSummary.errors[0] || 'Unknown error'}`
+        );
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to replace combined statement.');
+    } finally {
+      setIsSaving(false);
+      setPendingReplacement(null);
+    }
+  };
+
   const handleConfirmSave = async () => {
     if (!activeFile) return;
 
@@ -434,6 +616,13 @@ export const UploadDrCrStatement = ({ onClose }: UploadDrCrStatementProps) => {
         onChange={handleFilesChange}
         accept=".pdf"
         multiple
+        className="hidden"
+      />
+      <input
+        type="file"
+        ref={replaceHistoryInputRef}
+        onChange={handleReplaceFileSelected}
+        accept=".pdf"
         className="hidden"
       />
 
@@ -648,6 +837,33 @@ export const UploadDrCrStatement = ({ onClose }: UploadDrCrStatementProps) => {
                                 {imp.expenseRows} Dr, {imp.creditRows} Cr) •{' '}
                                 <span className="text-emerald-400">{imp.status}</span>
                               </p>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  setReplaceTargetRecord(imp);
+                                  replaceHistoryInputRef.current?.click();
+                                }}
+                                disabled={isParsing || isSaving}
+                                title="Replace Statement"
+                                className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-purple-500/40 text-slate-400 hover:text-purple-300 flex items-center justify-center transition-colors disabled:opacity-50"
+                              >
+                                <RefreshCw size={12} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  setHistoryRecordToDelete(imp);
+                                }}
+                                disabled={isParsing || isSaving}
+                                title="Move to Recycle Bin"
+                                className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-rose-500/20 border border-slate-700 hover:border-rose-500/40 text-slate-400 hover:text-rose-400 flex items-center justify-center transition-colors disabled:opacity-50"
+                              >
+                                <Trash2 size={12} />
+                              </button>
                             </div>
                           </div>
                         );
@@ -972,6 +1188,37 @@ export const UploadDrCrStatement = ({ onClose }: UploadDrCrStatementProps) => {
         cancelText="Cancel"
         onConfirm={handleConfirmSave}
         onClose={() => setIsConfirmSaveOpen(false)}
+      />
+
+      {/* Delete Saved Combined Statement Confirmation */}
+      <ConfirmModal
+        isOpen={Boolean(historyRecordToDelete)}
+        title="Move Combined Statement to Recycle Bin"
+        message={
+          historyRecordToDelete
+            ? `Are you sure you want to move "${historyRecordToDelete.fileName}" (${historyRecordToDelete.expenseRows} Expense and ${historyRecordToDelete.creditRows} Credit transaction(s)) to the Finance Recycle Bin?`
+            : ''
+        }
+        confirmText={isSaving ? 'Moving...' : 'Move to Recycle Bin'}
+        cancelText="Cancel"
+        isDestructive={true}
+        onConfirm={handleDeleteHistoryConfirm}
+        onClose={() => setHistoryRecordToDelete(null)}
+      />
+
+      {/* Replace Saved Combined Statement Confirmation */}
+      <ConfirmModal
+        isOpen={Boolean(pendingReplacement)}
+        title="Replace Combined Statement"
+        message={
+          pendingReplacement
+            ? `Move "${pendingReplacement.oldRecord.fileName}" (${pendingReplacement.oldRecord.expenseRows} Expense, ${pendingReplacement.oldRecord.creditRows} Credit) to Recycle Bin and import "${pendingReplacement.newFileName}" (${pendingReplacement.debitCount} Debit, ${pendingReplacement.creditCount} Credit, ${pendingReplacement.reviewCount} Review)?`
+            : ''
+        }
+        confirmText={isSaving ? 'Replacing...' : 'Replace Statement'}
+        cancelText="Cancel"
+        onConfirm={handleReplaceConfirm}
+        onClose={() => setPendingReplacement(null)}
       />
     </div>
   );
