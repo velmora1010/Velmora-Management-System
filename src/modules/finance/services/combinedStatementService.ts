@@ -22,6 +22,7 @@ export interface CombinedSaveSummary {
   creditsSaved: number;
   skippedDuplicates: number;
   reviewRequired: number;
+  ruleConflictCount?: number;
   failedCount: number;
   expenseBatchId?: string | null;
   creditBatchId?: string | null;
@@ -401,9 +402,11 @@ export function reconstructHistoryPreviewRows(
 
 export function mapDebitRowsToExpenses(
   debitRows: AnnotatedCombinedRow[],
-  activeRules: Awaited<ReturnType<typeof ExpenseRuleEngine.fetchActiveRules>>
+  activeRules: Awaited<ReturnType<typeof ExpenseRuleEngine.fetchActiveRules>>,
+  onConflictCount?: (count: number) => void
 ): FinanceExpense[] {
-  return debitRows.map(row => {
+  let conflictCount = 0;
+  const mapped = debitRows.map(row => {
     const baseTx: NormalizedTransaction = {
       sequence: row.sequence,
       transactionDate: row.transactionDate,
@@ -414,6 +417,9 @@ export function mapDebitRowsToExpenses(
     };
 
     const ruled = ExpenseRuleEngine.applyExpenseRules(baseTx, activeRules);
+    if (ruled.ruleConflict) {
+      conflictCount += 1;
+    }
 
     return {
       sequence: row.sequence,
@@ -427,7 +433,7 @@ export function mapDebitRowsToExpenses(
       sub_category1: ruled.sub_category1 || null,
       sub_category2: ruled.sub_category2 || null,
       sub_category3: ruled.sub_category3 || null,
-      sub_category3_values: [],
+      sub_category3_values: ruled.sub_category3_values || [],
       quantity: 1,
       gst_status: ruled.gst_status || 'Unregistered',
       payment_mode: ruled.payment_mode || 'Bank Transfer',
@@ -436,6 +442,8 @@ export function mapDebitRowsToExpenses(
       approved_by: ruled.approved_by || null
     };
   });
+  onConflictCount?.(conflictCount);
+  return mapped;
 }
 
 export function mapCreditRowsToCredits(
@@ -531,11 +539,14 @@ export async function saveCombinedStatementTransactions(params: {
 
   let nextDebitState: RowSaveState | null = null;
   let nextCreditState: RowSaveState | null = null;
+  let ruleConflictCount = previousSummary?.ruleConflictCount || 0;
 
   if (readyDebits.length > 0 && !expenseSavedDone) {
     try {
       const expenseRules = await fetchExpenseRules();
-      const mappedExpenses = mapDebitRowsToExpenses(readyDebits, expenseRules);
+      const mappedExpenses = mapDebitRowsToExpenses(readyDebits, expenseRules, count => {
+        ruleConflictCount = count;
+      });
       const expRes = await uploadExpenseBatch(
         fileName,
         fileHash,
@@ -614,6 +625,7 @@ export async function saveCombinedStatementTransactions(params: {
     creditsSaved,
     skippedDuplicates,
     reviewRequired,
+    ruleConflictCount,
     failedCount,
     expenseBatchId,
     creditBatchId,

@@ -445,6 +445,12 @@ export const UploadDrCrStatement = ({ onClose }: UploadDrCrStatementProps) => {
           `Old statement moved to Recycle Bin, but saving replacement failed: ${saveSummary.errors[0] || 'Unknown error'}`
         );
       }
+      if ((saveSummary.ruleConflictCount || 0) > 0) {
+        toast(
+          `${saveSummary.ruleConflictCount} debit transaction(s) matched conflicting automation rules and were marked Uncategorized for manual review.`,
+          { icon: '⚠️' }
+        );
+      }
     } catch (err: any) {
       toast.error(err?.message || 'Failed to replace combined statement.');
     } finally {
@@ -513,6 +519,12 @@ export const UploadDrCrStatement = ({ onClose }: UploadDrCrStatementProps) => {
         toast.error(saveSummary.errors[0] || 'Database save failed.');
       } else {
         toast('No new non-duplicate transactions to save.');
+      }
+      if ((saveSummary.ruleConflictCount || 0) > 0) {
+        toast(
+          `${saveSummary.ruleConflictCount} debit transaction(s) matched conflicting automation rules and were marked Uncategorized for manual review.`,
+          { icon: '⚠️' }
+        );
       }
     } catch (err: any) {
       const msg = err?.message || 'Failed to save combined statement transactions.';
@@ -1059,6 +1071,11 @@ export const UploadDrCrStatement = ({ onClose }: UploadDrCrStatementProps) => {
                     <span>Credits Saved: {activeFile.saveSummary.creditsSaved}</span>
                     <span>Skipped Duplicates: {activeFile.saveSummary.skippedDuplicates}</span>
                     <span>Requires Review: {activeFile.saveSummary.reviewRequired}</span>
+                    {(activeFile.saveSummary.ruleConflictCount || 0) > 0 && (
+                      <span className="text-amber-300">
+                        Rule Conflicts: {activeFile.saveSummary.ruleConflictCount}
+                      </span>
+                    )}
                     <span>Failed: {activeFile.saveSummary.failedCount}</span>
                   </div>
                 </div>
