@@ -60,6 +60,13 @@ export const UploadExpense = ({ onClose }: UploadExpenseProps) => {
       console.log(`[UploadExpense] 4. Fetching and applying Expense Rules...`);
       const activeRules = await ExpenseRuleEngine.fetchActiveRules();
       const ruledTransactions = transactions.map(tx => ExpenseRuleEngine.applyExpenseRules(tx, activeRules));
+      const conflictCount = ruledTransactions.filter(tx => Boolean(tx.ruleConflict)).length;
+      if (conflictCount > 0) {
+        toast(
+          `${conflictCount} transaction(s) matched conflicting automation rules and were marked Uncategorized for manual review.`,
+          { icon: '⚠️' }
+        );
+      }
 
       // 5. If replacing, delete old batch first
       if (replacingBatchId) {
@@ -144,7 +151,7 @@ export const UploadExpense = ({ onClose }: UploadExpenseProps) => {
           sub_category1: tx.sub_category1 || null,
           sub_category2: tx.sub_category2 || null,
           sub_category3: tx.sub_category3 || null,
-          sub_category3_values: [],
+          sub_category3_values: tx.sub_category3_values || [],
           quantity: 1,
           gst_status: tx.gst_status || 'Unregistered',
           payment_mode: tx.payment_mode || 'Bank Transfer',

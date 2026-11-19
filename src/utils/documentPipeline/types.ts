@@ -29,6 +29,12 @@ export interface DocumentSource {
   rawContent: any; // e.g., PdfTextItem[] (for PDF) or any[][] (for Excel)
 }
 
+export interface ExpenseRuleConflict {
+  matchedRuleIds: string[];
+  matchedKeywords: string[];
+  reason: string;
+}
+
 export interface NormalizedTransaction extends Partial<FinanceExpense> {
   sequence: number;
   transactionDate?: string;
@@ -40,12 +46,14 @@ export interface NormalizedTransaction extends Partial<FinanceExpense> {
   sub_category1?: string | null;
   sub_category2?: string | null;
   sub_category3?: string | null;
+  sub_category3_values?: string[];
   vendor?: string | null;
   payment_mode?: string | null;
   gst_status?: string | null;
   purchased_by?: string | null;
   approved_by?: string | null;
   source?: string | null; // Credit specific
+  ruleConflict?: ExpenseRuleConflict;
 }
 
 export interface DocumentParser {
