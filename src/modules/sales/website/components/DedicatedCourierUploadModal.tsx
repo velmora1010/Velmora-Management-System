@@ -681,9 +681,12 @@ function getCourierTheme(courierType: CourierUploadType) {
         badgeText: 'text-rose-300',
         dropBorder: 'border-rose-500/60',
         expectedColumns: [
-          'Order/Ref No', 'Article/Consignment No', 'Booking Date', 'Status', 'Event', 'Delivered Date'
+          'Order ID', 'Order Date', 'Customer Name', 'Phone', 'City', 'State',
+          'Payment Mode', 'Order Value (INR)', 'Dispatch Status', 'AWB Number',
+          'Courier Name', 'Status Type', 'Delivered Date', 'Current Status',
+          'Product Description', 'Quantity'
         ],
-        note: 'Requires at least an Order Reference and Article/Consignment tracking number. Extensible for all India Post regional formats.'
+        note: 'Requires at least an Order ID and AWB / Consignment number. Automatically enriches existing orders with delivery dates and tracking events without creating duplicates.'
       };
     default:
       return {

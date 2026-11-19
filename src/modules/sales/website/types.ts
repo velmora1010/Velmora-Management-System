@@ -229,10 +229,13 @@ export interface WebsiteFullOrderDetails {
   }>;
 }
 
+export type SalesSearchMode = 'order' | 'customer' | 'phone' | 'product' | 'city' | 'awb' | 'all';
+
 export interface GetOrdersPaginatedParams {
   page: number;
   pageSize: number;
   search?: string;
+  searchMode?: SalesSearchMode;
   datePreset?: string;
   dateFrom?: string;
   dateTo?: string;

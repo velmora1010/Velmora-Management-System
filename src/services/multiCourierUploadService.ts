@@ -255,12 +255,16 @@ export async function parseAndValidateCourierFile(
   ]);
 
   const orderStatusIdx = findColumnIndex(rawHeaders, [
-    'orderstatus', 'order_status', 'currentstatus', 'current_status', 'shipmentstatus',
-    'deliverystatus', 'status', 'statustype', 'status_type'
+    'currentstatus', 'current_status', 'orderstatus', 'order_status', 'shipmentstatus',
+    'deliverystatus', 'status'
   ]);
 
   const statusTypeIdx = findColumnIndex(rawHeaders, [
     'statustype', 'status_type', 'type_status'
+  ]);
+
+  const dispatchStatusIdx = findColumnIndex(rawHeaders, [
+    'dispatchstatus', 'dispatch_status', 'fulfillmentstatus', 'fulfillment_status'
   ]);
 
   const remarksIdx = findColumnIndex(rawHeaders, [
@@ -425,6 +429,44 @@ export async function parseAndValidateCourierFile(
     orderGroups.push(currentGroup);
   }
 
+  // Targeted query for all order IDs present in the uploaded file against Supabase
+  const distinctFileOids = Array.from(new Set(orderGroups.map(g => g.cleanOid).filter(Boolean)));
+  const missingFromMap = distinctFileOids.filter(oid => !salesByCleanId.has(oid.toLowerCase()));
+
+  if (missingFromMap.length > 0) {
+    const chunkSize = 200;
+    for (let i = 0; i < missingFromMap.length; i += chunkSize) {
+      const chunk = missingFromMap.slice(i, i + chunkSize);
+      const idVariants = Array.from(new Set([...chunk, ...chunk.map(c => `#${c}`)]));
+      const { data: chunkOrders } = await supabase
+        .from('sales_orders')
+        .select('id, order_id, customer_name, order_date, order_total, payment_mode, dispatch_status, order_status, extra_data')
+        .in('order_id', idVariants);
+
+      (chunkOrders || []).forEach(so => {
+        const clean = cleanOrderId(so.order_id).toLowerCase();
+        if (clean) salesByCleanId.set(clean, so);
+      });
+    }
+  }
+
+  // Also query customer_tracking_shipments by AWB to match existing tracking records
+  const distinctFileAwbs = Array.from(new Set(orderGroups.map(g => g.rawAwb).filter(Boolean)));
+  const trackingByAwb = new Map<string, any>();
+  if (distinctFileAwbs.length > 0) {
+    const awbChunkSize = 200;
+    for (let i = 0; i < distinctFileAwbs.length; i += awbChunkSize) {
+      const chunk = distinctFileAwbs.slice(i, i + awbChunkSize);
+      const { data: trackingRows } = await supabase
+        .from('customer_tracking_shipments')
+        .select('*')
+        .in('awb_number', chunk);
+      (trackingRows || []).forEach(tr => {
+        if (tr.awb_number) trackingByAwb.set(tr.awb_number.toLowerCase(), tr);
+      });
+    }
+  }
+
   // Preview & Reconciliation against existing database records
   const previewItems: MultiCourierPreviewItem[] = [];
   const unmatchedItems: MultiCourierPreviewItem[] = [];
@@ -507,9 +549,11 @@ export async function parseAndValidateCourierFile(
     // 1. Exact AWB match
     let matchedDexie: LogisticsOrder | undefined;
     let matchedSales: any | undefined;
+    let matchedTracking: any | undefined;
 
     if (rawAwb) {
       matchedDexie = dexieByAwb.get(rawAwb.toLowerCase());
+      matchedTracking = trackingByAwb.get(rawAwb.toLowerCase());
     }
 
     // 2. Exact Order ID match
@@ -519,6 +563,11 @@ export async function parseAndValidateCourierFile(
 
     if (cleanOid) {
       matchedSales = salesByCleanId.get(cleanOid.toLowerCase());
+    }
+
+    if (!matchedSales && matchedTracking?.order_id) {
+      const trOid = cleanOrderId(matchedTracking.order_id).toLowerCase();
+      matchedSales = salesByCleanId.get(trOid);
     }
 
     const isCancelledInSystem = matchedSales?.order_status === 'CANCELLED' || 
@@ -570,11 +619,11 @@ export async function parseAndValidateCourierFile(
       continue;
     }
 
-    if (matchedDexie || matchedSales) {
+    if (matchedDexie || matchedSales || matchedTracking) {
       matchedCount++;
-      const existingAwb = normalizeAwb(matchedDexie?.awbNumber || matchedSales?.extra_data?.awb_number || '');
-      const existingCourier = normalizeCourier(matchedDexie?.courier || matchedSales?.extra_data?.courier) || '';
-      const existingStatus = matchedDexie?.status || matchedSales?.dispatch_status || 'Pending';
+      const existingAwb = normalizeAwb(matchedDexie?.awbNumber || matchedSales?.extra_data?.awb_number || matchedTracking?.awb_number || '');
+      const existingCourier = normalizeCourier(matchedDexie?.courier || matchedSales?.extra_data?.courier || matchedTracking?.courier) || '';
+      const existingStatus = matchedDexie?.status || matchedSales?.dispatch_status || matchedTracking?.status || 'Pending';
 
       let classification: MatchClassification = 'MATCHED_EXISTING';
       let matchReason = '';

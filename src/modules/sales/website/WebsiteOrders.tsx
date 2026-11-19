@@ -95,6 +95,7 @@ export const WebsiteOrders: React.FC = () => {
   // Status-Specific Filter State
   const [logisticsFilters, setLogisticsFilters] = useState<LogisticsFilterState>({
     ...INITIAL_LOGISTICS_FILTER_STATE,
+    searchMode: 'order',
     activeSection: 'all_shipments'
   });
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -129,6 +130,7 @@ export const WebsiteOrders: React.FC = () => {
     setSearchTerm('');
     setLogisticsFilters(prev => ({
       ...INITIAL_LOGISTICS_FILTER_STATE,
+      searchMode: 'order',
       activeSection: prev.activeSection
     }));
     setPage(1);
@@ -280,6 +282,7 @@ export const WebsiteOrders: React.FC = () => {
         page,
         pageSize,
         search: searchTerm,
+        searchMode: (logisticsFilters.searchMode as any) || 'order',
         dateFrom,
         dateTo,
         manifestDateFrom: manifestFrom,
@@ -490,14 +493,20 @@ export const WebsiteOrders: React.FC = () => {
           <div className="w-full sm:w-64 md:w-72 shrink-0">
             <BulkAwbSearchInput
               searchMode={logisticsFilters.searchMode}
-              onSearchModeChange={mode => setLogisticsFilters(prev => ({ ...prev, searchMode: mode }))}
+              onSearchModeChange={mode => {
+                setLogisticsFilters(prev => ({ ...prev, searchMode: mode }));
+                setPage(1);
+              }}
               searchTerm={searchTerm}
               onSearchTermChange={val => {
                 setSearchTerm(val);
                 setPage(1);
               }}
               bulkAwbs={logisticsFilters.bulkAwbs}
-              onBulkAwbsChange={awbs => setLogisticsFilters(prev => ({ ...prev, bulkAwbs: awbs }))}
+              onBulkAwbsChange={awbs => {
+                setLogisticsFilters(prev => ({ ...prev, bulkAwbs: awbs }));
+                setPage(1);
+              }}
             />
           </div>
 
@@ -632,7 +641,14 @@ export const WebsiteOrders: React.FC = () => {
             {/* Search Query Chip */}
             {searchTerm.trim() && (
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 text-xs shrink-0">
-                <span>Search: "{searchTerm}"</span>
+                <span>
+                  {logisticsFilters.searchMode === 'order' ? 'Order ID' :
+                   logisticsFilters.searchMode === 'customer' ? 'Customer Name' :
+                   logisticsFilters.searchMode === 'phone' ? 'Phone' :
+                   logisticsFilters.searchMode === 'product' ? 'Product' :
+                   logisticsFilters.searchMode === 'city' ? 'City' :
+                   logisticsFilters.searchMode === 'awb' ? 'AWB' : 'All Fields'}: "{searchTerm}"
+                </span>
                 <button
                   type="button"
                   onClick={() => {

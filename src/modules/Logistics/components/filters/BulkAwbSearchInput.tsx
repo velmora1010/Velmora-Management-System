@@ -1,20 +1,26 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Search, ChevronDown, X, Layers, Check, AlertCircle } from 'lucide-react';
 
+export type SearchModeType = 'awb' | 'order' | 'customer' | 'phone' | 'product' | 'city' | 'all';
+
 interface BulkAwbSearchInputProps {
-  searchMode: 'awb' | 'order' | 'customer' | 'all';
-  onSearchModeChange: (mode: 'awb' | 'order' | 'customer' | 'all') => void;
+  searchMode: SearchModeType;
+  onSearchModeChange: (mode: SearchModeType) => void;
   searchTerm: string;
   onSearchTermChange: (val: string) => void;
-  bulkAwbs: string[];
-  onBulkAwbsChange: (awbs: string[]) => void;
+  bulkAwbs?: string[];
+  onBulkAwbsChange?: (awbs: string[]) => void;
+  availableModes?: SearchModeType[];
 }
 
-const SEARCH_MODES = [
+const ALL_SEARCH_MODES = [
+  { id: 'order', label: 'Order ID', placeholder: 'Search Order ID (e.g. 4515)...' },
+  { id: 'customer', label: 'Customer Name', placeholder: 'Search Customer Name...' },
+  { id: 'phone', label: 'Phone', placeholder: 'Search Phone Number...' },
+  { id: 'product', label: 'Product', placeholder: 'Search Product Name / SKU...' },
+  { id: 'city', label: 'City', placeholder: 'Search City...' },
   { id: 'awb', label: 'AWB', placeholder: 'Search upto 100 AWBs' },
-  { id: 'order', label: 'Order ID', placeholder: 'Search Order ID...' },
-  { id: 'customer', label: 'Customer', placeholder: 'Search Name or Phone...' },
-  { id: 'all', label: 'All', placeholder: 'Search all fields...' }
+  { id: 'all', label: 'All Fields', placeholder: 'Search across all fields...' }
 ] as const;
 
 export const BulkAwbSearchInput: React.FC<BulkAwbSearchInputProps> = ({
@@ -22,14 +28,20 @@ export const BulkAwbSearchInput: React.FC<BulkAwbSearchInputProps> = ({
   onSearchModeChange,
   searchTerm,
   onSearchTermChange,
-  bulkAwbs,
-  onBulkAwbsChange
+  bulkAwbs = [],
+  onBulkAwbsChange = () => {},
+  availableModes
 }) => {
   const [isModeOpen, setIsModeOpen] = useState(false);
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   const [bulkInputText, setBulkInputText] = useState('');
   const modeMenuRef = useRef<HTMLDivElement>(null);
   const bulkModalRef = useRef<HTMLDivElement>(null);
+
+  const activeModes = useMemo(() => {
+    if (!availableModes || availableModes.length === 0) return ALL_SEARCH_MODES;
+    return ALL_SEARCH_MODES.filter(m => availableModes.includes(m.id as SearchModeType));
+  }, [availableModes]);
 
   // Close mode menu on outside click
   useEffect(() => {
@@ -83,7 +95,7 @@ export const BulkAwbSearchInput: React.FC<BulkAwbSearchInputProps> = ({
     onSearchTermChange(val);
   };
 
-  const currentModeObj = SEARCH_MODES.find(m => m.id === searchMode) || SEARCH_MODES[0];
+  const currentModeObj = activeModes.find(m => m.id === searchMode) || activeModes[0];
 
   const handleApplyBulk = () => {
     onBulkAwbsChange(parsedAwbs);
@@ -113,13 +125,13 @@ export const BulkAwbSearchInput: React.FC<BulkAwbSearchInputProps> = ({
         </button>
 
         {isModeOpen && (
-          <div className="absolute left-0 mt-1 w-36 bg-[#0e1626] border border-slate-700/80 rounded-xl shadow-xl z-50 py-1 flex flex-col animate-in fade-in zoom-in-95 duration-100">
-            {SEARCH_MODES.map(mode => (
+          <div className="absolute left-0 mt-1 w-40 bg-[#0e1626] border border-slate-700/80 rounded-xl shadow-xl z-50 py-1 flex flex-col animate-in fade-in zoom-in-95 duration-100">
+            {activeModes.map(mode => (
               <button
                 key={mode.id}
                 type="button"
                 onClick={() => {
-                  onSearchModeChange(mode.id);
+                  onSearchModeChange(mode.id as SearchModeType);
                   setIsModeOpen(false);
                 }}
                 className={`text-left px-3 py-1.5 text-xs font-medium flex items-center justify-between hover:bg-slate-800 transition-colors ${

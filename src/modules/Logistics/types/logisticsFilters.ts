@@ -57,7 +57,7 @@ export interface LogisticsFilterState {
   returnedEndDate: string; // YYYY-MM-DD
 
   // 2. Search & Bulk AWBs
-  searchMode: 'awb' | 'order' | 'customer' | 'all';
+  searchMode: 'awb' | 'order' | 'customer' | 'phone' | 'product' | 'city' | 'all';
   bulkAwbs: string[]; // up to 100 AWBs
   orderIdSearch: string;
   customerNameSearch: string;

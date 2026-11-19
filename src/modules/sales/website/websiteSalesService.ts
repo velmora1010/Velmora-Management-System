@@ -1242,8 +1242,42 @@ export class WebsiteSalesService {
       .neq('order_status', 'DELETED');
 
     if (params.search && params.search.trim()) {
-      const q = params.search.trim().replace(/^#/, '');
-      query = query.or(`order_id.ilike.%${q}%,customer_name.ilike.%${q}%,phone.ilike.%${q}%`);
+      const mode = params.searchMode || 'order';
+      const rawSearch = params.search.trim();
+      const cleanSearch = rawSearch.replace(/^#/, '').trim();
+
+      if (mode === 'order') {
+        // Strict Order ID match: Search only order ID, normalize optional # prefix and whitespace
+        query = query.or(`order_id.eq.${cleanSearch},order_id.eq.#${cleanSearch},order_id.ilike.%${cleanSearch}%`);
+      } else if (mode === 'customer') {
+        // Customer Name: Case-insensitive partial matching
+        query = query.ilike('customer_name', `%${rawSearch}%`);
+      } else if (mode === 'phone') {
+        // Phone: Search only phone numbers, normalize formatting
+        const cleanDigits = rawSearch.replace(/\D/g, '');
+        if (cleanDigits.length >= 10) {
+          const last10 = cleanDigits.slice(-10);
+          query = query.or(`phone.ilike.%${last10}%,phone.ilike.%${cleanDigits}%,phone.ilike.%${rawSearch}%`);
+        } else if (cleanDigits.length > 0) {
+          query = query.or(`phone.ilike.%${cleanDigits}%,phone.ilike.%${rawSearch}%`);
+        } else {
+          query = query.ilike('phone', `%${rawSearch}%`);
+        }
+      } else if (mode === 'product') {
+        // Product: Search only product names and descriptions
+        query = query.or(`extra_data->>product_name.ilike.%${rawSearch}%,extra_data->>order_formatted.ilike.%${rawSearch}%`);
+      } else if (mode === 'city') {
+        // City: Strict city search
+        query = query.ilike('city', `%${rawSearch}%`);
+      } else if (mode === 'awb') {
+        // AWB: Search only waybill / AWB numbers
+        query = query.or(`extra_data->>awb_number.ilike.%${rawSearch}%`);
+      } else {
+        // All Fields: Search across all supported fields
+        query = query.or(
+          `order_id.ilike.%${cleanSearch}%,customer_name.ilike.%${rawSearch}%,phone.ilike.%${rawSearch}%,city.ilike.%${rawSearch}%,extra_data->>product_name.ilike.%${rawSearch}%`
+        );
+      }
     }
 
     // 1. General Date Range (Order Date)

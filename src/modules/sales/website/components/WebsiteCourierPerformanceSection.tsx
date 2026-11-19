@@ -583,8 +583,20 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
             {filteredRows.length > 0 ? (
               filteredRows.map((row) => {
                 const isDelhivery = row.courier.toLowerCase().includes('delhivery');
+                const isIndiaPost = row.courier.toLowerCase().includes('india post');
+                const isStCourier = row.courier.toLowerCase().includes('st courier');
+                const isAmazon = row.courier.toLowerCase().includes('amazon');
+                const isEkart = row.courier.toLowerCase().includes('ekart');
                 const isUnknown = row.courier.includes('Unknown') || row.courier.includes('Not Available');
                 const isHouse = row.courier.toLowerCase() === 'house';
+
+                const courierColor = isIndiaPost ? '#f43f5e' : 
+                                     isDelhivery ? '#06b6d4' : 
+                                     isStCourier ? '#38bdf8' : 
+                                     isAmazon ? '#f59e0b' : 
+                                     isEkart ? '#a855f7' : 
+                                     isHouse ? '#8b5cf6' : 
+                                     isUnknown ? '#eab308' : '#3b82f6';
 
                 return (
                   <tr
@@ -596,7 +608,7 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                     <td className="py-3 px-4 font-sans font-medium text-slate-200">
                       <div className="flex items-center gap-2.5">
                         <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{
-                          backgroundColor: isDelhivery ? '#06b6d4' : isHouse ? '#8b5cf6' : isUnknown ? '#eab308' : '#3b82f6'
+                          backgroundColor: courierColor
                         }} />
                         <span className="font-semibold text-white group-hover:text-purple-300 transition-colors">
                           {row.courier}
