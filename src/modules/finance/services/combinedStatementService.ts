@@ -439,7 +439,13 @@ export function mapDebitRowsToExpenses(
       payment_mode: ruled.payment_mode || 'Bank Transfer',
       bank_account: null,
       purchased_by: ruled.purchased_by || null,
-      approved_by: ruled.approved_by || null
+      approved_by: ruled.approved_by || null,
+      manually_edited: false,
+      categorization_source: ruled.ruleConflict
+        ? ('conflict' as const)
+        : ruled.main_category && ruled.main_category !== 'Uncategorized'
+          ? ('auto_rule' as const)
+          : ('unassigned' as const)
     };
   });
   onConflictCount?.(conflictCount);

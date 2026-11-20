@@ -157,7 +157,13 @@ export const UploadExpense = ({ onClose }: UploadExpenseProps) => {
           payment_mode: tx.payment_mode || 'Bank Transfer',
           bank_account: null,
           purchased_by: tx.purchased_by || null,
-          approved_by: tx.approved_by || null
+          approved_by: tx.approved_by || null,
+          manually_edited: false,
+          categorization_source: tx.ruleConflict
+            ? ('conflict' as const)
+            : tx.main_category && tx.main_category !== 'Uncategorized'
+              ? ('auto_rule' as const)
+              : ('unassigned' as const)
         };
       });
 

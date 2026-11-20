@@ -28,6 +28,8 @@ export interface FinanceExpense {
   sequence?: number;
   transaction_date?: string | null;
   posted_datetime?: string | null;
+  manually_edited?: boolean;
+  categorization_source?: 'unassigned' | 'auto_rule' | 'conflict' | 'manual';
 }
 
 export interface ExpenseImport {
@@ -108,7 +110,12 @@ export const useExpenses = () => {
 
   const addExpense = async (expenseData: FinanceExpense) => {
     try {
-      const payload = { ...expenseData, status: 'active' };
+      const payload = {
+        ...expenseData,
+        status: 'active',
+        manually_edited: true,
+        categorization_source: 'manual' as const
+      };
       console.log('Expense Payload', payload);
 
       const { data, error } = await supabase
@@ -140,12 +147,25 @@ export const useExpenses = () => {
     }
   };
 
-  const updateExpense = async (id: string, updates: Partial<FinanceExpense>) => {
+  const updateExpense = async (
+    id: string,
+    updates: Partial<FinanceExpense>,
+    options?: { preserveEditTracking?: boolean }
+  ) => {
     try {
-      console.log('Expense Update Payload', updates);
+      const isStatusOnly = Object.keys(updates).every(key => key === 'status');
+      const finalUpdates: Partial<FinanceExpense> =
+        options?.preserveEditTracking || isStatusOnly
+          ? updates
+          : {
+              ...updates,
+              manually_edited: true,
+              categorization_source: 'manual'
+            };
+      console.log('Expense Update Payload', finalUpdates);
       const { data, error } = await supabase
         .from(SUPABASE_TABLES.expenses)
-        .update(updates)
+        .update(finalUpdates)
         .eq('id', id)
         .select()
         .single();
@@ -174,7 +194,7 @@ export const useExpenses = () => {
   };
 
   const archiveExpense = async (id: string) => {
-    return updateExpense(id, { status: 'archived' });
+    return updateExpense(id, { status: 'archived' }, { preserveEditTracking: true });
   };
 
   const fetchImports = useCallback(async () => {
@@ -246,7 +266,9 @@ export const useExpenses = () => {
           status: 'active',
           import_batch_id: batch_id,
           import_file_name: file_name,
-          import_status: 'Imported'
+          import_status: 'Imported',
+          manually_edited: exp.manually_edited ?? false,
+          categorization_source: exp.categorization_source || 'unassigned'
         };
       });
 

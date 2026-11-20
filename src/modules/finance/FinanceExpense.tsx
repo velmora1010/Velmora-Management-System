@@ -489,6 +489,7 @@ export const FinanceExpense = () => {
                               formId={`edit-expense-${expense.id}`}
                               onClose={() => setEditingId(null)}
                               onSuccess={() => setEditingId(null)}
+                              onRuleSavedAndReevaluated={refreshExpenses}
                             />
                           )}
                         />
