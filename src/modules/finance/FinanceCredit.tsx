@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Search, RefreshCw, X } from 'lucide-react';
 import { UploadCredit } from './UploadCredit';
+import { UploadDrCrStatement } from './UploadDrCrStatement';
 import { useCredits, type FinanceCredit as FinanceCreditType } from '../../hooks/finance/useCredits';
 import { CreditCard } from './CreditCard';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
@@ -12,7 +13,7 @@ export const FinanceCredit = () => {
   const { credits, isLoading, archiveCredit, refreshCredits } = useCredits();
 
   // Tab state
-  const [activeTab, setActiveTab] = useState<'view' | 'upload' | 'rules' | 'analytics'>('view');
+  const [activeTab, setActiveTab] = useState<'view' | 'upload' | 'upload_dr_cr' | 'rules' | 'analytics'>('view');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Search & Filter state
@@ -182,6 +183,17 @@ export const FinanceCredit = () => {
         </button>
         <button
           type="button"
+          onClick={() => setActiveTab('upload_dr_cr')}
+          className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${
+            activeTab === 'upload_dr_cr'
+              ? 'bg-purple-600 text-white shadow-md shadow-purple-600/25 font-semibold'
+              : 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-700/80 hover:text-white'
+          }`}
+        >
+          Upload Dr &amp; Cr
+        </button>
+        <button
+          type="button"
           onClick={() => setActiveTab('view')}
           className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${
             activeTab === 'view'
@@ -323,6 +335,10 @@ export const FinanceCredit = () => {
       <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
         {activeTab === 'upload' && (
           <UploadCredit onClose={() => setActiveTab('view')} />
+        )}
+
+        {activeTab === 'upload_dr_cr' && (
+          <UploadDrCrStatement onClose={() => setActiveTab('view')} />
         )}
 
         {activeTab === 'view' && (

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useExpenses, type FinanceExpense } from '../../hooks/finance/useExpenses';
 import { supabase } from '../../lib/supabase';
 import { MultiSelect } from '../../components/ui/MultiSelect';
+import { ExpenseRuleEngine } from '../../utils/rules/ExpenseRuleEngine';
 import toast from 'react-hot-toast';
 
 interface ExpenseCardEditorProps {
@@ -184,8 +185,8 @@ export const ExpenseCardEditor = ({ expense, formId, onClose, onSuccess }: Expen
       return;
     }
 
-    if (saveAsRule && !ruleKeyword.trim()) {
-      setError('Please specify a keyword for the automation rule.');
+    if (saveAsRule && ExpenseRuleEngine.parseRuleKeywords(ruleKeyword).length === 0) {
+      setError('Please specify at least one valid keyword for the automation rule.');
       return;
     }
 
@@ -207,36 +208,46 @@ export const ExpenseCardEditor = ({ expense, formId, onClose, onSuccess }: Expen
       }
 
       if (saveAsRule) {
-        const kw = ruleKeyword.trim();
+        const tokens = ExpenseRuleEngine.parseRuleKeywords(ruleKeyword);
+        const signature = ExpenseRuleEngine.getKeywordSignature(tokens);
+        const canonicalKeyword = tokens.join('/');
+        const normalizedSub4 = ExpenseRuleEngine.normalizeLevel5Values(selectedSub4Values);
+
         const { data: existingRules, error: fetchErr } = await supabase
           .from('expense_rules')
           .select('*')
-          .eq('keyword', kw);
+          .eq('keyword_signature', signature);
 
         if (fetchErr) {
           toast.error('Expense updated, but rule creation failed (Database Error).');
         } else if (existingRules && existingRules.length > 0) {
           const existing = existingRules[0];
-          const isSameMapping = 
-            existing.department === selectedMain &&
-            existing.category === selectedSub1 &&
+          const existingSub4 = ExpenseRuleEngine.normalizeLevel5Values(existing.sub_category3_values);
+          const isSameMapping =
+            (existing.department || '') === (selectedMain || '') &&
+            (existing.category || '') === (selectedSub1 || '') &&
             (existing.sub_category1 || '') === (selectedSub2 || '') &&
+            (existing.sub_category2 || '') === (selectedSub3 || '') &&
+            JSON.stringify(existingSub4) === JSON.stringify(normalizedSub4) &&
             (existing.vendor || '') === (formData.vendor || '');
 
           if (isSameMapping) {
             toast.success('Expense updated. (Automation rule already exists)');
           } else {
-            toast.error('Expense updated, but automation rule was NOT created because this keyword already has a different mapping.');
+            toast.error('Expense updated, but automation rule was NOT created because this keyword combination already has a different mapping.');
           }
         } else {
           const { error: insertErr } = await supabase
             .from('expense_rules')
             .insert([{
-              keyword: kw,
+              keyword: canonicalKeyword,
+              keywords: tokens,
+              keyword_signature: signature,
               department: selectedMain,
               category: selectedSub1,
               sub_category1: selectedSub2,
               sub_category2: selectedSub3,
+              sub_category3_values: normalizedSub4,
               vendor: formData.vendor || null,
               payment_mode: formData.payment_mode || null,
               gst_status: formData.gst_status || null,
@@ -510,11 +521,11 @@ export const ExpenseCardEditor = ({ expense, formId, onClose, onSuccess }: Expen
                 required
                 value={ruleKeyword}
                 onChange={(e) => setRuleKeyword(e.target.value)}
-                placeholder="Enter automation keyword (e.g., swiggy)"
+                placeholder="Enter automation keyword(s) (e.g., wififoundersoff/airte/paymentsb)"
                 className="w-full bg-background border border-border text-main text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-primary font-mono"
               />
               <p className="text-[11px] text-muted leading-tight">
-                This exact keyword will be matched against future transactions to automatically categorize them. Ensure it is unique enough to avoid false positives.
+                Separate multiple keywords using /. All keywords must be present in the transaction description.
               </p>
             </div>
           )}

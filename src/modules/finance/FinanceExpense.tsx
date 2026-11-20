@@ -7,6 +7,7 @@ import { ExpenseCard } from './ExpenseCard';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import { supabase } from '../../lib/supabase';
 import { UploadExpense } from './UploadExpense';
+import { UploadDrCrStatement } from './UploadDrCrStatement';
 import { ExpenseAnalytics } from './ExpenseAnalytics';
 import toast from 'react-hot-toast';
 
@@ -32,7 +33,7 @@ export const FinanceExpense = () => {
 
 
   // Tab and Form state
-  const [activeTab, setActiveTab] = useState<'view' | 'add' | 'analytics' | 'upload'>('view');
+  const [activeTab, setActiveTab] = useState<'view' | 'add' | 'analytics' | 'upload' | 'upload_dr_cr'>('view');
   const [editingExpense, setEditingExpense] = useState<FinanceExpenseType | null>(null);
 
   // Modal state
@@ -241,6 +242,16 @@ export const FinanceExpense = () => {
           Upload Expense
         </button>
         <button
+          onClick={() => setActiveTab('upload_dr_cr')}
+          className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${
+            activeTab === 'upload_dr_cr'
+              ? 'bg-purple-600 text-white shadow-md shadow-purple-600/25 font-semibold'
+              : 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-700/80 hover:text-white'
+          }`}
+        >
+          Upload Dr &amp; Cr
+        </button>
+        <button
           onClick={() => setActiveTab('view')}
           className={`px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${
             activeTab === 'view'
@@ -398,6 +409,10 @@ export const FinanceExpense = () => {
 
         {activeTab === 'upload' && (
           <UploadExpense onClose={() => setActiveTab('view')} />
+        )}
+
+        {activeTab === 'upload_dr_cr' && (
+          <UploadDrCrStatement onClose={() => setActiveTab('view')} />
         )}
 
         {activeTab === 'analytics' && (
