@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { MultiSelect } from '../../components/ui/MultiSelect';
 import { ExpenseRuleEngine } from '../../utils/rules/ExpenseRuleEngine';
 import { reevaluateHistoricalExpenses } from './services/expenseReevaluationService';
+import { runHistoricalReevaluationWithToast } from './services/ruleReevaluationFlow';
 import toast from 'react-hot-toast';
 
 interface ExpenseCardEditorProps {
@@ -240,7 +241,13 @@ export const ExpenseCardEditor = ({
             (existing.vendor || '') === (formData.vendor || '');
 
           if (isSameMapping) {
-            toast.success('Expense updated. (Automation rule already exists)');
+            await runHistoricalReevaluationWithToast({
+              source: 'reused',
+              excludeExpenseId: expense.id,
+              reevaluate: reevaluateHistoricalExpenses,
+              onRuleSavedAndReevaluated,
+              toast,
+            });
           } else {
             toast.error('Expense updated, but automation rule was NOT created because this keyword combination already has a different mapping.');
           }
@@ -269,40 +276,13 @@ export const ExpenseCardEditor = ({
           if (insertErr) {
             toast.error(`Expense updated, but rule creation failed: ${insertErr.message}`);
           } else {
-            const reevalToastId = toast.loading('Rule saved. Re-evaluating existing transactions...');
-            try {
-              const summary = await reevaluateHistoricalExpenses({
-                excludeExpenseId: expense.id
-              });
-
-              if (summary.queuedRerun) {
-                toast.success('Rule saved! Re-evaluation queued behind active run.', {
-                  id: reevalToastId
-                });
-              } else {
-                const extraParts: string[] = [];
-                if (summary.skipped > 0) extraParts.push(`${summary.skipped} skipped`);
-                if (summary.failed > 0) extraParts.push(`${summary.failed} failed`);
-                const suffix = extraParts.length > 0 ? `, ${extraParts.join(', ')}` : '';
-                const msg = `Rule saved! ${summary.updated} existing transactions categorized, ${summary.unmatched} unmatched, ${summary.conflicts} conflicts${suffix}.`;
-
-                if (summary.failed > 0 && summary.updated === 0) {
-                  toast.error(msg, { id: reevalToastId });
-                } else if (summary.conflicts > 0 || summary.failed > 0) {
-                  toast(msg, { id: reevalToastId, icon: '⚠️' });
-                } else {
-                  toast.success(msg, { id: reevalToastId });
-                }
-              }
-
-              await onRuleSavedAndReevaluated?.();
-            } catch (reevalErr: any) {
-              console.error('Historical expense re-evaluation failed:', reevalErr);
-              toast.error(
-                `Rule saved, but historical re-evaluation failed: ${reevalErr?.message || 'Unexpected error'}`,
-                { id: reevalToastId }
-              );
-            }
+            await runHistoricalReevaluationWithToast({
+              source: 'new',
+              excludeExpenseId: expense.id,
+              reevaluate: reevaluateHistoricalExpenses,
+              onRuleSavedAndReevaluated,
+              toast,
+            });
           }
         }
       } else {
