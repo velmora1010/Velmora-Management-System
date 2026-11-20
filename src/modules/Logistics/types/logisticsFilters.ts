@@ -349,15 +349,27 @@ export function getOrderShipmentStatus(order: UnifiedLogisticsOrder): string {
   const st = (order.status || '').trim();
   const lower = st.toLowerCase();
   const stage = (order.workflowStage || order.stage || '').toLowerCase();
+  const ordSt = ((order as any).order_status || (order as any).orderStatus || '').toLowerCase();
 
-  if (
+  const isExplicitTombstone =
     lower === 'deleted' || 
     lower === 'order deleted' || 
-    (stage === 'trash' && (lower === 'deleted' || order.trashReason?.toLowerCase().includes('delete') || (!order.cancellation && !order.cancellationStatus))) ||
-    Boolean((order as any).isDeleted || (order as any).is_deleted)
-  ) {
+    ordSt === 'deleted' ||
+    Boolean((order as any).isDeleted || (order as any).is_deleted || (order as any).extra_data?.is_deleted || (order as any).extra_data?.tombstone);
+
+  if (isExplicitTombstone) {
     return 'Deleted';
   }
+
+  // Terminal delivery protection: Delivered orders must never be marked deleted or cancelled
+  if (lower.includes('delivered') || !!order.deliveredDate || (order as any).dispatch_status === 'DELIVERED') {
+    return 'Delivered';
+  }
+
+  if (stage === 'trash' && (lower === 'deleted' || order.trashReason?.toLowerCase().includes('delete'))) {
+    return 'Deleted';
+  }
+
   if (lower === 'cancelled' || stage === 'trash' || (order.cancellationStatus && order.cancellationStatus.toLowerCase() === 'completed')) {
     return 'Cancelled';
   }
@@ -486,20 +498,28 @@ export function isOrderInTransit(order: UnifiedLogisticsOrder): boolean {
  */
 export function isDeletedLogisticsOrder(order: UnifiedLogisticsOrder): boolean {
   if (!order) return false;
-  const stage = (order.workflowStage || order.stage || '').toLowerCase();
   const st = (order.status || '').toLowerCase();
   const rawStatus = (order.rawStatus || '').toLowerCase();
   const ordSt = ((order as any).order_status || (order as any).orderStatus || '').toLowerCase();
   const fst = (order.fulfillmentStatus || order.sourceFulfillmentStatus || (order as any).fulfillment_status || '').toLowerCase();
-  return (
-    stage === 'trash' ||
+
+  const isExplicitTombstone =
     st === 'deleted' ||
     st === 'order deleted' ||
     ordSt === 'deleted' ||
     rawStatus === 'deleted' ||
     fst === 'deleted' ||
-    Boolean((order as any).isDeleted || (order as any).is_deleted)
-  );
+    Boolean((order as any).isDeleted || (order as any).is_deleted || (order as any).extra_data?.is_deleted || (order as any).extra_data?.tombstone);
+
+  if (isExplicitTombstone) return true;
+
+  // Terminal delivery protection: Delivered orders must never be marked deleted due to staging stage
+  if (st.includes('delivered') || !!order.deliveredDate || (order as any).dispatch_status === 'DELIVERED') {
+    return false;
+  }
+
+  const stage = (order.workflowStage || order.stage || '').toLowerCase();
+  return stage === 'trash' && (st === 'deleted' || (order as any).trashReason?.toLowerCase().includes('delete'));
 }
 
 /**

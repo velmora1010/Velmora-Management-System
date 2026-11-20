@@ -165,31 +165,48 @@ export const STATUS_METADATA_MAP: Record<CanonicalLogisticsStatus, StatusMetadat
 
 /**
  * Robust predicate to determine whether an order is marked as DELETED or trashed across Sales and Logistics.
+ * Genuinely deleted orders carry explicit tombstones or explicit deletion flags.
+ * Orders with verified terminal delivery events are protected from spurious local cache/staging deletion flags.
  */
 export function isDeletedOrder(order: any): boolean {
   if (!order) return false;
   const extra = order.extra_data || {};
+  const orderStatusStr = String(order.order_status || '').toLowerCase().trim();
+  if (orderStatusStr === 'deleted') return true;
+  if (Boolean(order.isDeleted || order.is_deleted || extra.is_deleted || extra.tombstone)) return true;
+
   const statusStr = String(order.status || order.shipment_status || extra.delhivery_status_type || '').toLowerCase().trim();
   const rawStatusStr = String(order.rawStatus || order.raw_status || extra.delhivery_current_status || extra.raw_status || '').toLowerCase().trim();
-  const orderStatusStr = String(order.order_status || '').toLowerCase().trim();
-  const stage = String(order.stage || order.workflowStage || '').toLowerCase().trim();
 
-  return (
-    orderStatusStr === 'deleted' ||
-    statusStr === 'deleted' ||
-    statusStr === 'order deleted' ||
-    rawStatusStr === 'deleted' ||
-    rawStatusStr === 'order deleted' ||
-    Boolean(order.isDeleted || order.is_deleted || extra.is_deleted || extra.tombstone) ||
-    Boolean(order.deletedAt || order.deleted_at || extra.deleted_at) ||
-    (stage === 'trash' && (
-      statusStr === 'deleted' || 
-      statusStr === 'order deleted' ||
-      Boolean(order.trashReason?.toLowerCase().includes('delete')) || 
-      Boolean(order.remarks?.toLowerCase().includes('delete')) || 
-      (!order.cancellation && !order.cancellationStatus && orderStatusStr !== 'cancelled')
-    ))
-  );
+  // Explicit tracking tombstone
+  if (statusStr === 'order deleted' || rawStatusStr === 'order deleted' || (statusStr === 'deleted' && rawStatusStr === 'deleted')) {
+    return true;
+  }
+
+  // Authoritative protection: Orders with verified terminal delivery cannot be marked deleted
+  const dispatchStatusStr = String(order.dispatch_status || '').toLowerCase().trim();
+  const isDelivered = 
+    statusStr === 'delivered' || 
+    rawStatusStr === 'delivered' || 
+    dispatchStatusStr === 'delivered' ||
+    Boolean(order.delivered_date || order.deliveredDate);
+
+  if (isDelivered) {
+    return false;
+  }
+
+  // Deletion timestamp on an un-delivered order
+  if (Boolean(order.deletedAt || order.deleted_at || extra.deleted_at)) {
+    return true;
+  }
+
+  // Explicit deletion in staging Dexie orders (status: 'Deleted' with explicit deletion reason, not just staging trash)
+  const stage = String(order.stage || order.workflowStage || '').toLowerCase().trim();
+  if (stage === 'trash' && statusStr === 'deleted' && (order.trashReason?.toLowerCase().includes('delete') || order.remarks?.toLowerCase().includes('delete'))) {
+    return true;
+  }
+
+  return false;
 }
 
 /**
@@ -198,15 +215,14 @@ export function isDeletedOrder(order: any): boolean {
  */
 export function getCanonicalStatus(order: any): CanonicalLogisticsStatus {
   const extra = order.extra_data || {};
-  const statusStr = (order.status || order.shipment_status || order.order_status || extra.delhivery_status_type || '').toLowerCase().trim();
+  const statusStr = (order.status || order.shipment_status || order.order_status || order.dispatch_status || order.fulfillment_status || extra.delhivery_status_type || '').toLowerCase().trim();
   const rawStatusStr = (order.rawStatus || order.raw_status || extra.delhivery_current_status || extra.raw_status || '').toLowerCase().trim();
   const eventStr = (order.lastEvent || extra.delhivery_remarks || '').toLowerCase().trim();
   const remarksStr = (order.remarks || extra.delhivery_remarks || '').toLowerCase().trim();
   const finStr = (order.financialStatus || order.financial_status || extra.financial_status || '').toLowerCase().trim();
-  const stage = (order.stage || order.workflowStage || '').toLowerCase().trim();
   const todayStr = formatLocalYMD(new Date());
 
-  // 0. Deleted (Highest priority: deleted orders must NEVER appear as active or pending dispatch)
+  // 0. Deleted (Highest priority: genuinely deleted orders must NEVER appear as active or pending dispatch)
   if (isDeletedOrder(order)) {
     return 'Deleted';
   }
@@ -216,10 +232,8 @@ export function getCanonicalStatus(order: any): CanonicalLogisticsStatus {
     order.order_status === 'CANCELLED' ||
     (order.order_status || '').toLowerCase() === 'cancelled' ||
     statusStr === 'cancelled' || 
-    order.workflowStage === 'trash' || 
     finStr === 'voided' || 
     rawStatusStr.includes('cancel') ||
-    order.stage === 'trash' ||
     (order.cancellation && order.cancellation.status === 'CANCELLED') ||
     order.cancellationStatus === 'Completed' ||
     order.isCancelled
@@ -275,6 +289,7 @@ export function getCanonicalStatus(order: any): CanonicalLogisticsStatus {
   if (
     statusStr === 'delivered' || 
     rawStatusStr === 'delivered' || 
+    String(order.dispatch_status || '').toLowerCase().trim() === 'delivered' ||
     (eventStr.includes('delivered') && !eventStr.includes('undelivered') && !eventStr.includes('attempt'))
   ) {
     return 'Delivered';

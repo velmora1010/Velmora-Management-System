@@ -48,7 +48,7 @@ interface ConsolidatedOrdersCacheEntry {
 
 const consolidatedOrdersCache = new Map<string, ConsolidatedOrdersCacheEntry>();
 const inFlightOrderPromises = new Map<string, Promise<WebsiteConsolidatedOrder[]>>();
-let trackingShipmentsCache: { timestamp: number; map: Map<string, any> } | null = null;
+let trackingShipmentsCache: { timestamp: number; map: Map<string, any>; awbMap: Map<string, any> } | null = null;
 let uploadBatchesCache: { timestamp: number; data: WebsiteUploadBatch[] } | null = null;
 
 export class WebsiteSalesService {
@@ -642,6 +642,7 @@ export class WebsiteSalesService {
 
       // 1. Authoritative shipments from Supabase customer_tracking_shipments with 60-second in-memory TTL
       const now = Date.now();
+      let trackingAwbMap = new Map<string, any>();
       if (!trackingShipmentsCache || now - trackingShipmentsCache.timestamp > 60_000) {
         const shipRows = await this.fetchAllPages<any>((start, end) =>
           supabase
@@ -652,15 +653,19 @@ export class WebsiteSalesService {
         );
 
         const newMap = new Map<string, any>();
+        const newAwbMap = new Map<string, any>();
         (shipRows || []).forEach(s => {
           const cid1 = cleanOrderId(s.order_id).toLowerCase();
           const cid2 = cleanOrderId(s.display_order_id).toLowerCase();
+          const awb = String(s.awb_number || '').trim();
           if (cid1) newMap.set(cid1, s);
           if (cid2) newMap.set(cid2, s);
+          if (awb) newAwbMap.set(awb, s);
         });
-        trackingShipmentsCache = { timestamp: now, map: newMap };
+        trackingShipmentsCache = { timestamp: now, map: newMap, awbMap: newAwbMap };
       }
       trackingShipmentsCache.map.forEach((val, key) => trackingMap.set(key, val));
+      trackingAwbMap = trackingShipmentsCache.awbMap || new Map();
 
       // 2. Fetch local Dexie db.logistics_orders as secondary/staging cache
       try {
@@ -690,9 +695,10 @@ export class WebsiteSalesService {
 
     const orders: WebsiteConsolidatedOrder[] = orderRows.map(o => {
       const cid = cleanOrderId(o.order_id).toLowerCase();
-      const trackRec = trackingMap.get(cid);
-      const logRec = logisticsMap.get(cid);
       const extra = o.extra_data || {};
+      const orderAwb = String(extra.awb_number || o.awb_number || '').trim();
+      const trackRec = trackingMap.get(cid) || (orderAwb ? trackingAwbMap.get(orderAwb) : null);
+      const logRec = logisticsMap.get(cid);
       
       // Items embedded directly from PostgREST query
       const rawEmbeddedItems = Array.isArray(o.items) ? o.items : [];
@@ -719,13 +725,36 @@ export class WebsiteSalesService {
       const rawPincode = o.pincode || '';
       const canonicalLoc = resolveCanonicalLocation(rawState, rawCity, rawPincode);
 
-      const isOrderDeleted =
+      // Authoritative terminal delivery verification:
+      // Orders with verified delivery events must NEVER be marked deleted due to staging or local cache flags.
+      const hasTerminalDelivery =
+        (trackRec?.status && trackRec.status.toLowerCase().includes('deliv')) ||
+        (trackRec?.raw_status && trackRec.raw_status.toLowerCase().includes('deliv')) ||
+        (extra.delhivery_status_type && extra.delhivery_status_type.toLowerCase().includes('deliv')) ||
+        (extra.delhivery_current_status && extra.delhivery_current_status.toLowerCase().includes('deliv')) ||
+        (o.dispatch_status && o.dispatch_status.toUpperCase() === 'DELIVERED');
+
+      // Genuinely deleted orders carry explicit tombstones in sales_orders or customer_tracking_shipments
+      const isExplicitlyDeleted =
         o.order_status === 'DELETED' ||
         Boolean(extra.is_deleted || extra.tombstone) ||
-        logRec?.status === 'Deleted' ||
-        logRec?.stage === 'trash' ||
         trackRec?.status === 'Order Deleted' ||
         trackRec?.raw_status === 'DELETED';
+
+      const isOrderDeleted = isExplicitlyDeleted || (
+        !hasTerminalDelivery &&
+        logRec?.status === 'Deleted' &&
+        Boolean(logRec?.isDeleted || logRec?.trashReason?.toLowerCase().includes('deleted from sales'))
+      );
+
+      const finalCourier = trackRec?.courier || logRec?.courier || extra.courier || extra.logistics_courier || o.courier || '';
+      const finalAwb = trackRec?.awb_number || logRec?.awbNumber || extra.awb_number || o.awb_number || '';
+      const finalShipmentStatus = isOrderDeleted
+        ? 'Deleted'
+        : (trackRec?.status || logRec?.status || (finalAwb ? 'Dispatched' : (o.dispatch_status === 'DELIVERED' ? 'Delivered' : (o.order_status === 'CANCELLED' ? 'Cancelled' : 'Pending Manifest'))));
+      const finalRawStatus = isOrderDeleted
+        ? 'DELETED'
+        : (trackRec?.raw_status || logRec?.rawStatus || (logRec as any)?.raw_status || extra.delhivery_current_status || extra.raw_status || (o.dispatch_status === 'DELIVERED' ? 'DELIVERED' : ''));
 
       return {
         id: o.id,
@@ -761,10 +790,10 @@ export class WebsiteSalesService {
         items,
         fulfillment_status: isOrderDeleted ? 'Deleted' : (extra.fulfillment_status || o.dispatch_status || o.order_status || 'unfulfilled'),
         financial_status: extra.financial_status || '',
-        awb_number: trackRec?.awb_number || logRec?.awbNumber || extra.awb_number || o.awb_number || '',
-        courier: trackRec?.courier || logRec?.courier || extra.courier || o.courier || '',
-        shipment_status: isOrderDeleted ? 'Deleted' : (trackRec?.status || logRec?.status || logRec?.stage || (trackRec?.awb_number || logRec?.awbNumber || extra.awb_number || o.awb_number ? 'Dispatched' : (o.dispatch_status === 'DELIVERED' ? 'Delivered' : 'Pending Manifest'))),
-        raw_status: isOrderDeleted ? 'DELETED' : (trackRec?.raw_status || logRec?.rawStatus || (logRec as any)?.raw_status || extra.delhivery_current_status || extra.raw_status || ''),
+        awb_number: finalAwb,
+        courier: finalCourier,
+        shipment_status: finalShipmentStatus,
+        raw_status: finalRawStatus,
         delhivery_remarks: trackRec?.remarks || extra.delhivery_remarks || '',
         extra_data: {
           ...extra,
