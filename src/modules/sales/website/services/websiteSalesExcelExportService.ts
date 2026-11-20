@@ -15,6 +15,14 @@ import {
   normalizeProductName
 } from '../../../../services/customerRepeatAnalyticsService';
 import { isComboItem } from '../components/TopPerformingProductsCombos';
+import {
+  calculateMonthlyPerformance,
+  calculateYearlyPerformance,
+  calculateProductIntelligence,
+  calculateComboIntelligence,
+  calculateProductPricingInsights,
+  comparePeriods
+} from '../components/business-trends/businessTrendsCalculations';
 
 export interface ExportWebsiteSalesAnalyticsOptions {
   startDate: string;
@@ -1312,6 +1320,297 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
   });
 
   // =========================================================================
+  // BI WORKSHEETS (PARTS 3 TO 7 & 10)
+  // =========================================================================
+  const biMonthlyRecords = calculateMonthlyPerformance(orders);
+  const biYearlyRecords = calculateYearlyPerformance(biMonthlyRecords);
+  const { products: biProducts } = calculateProductIntelligence(orders);
+  const { combos: biCombos } = calculateComboIntelligence(biProducts, orders);
+  const { items: biPricingItems, keyInsights: biKeyInsights } = calculateProductPricingInsights(biProducts, orders);
+
+  // 1. Monthly Performance Sheet
+  const monthlyHeaders = [
+    'Month',
+    'Total Orders',
+    'Gross Order Value (INR)',
+    'Net Sales (INR)',
+    'Units Sold',
+    'Average Order Value (AOV)',
+    'Delivered Orders',
+    'Delivered Revenue (INR)',
+    'RTO Orders',
+    'RTO Value (INR)',
+    'Cancelled Orders',
+    'Cancellation Value (INR)',
+    'Repeat Customers',
+    'New Customers'
+  ];
+  const monthlyDataRows = biMonthlyRecords.map(m => [
+    m.monthLabel,
+    m.totalOrders,
+    m.grossOrderValue,
+    m.netSales,
+    m.unitsSold,
+    m.aov,
+    m.deliveredOrders,
+    m.deliveredRevenue,
+    m.rtoOrders,
+    m.rtoValue,
+    m.cancelledOrders,
+    m.cancellationValue,
+    m.repeatCustomers,
+    m.newCustomers
+  ]);
+  const monthlyRows: (string | number)[][] = [
+    ['VELMORA - MONTHLY BUSINESS PERFORMANCE TRENDS'],
+    ['Report Period', `${formatExcelDate(startDate)} to ${formatExcelDate(endDate)}`, 'Date Range (DD-MMM-YYYY)'],
+    ['Generated On', new Date().toLocaleString('en-IN'), 'Timestamp'],
+    ['Total Months Tracked', biMonthlyRecords.length, 'Monthly Cohorts'],
+    [],
+    monthlyHeaders,
+    ...(monthlyDataRows.length > 0 ? monthlyDataRows : [['-', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]])
+  ];
+  const wsMonthly = XLSX.utils.aoa_to_sheet(monthlyRows);
+  enhanceWorksheet(wsMonthly, 5, true, { s: { r: 5, c: 0 }, e: { r: monthlyRows.length - 1, c: monthlyHeaders.length - 1 } });
+
+  // 2. Yearly Performance Sheet
+  const yearlyHeaders = [
+    'Year',
+    'Total Orders',
+    'YoY Orders Growth (%)',
+    'Gross Revenue (INR)',
+    'YoY Revenue Growth (%)',
+    'Net Sales (INR)',
+    'Units Sold',
+    'Average Order Value (AOV)',
+    'Delivered Orders',
+    'Delivered Revenue (INR)',
+    'RTO Orders',
+    'RTO Value (INR)',
+    'Cancelled Orders',
+    'Cancellation Value (INR)',
+    'Repeat Customers',
+    'New Customers'
+  ];
+  const yearlyDataRows = biYearlyRecords.map(y => [
+    y.yearLabel,
+    y.totalOrders,
+    y.yoyOrdersGrowthPercent != null ? `${y.yoyOrdersGrowthPercent}%` : '-',
+    y.grossOrderValue,
+    y.yoyRevenueGrowthPercent != null ? `${y.yoyRevenueGrowthPercent}%` : '-',
+    y.netSales,
+    y.unitsSold,
+    y.aov,
+    y.deliveredOrders,
+    y.deliveredRevenue,
+    y.rtoOrders,
+    y.rtoValue,
+    y.cancelledOrders,
+    y.cancellationValue,
+    y.repeatCustomers,
+    y.newCustomers
+  ]);
+  const yearlyRows: (string | number)[][] = [
+    ['VELMORA - YEARLY BUSINESS PERFORMANCE & YOY GROWTH'],
+    ['Report Period', `${formatExcelDate(startDate)} to ${formatExcelDate(endDate)}`, 'Date Range (DD-MMM-YYYY)'],
+    ['Generated On', new Date().toLocaleString('en-IN'), 'Timestamp'],
+    ['Total Years Tracked', biYearlyRecords.length, 'Annual Cohorts'],
+    [],
+    yearlyHeaders,
+    ...(yearlyDataRows.length > 0 ? yearlyDataRows : [['-', 0, '-', 0, '-', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]])
+  ];
+  const wsYearly = XLSX.utils.aoa_to_sheet(yearlyRows);
+  enhanceWorksheet(wsYearly, 5, true, { s: { r: 5, c: 0 }, e: { r: yearlyRows.length - 1, c: yearlyHeaders.length - 1 } });
+
+  // 3. Product Performance Sheet
+  const prodHeaders = [
+    'Rank',
+    'Product Name',
+    'Category',
+    'Orders Containing Product',
+    'Total Quantity Sold (Units)',
+    'Total Sales Revenue (INR)',
+    'Average Selling Price (ASP)',
+    'Min Selling Price (INR)',
+    'Max Selling Price (INR)',
+    'Repeat Buyers',
+    'Repeat Quantity Sold',
+    'Repeat Sales Value (INR)',
+    'Revenue Contribution (%)',
+    'First Purchase Date',
+    'Last Purchase Date'
+  ];
+  const prodDataRows = biProducts.map((p, idx) => [
+    idx + 1,
+    p.productName,
+    p.isCombo ? 'Combo Package' : 'Individual Product',
+    p.orderCount,
+    p.totalQuantity,
+    p.totalRevenue,
+    p.averageSellingPrice,
+    p.minSellingPrice,
+    p.maxSellingPrice,
+    p.repeatBuyers,
+    p.repeatQuantity,
+    p.repeatSalesValue,
+    `${p.revenueContributionPercent}%`,
+    p.firstPurchaseDate,
+    p.lastPurchaseDate
+  ]);
+  const prodRows: (string | number)[][] = [
+    ['VELMORA - COMPREHENSIVE PRODUCT INTELLIGENCE & LINE-ITEM METRICS'],
+    ['Report Period', `${formatExcelDate(startDate)} to ${formatExcelDate(endDate)}`, 'Date Range (DD-MMM-YYYY)'],
+    ['Generated On', new Date().toLocaleString('en-IN'), 'Timestamp'],
+    ['Total Products Tracked', biProducts.length, 'Unique Products'],
+    [],
+    prodHeaders,
+    ...(prodDataRows.length > 0 ? prodDataRows : [['-', '-', '-', 0, 0, 0, 0, 0, 0, 0, 0, 0, '-', '-', '-']])
+  ];
+  const wsProductPerf = XLSX.utils.aoa_to_sheet(prodRows);
+  enhanceWorksheet(wsProductPerf, 5, true, { s: { r: 5, c: 0 }, e: { r: prodRows.length - 1, c: prodHeaders.length - 1 } });
+
+  // 4. Combo Performance Sheet
+  const comboHeaders = [
+    'Rank',
+    'Combo Name',
+    'Orders Sold',
+    'Units Sold',
+    'Total Revenue (INR)',
+    'Average Selling Price (ASP)',
+    'Repeat Buyers',
+    'Repeat Sales Value (INR)',
+    'Contribution to Combos Sales (%)'
+  ];
+  const comboDataRows = biCombos.map((c, idx) => [
+    idx + 1,
+    c.comboName,
+    c.ordersSold,
+    c.unitsSold,
+    c.totalRevenue,
+    c.averageSellingPrice,
+    c.repeatBuyers,
+    c.repeatSalesValue,
+    `${c.revenueContributionPercent}%`
+  ]);
+  const comboRows: (string | number)[][] = [
+    ['VELMORA - BEST PERFORMING COMBOS INTELLIGENCE'],
+    ['Report Period', `${formatExcelDate(startDate)} to ${formatExcelDate(endDate)}`, 'Date Range (DD-MMM-YYYY)'],
+    ['Generated On', new Date().toLocaleString('en-IN'), 'Timestamp'],
+    ['Total Combos Tracked', biCombos.length, 'Catalog Combos'],
+    [],
+    comboHeaders,
+    ...(comboDataRows.length > 0 ? comboDataRows : [['-', '-', 0, 0, 0, 0, 0, 0, '-']])
+  ];
+  const wsComboPerf = XLSX.utils.aoa_to_sheet(comboRows);
+  enhanceWorksheet(wsComboPerf, 5, true, { s: { r: 5, c: 0 }, e: { r: comboRows.length - 1, c: comboHeaders.length - 1 } });
+
+  // 5. Product Pricing Insights Sheet
+  const pricingHeaders = [
+    'Rank',
+    'Product Name',
+    'Average Selling Price (ASP)',
+    'Lowest Selling Price (INR)',
+    'Highest Selling Price (INR)',
+    'Total Revenue (INR)',
+    'Quantity Sold (Units)',
+    'Order Count',
+    'Units < INR 500',
+    'Units INR 500-999',
+    'Units INR 1000-1499',
+    'Units INR 1500+'
+  ];
+  const pricingDataRows = biPricingItems.map((p, idx) => [
+    idx + 1,
+    p.productName,
+    p.averageSellingPrice,
+    p.minSellingPrice,
+    p.maxSellingPrice,
+    p.totalRevenue,
+    p.totalQuantity,
+    p.orderCount,
+    p.priceDistribution.under500,
+    p.priceDistribution.from500to999,
+    p.priceDistribution.from1000to1499,
+    p.priceDistribution.above1500
+  ]);
+  const pricingRows: (string | number)[][] = [
+    ['VELMORA - PRODUCT PRICING INSIGHTS & PRICE DISTRIBUTION'],
+    ['Report Period', `${formatExcelDate(startDate)} to ${formatExcelDate(endDate)}`, 'Date Range (DD-MMM-YYYY)'],
+    ['Generated On', new Date().toLocaleString('en-IN'), 'Timestamp'],
+    ['Top Revenue Product', biKeyInsights.highestRevenueProduct?.productName || 'N/A', `INR ${biKeyInsights.highestRevenueProduct?.totalRevenue.toLocaleString('en-IN') || 0}`],
+    ['Most Units Sold Product', biKeyInsights.mostUnitsSoldProduct?.productName || 'N/A', `${biKeyInsights.mostUnitsSoldProduct?.totalQuantity.toLocaleString('en-IN') || 0} units`],
+    ['Highest ASP Product', biKeyInsights.highestAspProduct?.productName || 'N/A', `INR ${biKeyInsights.highestAspProduct?.averageSellingPrice || 0}`],
+    ['Lowest ASP Product', biKeyInsights.lowestAspProduct?.productName || 'N/A', `INR ${biKeyInsights.lowestAspProduct?.averageSellingPrice || 0}`],
+    [],
+    pricingHeaders,
+    ...(pricingDataRows.length > 0 ? pricingDataRows : [['-', '-', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]])
+  ];
+  const wsPricing = XLSX.utils.aoa_to_sheet(pricingRows);
+  enhanceWorksheet(wsPricing, 8, true, { s: { r: 8, c: 0 }, e: { r: pricingRows.length - 1, c: pricingHeaders.length - 1 } });
+
+  // 6. Monthly Comparison Sheet
+  const latestMonth = biMonthlyRecords[biMonthlyRecords.length - 1];
+  const priorMonth = biMonthlyRecords[biMonthlyRecords.length - 2] || latestMonth;
+  const monthCompResult = latestMonth && priorMonth ? comparePeriods(latestMonth, priorMonth, 'monthly') : null;
+  const monthCompHeaders = [
+    'Performance Metric',
+    `${monthCompResult?.currentLabel || 'Current Month'} (Current)`,
+    `${monthCompResult?.previousLabel || 'Baseline Month'} (Baseline)`,
+    'Absolute Difference',
+    'Percentage Change (%)'
+  ];
+  const monthCompDataRows = monthCompResult
+    ? monthCompResult.metrics.map(m => [
+        m.metricLabel,
+        m.currentValue,
+        m.previousValue,
+        m.difference,
+        m.percentChange != null ? `${m.percentChange}%` : 'N/A'
+      ])
+    : [];
+  const monthCompRows: (string | number)[][] = [
+    ['VELMORA - MONTHLY PERIOD COMPARISON AUDIT'],
+    ['Comparison', monthCompResult ? `${monthCompResult.currentLabel} vs ${monthCompResult.previousLabel}` : 'N/A', 'Month-over-Month'],
+    ['Generated On', new Date().toLocaleString('en-IN'), 'Timestamp'],
+    [],
+    monthCompHeaders,
+    ...(monthCompDataRows.length > 0 ? monthCompDataRows : [['-', 0, 0, 0, '-']])
+  ];
+  const wsMonthlyComp = XLSX.utils.aoa_to_sheet(monthCompRows);
+  enhanceWorksheet(wsMonthlyComp, 4, true, { s: { r: 4, c: 0 }, e: { r: monthCompRows.length - 1, c: monthCompHeaders.length - 1 } });
+
+  // 7. Yearly Comparison Sheet
+  const latestYear = biYearlyRecords[biYearlyRecords.length - 1];
+  const priorYear = biYearlyRecords[biYearlyRecords.length - 2] || latestYear;
+  const yearCompResult = latestYear && priorYear ? comparePeriods(latestYear, priorYear, 'yearly') : null;
+  const yearCompHeaders = [
+    'Performance Metric',
+    `${yearCompResult?.currentLabel || 'Current Year'} (Current)`,
+    `${yearCompResult?.previousLabel || 'Baseline Year'} (Baseline)`,
+    'Absolute Difference',
+    'Percentage Change (%)'
+  ];
+  const yearCompDataRows = yearCompResult
+    ? yearCompResult.metrics.map(m => [
+        m.metricLabel,
+        m.currentValue,
+        m.previousValue,
+        m.difference,
+        m.percentChange != null ? `${m.percentChange}%` : 'N/A'
+      ])
+    : [];
+  const yearCompRows: (string | number)[][] = [
+    ['VELMORA - YEARLY PERIOD COMPARISON AUDIT'],
+    ['Comparison', yearCompResult ? `${yearCompResult.currentLabel} vs ${yearCompResult.previousLabel}` : 'N/A', 'Year-over-Year'],
+    ['Generated On', new Date().toLocaleString('en-IN'), 'Timestamp'],
+    [],
+    yearCompHeaders,
+    ...(yearCompDataRows.length > 0 ? yearCompDataRows : [['-', 0, 0, 0, '-']])
+  ];
+  const wsYearlyComp = XLSX.utils.aoa_to_sheet(yearCompRows);
+  enhanceWorksheet(wsYearlyComp, 4, true, { s: { r: 4, c: 0 }, e: { r: yearCompRows.length - 1, c: yearCompHeaders.length - 1 } });
+
+  // =========================================================================
   // Assemble Workbook & Download (Exact 11 Sheets Order)
   // =========================================================================
   const wb = XLSX.utils.book_new();
@@ -1327,6 +1626,15 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
   XLSX.utils.book_append_sheet(wb, ws8, 'Order Details');
   XLSX.utils.book_append_sheet(wb, ws10, 'Courier Reconciliation');
   XLSX.utils.book_append_sheet(wb, ws11, 'Unknown Records');
+
+  // Append New BI Worksheets
+  XLSX.utils.book_append_sheet(wb, wsMonthly, 'Monthly Performance');
+  XLSX.utils.book_append_sheet(wb, wsYearly, 'Yearly Performance');
+  XLSX.utils.book_append_sheet(wb, wsProductPerf, 'Product Performance');
+  XLSX.utils.book_append_sheet(wb, wsComboPerf, 'Combo Performance');
+  XLSX.utils.book_append_sheet(wb, wsPricing, 'Product Pricing Insights');
+  XLSX.utils.book_append_sheet(wb, wsMonthlyComp, 'Monthly Comparison');
+  XLSX.utils.book_append_sheet(wb, wsYearlyComp, 'Yearly Comparison');
 
   const filename = startDate === endDate
     ? `Website_Sales_Analytics_${startDate}.xlsx`

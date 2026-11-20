@@ -126,33 +126,36 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
   };
 
   // 3. Top Customers by Customer Value Controls
-  const [valueLimit, setValueLimit] = useState<number>(100);
+  const [valueLimit, setValueLimit] = useState<number>(10);
   const [valueSortField, setValueSortField] = useState<'totalValue' | 'totalOrders' | 'lastOrderDate'>('totalValue');
   const [valueSortAsc, setValueSortAsc] = useState<boolean>(false);
   const [valueSearch, setValueSearch] = useState<string>('');
   const [valuePage, setValuePage] = useState<number>(0);
-  const [valuePageSize, setValuePageSize] = useState<number>(15);
+  const [valuePageSize, setValuePageSize] = useState<number>(10);
   const [valueFrequencyFilter, setValueFrequencyFilter] = useState<string>('all');
   const [valueCustomerTypeFilter, setValueCustomerTypeFilter] = useState<'all' | 'vip' | 'non_vip'>('all');
 
-  // 4. Top 100 Repeat Customers Controls
-  const [repeatLimit, setRepeatLimit] = useState<number>(100);
+  // 4. Top Repeat Customers Controls
+  const [repeatLimit, setRepeatLimit] = useState<number>(10);
   const [repeatSortField, setRepeatSortField] = useState<'totalOrders' | 'totalValue' | 'lastOrderDate'>('totalOrders');
   const [repeatSortAsc, setRepeatSortAsc] = useState<boolean>(false);
   const [repeatSearch, setRepeatSearch] = useState<string>('');
   const [repeatPage, setRepeatPage] = useState<number>(0);
-  const [repeatPageSize, setRepeatPageSize] = useState<number>(15);
+  const [repeatPageSize, setRepeatPageSize] = useState<number>(10);
 
   // 5. Geographic Controls
   const [geoTab, setGeoTab] = useState<'states' | 'cities'>('states');
-  const [geoLimit, setGeoLimit] = useState<number>(100);
+  const [geoLimit, setGeoLimit] = useState<number>(10);
   const [geoSearch, setGeoSearch] = useState<string>('');
   const [drillDownState, setDrillDownState] = useState<string | null>(null);
 
   // 6. Product Insights Table Controls
+  const [productLimit, setProductLimit] = useState<number>(10);
   const [productSortField, setProductSortField] = useState<'repeatSalesValue' | 'repeatQuantity' | 'repeatCustomerCount'>('repeatSalesValue');
   const [productSortAsc, setProductSortAsc] = useState<boolean>(false);
   const [productSearch, setProductSearch] = useState<string>('');
+  const [productPage, setProductPage] = useState<number>(0);
+  const [productPageSize, setProductPageSize] = useState<number>(10);
 
   // -------------------------------------------------------------
   // Data Fetching
@@ -434,6 +437,17 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
 
     return list;
   }, [data, productSearch, productSortField, productSortAsc]);
+
+  // Ranked & Paginated Product Insights
+  const rankedProducts = useMemo(() => {
+    return productLimit > 0 ? processedProducts.slice(0, productLimit) : processedProducts;
+  }, [processedProducts, productLimit]);
+
+  const productTotalPages = Math.max(1, Math.ceil(rankedProducts.length / productPageSize));
+  const safeProductPage = Math.min(productPage, productTotalPages - 1);
+  const visibleProducts = useMemo(() => {
+    return rankedProducts.slice(safeProductPage * productPageSize, (safeProductPage + 1) * productPageSize);
+  }, [rankedProducts, safeProductPage, productPageSize]);
 
   const formatOrderDisplayDate = (dateStr: string): string => {
     if (!dateStr || dateStr === 'N/A') return '—';
@@ -1517,17 +1531,16 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
               <option value="non_vip">Non-VIP Customers</option>
             </select>
 
-            {/* 5. Top N Selector */}
+            {/* 5. Top N Selector: Top 10, Top 50, Top 100, All Records */}
             <select
               value={valueLimit}
               onChange={e => handleValueLimitChange(Number(e.target.value))}
               className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer focus:outline-none focus:border-emerald-500 shrink-0"
             >
-              <option value={15}>Top 15</option>
-              <option value={25}>Top 25</option>
+              <option value={10}>Top 10</option>
               <option value={50}>Top 50</option>
               <option value={100}>Top 100</option>
-              {department === 'sales' && <option value={0}>Overall</option>}
+              <option value={0}>All Records</option>
             </select>
 
             {/* 6. Sorting Selector */}
@@ -1728,7 +1741,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
               className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer"
               aria-label="Rows per page"
             >
-              <option value={15}>15 / page</option>
+              <option value={10}>10 / page</option>
               <option value={25}>25 / page</option>
               <option value={50}>50 / page</option>
               <option value={100}>100 / page</option>
@@ -1818,17 +1831,16 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
               />
             </div>
 
-            {/* Limit Selector: Top 15 / 25 / 50 / 100 */}
+            {/* Limit Selector: Top 10 / 50 / 100 / All */}
             <select
               value={repeatLimit}
               onChange={e => handleRepeatLimitChange(Number(e.target.value))}
               className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer"
             >
-              <option value={15}>Top 15</option>
-              <option value={25}>Top 25</option>
+              <option value={10}>Top 10</option>
               <option value={50}>Top 50</option>
               <option value={100}>Top 100</option>
-              {department === 'sales' && <option value={0}>All Customers (Overall)</option>}
+              <option value={0}>All Records</option>
             </select>
 
             {/* Sort Field Selector */}
@@ -2024,7 +2036,7 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
               className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer"
               aria-label="Rows per page"
             >
-              <option value={15}>15 / page</option>
+              <option value={10}>10 / page</option>
               <option value={25}>25 / page</option>
               <option value={50}>50 / page</option>
               <option value={100}>100 / page</option>
@@ -2146,16 +2158,16 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
               />
             </div>
 
-            {/* Limit Selector: Top 15 / 25 / 50 / 100 */}
+            {/* Limit Selector: Top 10 / 50 / 100 / All */}
             <select
               value={geoLimit}
               onChange={e => setGeoLimit(Number(e.target.value))}
               className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer"
             >
-              <option value={15}>Top 15</option>
-              <option value={25}>Top 25</option>
+              <option value={10}>Top 10</option>
               <option value={50}>Top 50</option>
               <option value={100}>Top 100</option>
+              <option value={0}>All Records</option>
             </select>
 
             {/* Export CSV */}
@@ -2324,15 +2336,35 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
             </p>
           </div>
 
-          <div className="relative">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              value={productSearch}
-              onChange={e => setProductSearch(e.target.value)}
-              placeholder="Search products..."
-              className="h-8 pl-8 pr-2.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 w-44 sm:w-60"
-            />
+          <div className="flex items-center gap-2">
+            {/* Limit Selector: Top 10 / 50 / 100 / All */}
+            <select
+              value={productLimit}
+              onChange={e => {
+                setProductLimit(Number(e.target.value));
+                setProductPage(0);
+              }}
+              className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer focus:outline-none focus:border-purple-500 shrink-0"
+            >
+              <option value={10}>Top 10</option>
+              <option value={50}>Top 50</option>
+              <option value={100}>Top 100</option>
+              <option value={0}>All Records</option>
+            </select>
+
+            <div className="relative">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={productSearch}
+                onChange={e => {
+                  setProductSearch(e.target.value);
+                  setProductPage(0);
+                }}
+                placeholder="Search products..."
+                className="h-8 pl-8 pr-2.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 w-44 sm:w-60"
+              />
+            </div>
           </div>
         </div>
 
@@ -2431,14 +2463,14 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 bg-slate-950/40">
-              {processedProducts.length === 0 ? (
+              {rankedProducts.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="py-8 text-center text-slate-500">
                     No products match the search query.
                   </td>
                 </tr>
               ) : (
-                processedProducts.map((p) => (
+                visibleProducts.map((p) => (
                   <tr key={p.productName} className="hover:bg-slate-900/60 transition-colors">
                     <td className="py-2.5 px-3 font-semibold text-white">
                       {p.productName}
@@ -2460,6 +2492,80 @@ export const CustomerRepeatAnalyticsDashboard: React.FC<CustomerRepeatAnalyticsD
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Pagination Footer */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+          <div className="text-xs text-slate-400 font-medium">
+            {rankedProducts.length === 0 ? (
+              <span>Showing 0 of 0 products</span>
+            ) : (
+              <>
+                Showing{' '}
+                <span className="font-mono font-bold text-white">
+                  {(safeProductPage * productPageSize + 1).toLocaleString('en-IN')}–{Math.min((safeProductPage + 1) * productPageSize, rankedProducts.length).toLocaleString('en-IN')}
+                </span>{' '}
+                of <span className="font-mono font-bold text-white">{rankedProducts.length.toLocaleString('en-IN')}</span> products
+              </>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={productPageSize}
+              onChange={e => {
+                setProductPageSize(Number(e.target.value));
+                setProductPage(0);
+              }}
+              className="h-8 px-2 bg-slate-900 border border-slate-700/80 rounded-lg text-xs font-semibold text-slate-200 cursor-pointer"
+              aria-label="Rows per page"
+            >
+              <option value={10}>10 / page</option>
+              <option value={25}>25 / page</option>
+              <option value={50}>50 / page</option>
+              <option value={100}>100 / page</option>
+            </select>
+
+            {productTotalPages > 1 && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setProductPage(0)}
+                  disabled={safeProductPage === 0}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  First
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setProductPage(p => Math.max(0, p - 1))}
+                  disabled={safeProductPage === 0}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  Prev
+                </button>
+                <span className="px-2 text-xs font-mono text-slate-300">
+                  Page {safeProductPage + 1} / {productTotalPages.toLocaleString('en-IN')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setProductPage(p => Math.min(productTotalPages - 1, p + 1))}
+                  disabled={safeProductPage >= productTotalPages - 1}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setProductPage(productTotalPages - 1)}
+                  disabled={safeProductPage >= productTotalPages - 1}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700/80 text-xs font-semibold text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  Last
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
       </div>

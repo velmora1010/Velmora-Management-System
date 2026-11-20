@@ -25,6 +25,8 @@ import {
 import toast from 'react-hot-toast';
 import type { WebsiteConsolidatedOrder, WebsiteOrderItem } from '../types';
 import { normalizeProductGroupingKey, resolveCanonicalProductName } from '../websiteSalesUtils';
+import { TablePaginationControls } from './TablePaginationControls';
+import { TopNLimitSelector } from './TopNLimitSelector';
 
 export interface TopPerformingProductsCombosProps {
   orders: WebsiteConsolidatedOrder[];
@@ -91,8 +93,12 @@ export const TopPerformingProductsCombos: React.FC<TopPerformingProductsCombosPr
   // Chart Metric: revenue | quantity | orders
   const [chartMetric, setChartMetric] = useState<'revenue' | 'quantity' | 'orders'>('revenue');
 
-  // Top N limit: 5 | 10 | 20 | 'all'
+  // Top N limit: 10 | 50 | 100 | 'all' (default: 10)
   const [topLimit, setTopLimit] = useState<number | 'all'>(10);
+
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(10);
 
   // Table sorting
   const [sortField, setSortField] = useState<'revenue' | 'quantity' | 'orders' | 'avgPrice' | 'name' | 'contribution'>('revenue');
@@ -263,10 +269,16 @@ export const TopPerformingProductsCombos: React.FC<TopPerformingProductsCombosPr
     });
   }, [processedItems, topLimit, chartMetric]);
 
-  // Table Items: respect top limit
-  const tableItems = useMemo(() => {
+  // Ranked Items: respect top limit
+  const rankedItems = useMemo(() => {
     return topLimit === 'all' ? processedItems : processedItems.slice(0, topLimit);
   }, [processedItems, topLimit]);
+
+  // Paginated items for current page
+  const pagedItems = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return rankedItems.slice(start, start + pageSize);
+  }, [rankedItems, currentPage, pageSize]);
 
   // Toggle Sorting helper
   const handleToggleSort = (field: typeof sortField) => {
@@ -276,6 +288,7 @@ export const TopPerformingProductsCombos: React.FC<TopPerformingProductsCombosPr
       setSortField(field);
       setSortAsc(false);
     }
+    setCurrentPage(1);
   };
 
   // CSV Export
@@ -348,7 +361,7 @@ export const TopPerformingProductsCombos: React.FC<TopPerformingProductsCombosPr
           <div className="flex items-center bg-slate-900 border border-slate-800 p-0.5 rounded-xl">
             <button
               type="button"
-              onClick={() => { setActiveTab('products'); setSearchQuery(''); }}
+              onClick={() => { setActiveTab('products'); setSearchQuery(''); setCurrentPage(1); }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                 activeTab === 'products'
                   ? 'bg-purple-600 text-white shadow-sm shadow-purple-600/30'
@@ -366,7 +379,7 @@ export const TopPerformingProductsCombos: React.FC<TopPerformingProductsCombosPr
 
             <button
               type="button"
-              onClick={() => { setActiveTab('combos'); setSearchQuery(''); }}
+              onClick={() => { setActiveTab('combos'); setSearchQuery(''); setCurrentPage(1); }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                 activeTab === 'combos'
                   ? 'bg-pink-600 text-white shadow-sm shadow-pink-600/30'
@@ -389,7 +402,10 @@ export const TopPerformingProductsCombos: React.FC<TopPerformingProductsCombosPr
             <input
               type="text"
               value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
+              onChange={e => {
+                setSearchQuery(e.target.value);
+                setCurrentPage(1);
+              }}
               placeholder={`Search ${activeTab === 'products' ? 'products' : 'combos'}...`}
               className="h-8 pl-8 pr-2.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500 w-44 sm:w-56"
             />
@@ -519,27 +535,18 @@ export const TopPerformingProductsCombos: React.FC<TopPerformingProductsCombosPr
           </div>
         </div>
 
-        {/* Top N Options */}
+        {/* Top N Limit Selector: Top 10, Top 50, Top 100, All Records */}
         <div className="flex items-center gap-1.5 self-end sm:self-auto">
           <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1">
             Display:
           </span>
-          <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800">
-            {[5, 10, 20, 'all'].map(option => (
-              <button
-                key={String(option)}
-                type="button"
-                onClick={() => setTopLimit(option as any)}
-                className={`px-2 py-0.5 rounded text-xs font-mono font-bold transition-all cursor-pointer ${
-                  topLimit === option
-                    ? 'bg-purple-600 text-white shadow-sm'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                {option === 'all' ? 'All' : `Top ${option}`}
-              </button>
-            ))}
-          </div>
+          <TopNLimitSelector
+            limit={topLimit}
+            onChange={val => {
+              setTopLimit(val);
+              setCurrentPage(1);
+            }}
+          />
         </div>
       </div>
 
@@ -695,17 +702,17 @@ export const TopPerformingProductsCombos: React.FC<TopPerformingProductsCombosPr
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/60 bg-slate-950/40">
-            {tableItems.length === 0 ? (
+            {pagedItems.length === 0 ? (
               <tr>
                 <td colSpan={onViewOrders ? 8 : 7} className="py-8 text-center text-slate-500">
                   No {activeTab === 'products' ? 'products' : 'combos'} match the current filters.
                 </td>
               </tr>
             ) : (
-              tableItems.map((item, index) => (
+              pagedItems.map((item, index) => (
                 <tr key={item.name} className="hover:bg-slate-900/60 transition-colors">
                   <td className="py-2.5 px-3 text-center font-mono text-slate-500 text-[11px]">
-                    {index + 1}
+                    {((currentPage - 1) * pageSize) + index + 1}
                   </td>
                   <td className="py-2.5 px-3 font-semibold text-white">
                     <div className="flex items-center gap-2">
@@ -749,6 +756,16 @@ export const TopPerformingProductsCombos: React.FC<TopPerformingProductsCombosPr
             )}
           </tbody>
         </table>
+
+        {/* Pagination Controls */}
+        <TablePaginationControls
+          currentPage={currentPage}
+          pageSize={pageSize}
+          totalRecords={rankedItems.length}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={setPageSize}
+          recordLabel={activeTab === 'products' ? 'products' : 'combos'}
+        />
       </div>
 
     </div>

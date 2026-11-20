@@ -40,6 +40,7 @@ import { CardMatchingOrdersList } from './components/CardMatchingOrdersList';
 import { RepeatCustomerSummarySection } from './components/RepeatCustomerSummarySection';
 import { CustomerRepeatAnalyticsDashboard } from '../../../components/analytics/CustomerRepeatAnalyticsDashboard';
 import { TopPerformingProductsCombos } from './components/TopPerformingProductsCombos';
+import { BusinessPerformanceTrendsSection } from './components/business-trends/BusinessPerformanceTrendsSection';
 import { WebsiteCourierPerformanceSection } from './components/WebsiteCourierPerformanceSection';
 import { AnalyticsFullPageDataView, CustomerPurchaseProfile, OperationalOrderRecord } from './components/AnalyticsFullPageDataView';
 import { OrderDetailsModal } from './components/OrderDetailsModal';
@@ -134,7 +135,8 @@ const ANALYTICS_VIEW_OPTIONS = [
   { id: 'analytics-order-value', label: 'Order Value Distribution' },
   { id: 'analytics-order-composition', label: 'Order Composition' },
   { id: 'analytics-cod-receivable', label: 'COD Receivable Overview' },
-  { id: 'analytics-customer-repeat', label: 'Customer Repeat & Geographic' }
+  { id: 'analytics-customer-repeat', label: 'Customer Repeat & Geographic' },
+  { id: 'analytics-business-performance-trends', label: 'Business Performance Trends' }
 ];
 
 const REVENUE_MIX_SEGMENTS: SegmentOption<'Payment Mode' | 'State' | 'Product' | 'Offer' | 'Order Value Range'>[] = [
@@ -2579,6 +2581,14 @@ export const WebsiteAnalytics: React.FC = () => {
           <div id="analytics-customer-repeat"  className="scroll-mt-6">
             <CustomerRepeatAnalyticsDashboard sourceChannel="WEBSITE" department="sales" />
           </div>
+
+          {/* 11. BUSINESS PERFORMANCE TRENDS & BI INTELLIGENCE */}
+          <BusinessPerformanceTrendsSection
+            orders={allOrders}
+            onRefreshData={loadData}
+            onViewOrders={(title, matchingOrders) => handleOpenOrdersFullPage(title, matchingOrders)}
+            onExportExcel={handleExportExcel}
+          />
         </>
       )}
 
