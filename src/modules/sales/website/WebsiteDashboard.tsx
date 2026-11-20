@@ -17,7 +17,8 @@ import {
   Filter,
   Truck,
   Package,
-  PieChart as PieIcon
+  PieChart as PieIcon,
+  Loader2
 } from 'lucide-react';
 import type { WebsiteConsolidatedOrder, WebsiteUploadBatch, WebsiteSalesFilterState } from './types';
 import { websiteSalesService } from './websiteSalesService';
@@ -81,28 +82,37 @@ export const WebsiteDashboard: React.FC = () => {
 
   const todayStr = getTodayInBusinessTimezone();
 
-  // Shared Website Sales Date Range State
+  // Shared Website Sales Date Range & Dataset State
   const { 
     startDate: salesStartDate, 
     endDate: salesEndDate, 
     setDateRange, 
     resetToToday: handleResetToday, 
-    shiftRange 
+    shiftRange,
+    orders: sharedOrders,
+    batches,
+    isLoading: loading,
+    loadingProgressText,
+    refreshData
   } = useWebsiteSalesDateRange();
 
   const [isDateModalOpen, setIsDateModalOpen] = useState<boolean>(false);
 
-  const [batches, setBatches] = useState<WebsiteUploadBatch[]>([]);
-  const [allOrders, setAllOrders] = useState<WebsiteConsolidatedOrder[]>([]);
-  const [orders, setOrders] = useState<WebsiteConsolidatedOrder[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  // Use full period dataset from shared date range context
+  const allOrders = sharedOrders;
+
+  // Filter orders in memory using applied dashboard filters (instant 0ms response)
+  const [appliedFilters, setAppliedFilters] = useState<WebsiteSalesFilterState>(DEFAULT_DASHBOARD_FILTERS);
+  const [draftFilters, setDraftFilters] = useState<WebsiteSalesFilterState>(DEFAULT_DASHBOARD_FILTERS);
+
+  const orders = useMemo(() => {
+    return websiteSalesService.filterOrders(sharedOrders, appliedFilters);
+  }, [sharedOrders, appliedFilters]);
 
   // Drawer & Filter state
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState<boolean>(false);
   const [isProductModalOpen, setIsProductModalOpen] = useState<boolean>(false);
   const [isComboModalOpen, setIsComboModalOpen] = useState<boolean>(false);
-  const [draftFilters, setDraftFilters] = useState<WebsiteSalesFilterState>(DEFAULT_DASHBOARD_FILTERS);
-  const [appliedFilters, setAppliedFilters] = useState<WebsiteSalesFilterState>(DEFAULT_DASHBOARD_FILTERS);
 
   // Filtered Visualization Card Slice States
   const [dashboardPaymentCardSlice, setDashboardPaymentCardSlice] = useState<string | null>(null);
@@ -127,42 +137,18 @@ export const WebsiteDashboard: React.FC = () => {
     }
   }, [searchParams]);
 
-  // Load dataset on date range change or applied filter change
+  // Reset card slice selection when date range or applied filter changes
   useEffect(() => {
     setDashboardPaymentCardSlice(null);
     setDashboardProductCardSlice(null);
     setDashboardOfferCardSlice(null);
     setDashboardStateCardSlice(null);
-    loadData();
   }, [salesStartDate, salesEndDate, appliedFilters]);
-
-  const loadData = async () => {
-    setLoading(true);
-    const bList = await websiteSalesService.getUploadBatches();
-    setBatches(bList);
-
-    // Fetch full period dataset for dropdown options
-    const periodDataset = await websiteSalesService.getConsolidatedOrders({
-      startDate: salesStartDate,
-      endDate: salesEndDate
-    });
-    setAllOrders(periodDataset);
-
-    // Filter using selected date range + applied dashboard filters
-    const ordList = await websiteSalesService.getConsolidatedOrders({
-      ...appliedFilters,
-      startDate: salesStartDate,
-      endDate: salesEndDate
-    });
-
-    setOrders(ordList);
-    setLoading(false);
-  };
 
   const handleDeleteBatch = async (id: string, name: string) => {
     if (window.confirm(`Are you sure you want to delete batch "${name}" and all its raw & consolidated data?`)) {
       await websiteSalesService.deleteUploadBatch(id);
-      loadData();
+      await refreshData();
     }
   };
 
@@ -414,13 +400,22 @@ export const WebsiteDashboard: React.FC = () => {
 
         {/* COMPACT DATE CONTROLS & FILTER DRAWER BUTTON */}
         <div className="flex flex-wrap items-center gap-2 bg-slate-950/80 border border-slate-800 p-2 rounded-2xl">
+          {/* Synchronized Loading Badge */}
+          {loading && (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 text-xs font-semibold shadow-sm animate-pulse mr-1">
+              <Loader2 size={13} className="animate-spin text-cyan-400 shrink-0" />
+              <span>{loadingProgressText || 'Updating sales data...'}</span>
+            </div>
+          )}
+
           {/* Previous Range / Day */}
           <button
             type="button"
             onClick={handlePrevRange}
+            disabled={loading}
             title="Previous Range / Day"
             aria-label="Previous Range / Day"
-            className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-200 rounded-xl transition-colors cursor-pointer flex items-center justify-center border border-slate-800"
+            className="p-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-slate-200 rounded-xl transition-colors cursor-pointer flex items-center justify-center border border-slate-800"
           >
             <ChevronLeft size={16} />
           </button>
@@ -429,7 +424,8 @@ export const WebsiteDashboard: React.FC = () => {
           <button
             type="button"
             onClick={() => setIsDateModalOpen(true)}
-            className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-xs text-white outline-none focus:border-cyan-400 font-mono font-bold cursor-pointer flex items-center gap-2 transition-colors"
+            disabled={loading}
+            className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 border border-slate-800 rounded-xl text-xs text-white outline-none focus:border-cyan-400 font-mono font-bold cursor-pointer flex items-center gap-2 transition-colors"
           >
             <Calendar size={15} className="text-cyan-400 shrink-0" />
             <span>{formatDateRangeDisplay(salesStartDate, salesEndDate)}</span>
@@ -439,7 +435,7 @@ export const WebsiteDashboard: React.FC = () => {
           <button
             type="button"
             onClick={handleNextRange}
-            disabled={salesEndDate >= todayStr}
+            disabled={loading || salesEndDate >= todayStr}
             title="Next Range / Day"
             aria-label="Next Range / Day"
             className="p-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-slate-200 rounded-xl transition-colors cursor-pointer flex items-center justify-center border border-slate-800"
@@ -451,7 +447,8 @@ export const WebsiteDashboard: React.FC = () => {
           <button
             type="button"
             onClick={handleResetToday}
-            className="px-3.5 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm"
+            disabled={loading}
+            className="px-3.5 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm"
           >
             <Clock size={14} /> Today
           </button>
@@ -460,8 +457,9 @@ export const WebsiteDashboard: React.FC = () => {
           <button
             type="button"
             onClick={() => setIsFilterDrawerOpen(true)}
+            disabled={loading}
             aria-label="Open Dashboard Filters"
-            className={`px-3.5 py-1.5 rounded-xl font-bold text-xs border transition-all cursor-pointer flex items-center gap-1.5 shadow-sm ${
+            className={`px-3.5 py-1.5 rounded-xl font-bold text-xs border transition-all cursor-pointer flex items-center gap-1.5 shadow-sm disabled:opacity-50 ${
               activeFilterCount > 0
                 ? 'bg-cyan-500/20 border-cyan-500/60 text-cyan-300'
                 : 'bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-300'
@@ -568,7 +566,29 @@ export const WebsiteDashboard: React.FC = () => {
           </h2>
         </div>
 
-        {totalOrdersCount === 0 && !loading ? (
+        {loading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 animate-in fade-in duration-200">
+            <div className="p-5 border-t-4 border-t-blue-500 bg-slate-900/50 border border-slate-800 rounded-xl animate-pulse">
+              <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Total Orders</span>
+              <div className="h-8 w-24 bg-slate-800 rounded" />
+            </div>
+
+            <div className="p-5 border-t-4 border-t-emerald-500 bg-slate-900/50 border border-slate-800 rounded-xl animate-pulse">
+              <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Total Revenue</span>
+              <div className="h-8 w-32 bg-slate-800 rounded" />
+            </div>
+
+            <div className="p-5 border-t-4 border-t-cyan-500 bg-slate-900/50 border border-slate-800 rounded-xl animate-pulse">
+              <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Total Units</span>
+              <div className="h-8 w-20 bg-slate-800 rounded" />
+            </div>
+
+            <div className="p-5 border-t-4 border-t-purple-500 bg-slate-900/50 border border-slate-800 rounded-xl animate-pulse">
+              <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Average Order Value</span>
+              <div className="h-8 w-24 bg-slate-800 rounded" />
+            </div>
+          </div>
+        ) : totalOrdersCount === 0 ? (
           <div className="p-10 text-center rounded-2xl bg-slate-900/60 border border-slate-800 space-y-3">
             <AlertCircle size={36} className="text-slate-600 mx-auto" />
             <h3 className="text-base font-bold text-slate-300">No website orders match the selected date range and filters.</h3>
@@ -627,17 +647,24 @@ export const WebsiteDashboard: React.FC = () => {
           <div className="p-5 border-t-4 border-t-emerald-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300 flex flex-col justify-between">
             <div>
               <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Prepaid Orders</span>
-              <div className="grid grid-cols-1 sm:grid-cols-[minmax(90px,0.8fr)_1px_minmax(0,1.5fr)] items-stretch gap-4">
-                <div className="flex flex-col justify-center">
-                  <div className="text-2xl sm:text-3xl font-bold text-emerald-400 leading-none">{prepaidCount.toLocaleString()}</div>
-                  <span className="text-[11px] text-slate-500 mt-1 font-semibold uppercase tracking-wider">Orders</span>
+              {loading ? (
+                <div className="space-y-2 py-1 animate-pulse">
+                  <div className="h-7 w-24 bg-slate-800 rounded" />
+                  <div className="h-4 w-32 bg-slate-800/60 rounded" />
                 </div>
-                <div className="hidden sm:block w-px bg-slate-800/80 self-stretch my-1" />
-                <div className="flex flex-col justify-center sm:pl-1">
-                  <div className="text-[17px] sm:text-[18px] font-bold text-white leading-tight">₹{prepaidRevenue.toLocaleString()}</div>
-                  <span className="text-[11px] text-slate-400 block font-medium">Prepaid Order Value</span>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-[minmax(90px,0.8fr)_1px_minmax(0,1.5fr)] items-stretch gap-4">
+                  <div className="flex flex-col justify-center">
+                    <div className="text-2xl sm:text-3xl font-bold text-emerald-400 leading-none">{prepaidCount.toLocaleString()}</div>
+                    <span className="text-[11px] text-slate-500 mt-1 font-semibold uppercase tracking-wider">Orders</span>
+                  </div>
+                  <div className="hidden sm:block w-px bg-slate-800/80 self-stretch my-1" />
+                  <div className="flex flex-col justify-center sm:pl-1">
+                    <div className="text-[17px] sm:text-[18px] font-bold text-white leading-tight">₹{prepaidRevenue.toLocaleString()}</div>
+                    <span className="text-[11px] text-slate-400 block font-medium">Prepaid Order Value</span>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
             <div className="mt-4 pt-1">
               <span className="text-[11px] text-slate-500 block leading-tight">Full payment received</span>
@@ -648,21 +675,34 @@ export const WebsiteDashboard: React.FC = () => {
           <div className="p-5 border-t-4 border-t-purple-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300 flex flex-col justify-between">
             <div>
               <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Partial COD Orders</span>
-              <div className="grid grid-cols-1 sm:grid-cols-[minmax(90px,0.8fr)_1px_minmax(0,1.5fr)] items-stretch gap-4">
-                <div className="flex flex-col justify-center">
-                  <div className="text-2xl sm:text-3xl font-bold text-purple-400 leading-none">{partialCodCount.toLocaleString()}</div>
-                  <span className="text-[11px] text-slate-500 mt-1 font-semibold uppercase tracking-wider">Orders</span>
+              {loading ? (
+                <div className="space-y-2 py-1 animate-pulse">
+                  <div className="h-7 w-24 bg-slate-800 rounded" />
+                  <div className="h-4 w-32 bg-slate-800/60 rounded" />
                 </div>
-                <div className="hidden sm:block w-px bg-slate-800/80 self-stretch my-1" />
-                <div className="flex flex-col justify-center sm:pl-1">
-                  <div className="text-[17px] sm:text-[18px] font-bold text-white leading-tight">₹{partialCodRevenue.toLocaleString()}</div>
-                  <span className="text-[11px] text-slate-400 block font-medium">Partial COD Order Value</span>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-[minmax(90px,0.8fr)_1px_minmax(0,1.5fr)] items-stretch gap-4">
+                  <div className="flex flex-col justify-center">
+                    <div className="text-2xl sm:text-3xl font-bold text-purple-400 leading-none">{partialCodCount.toLocaleString()}</div>
+                    <span className="text-[11px] text-slate-500 mt-1 font-semibold uppercase tracking-wider">Orders</span>
+                  </div>
+                  <div className="hidden sm:block w-px bg-slate-800/80 self-stretch my-1" />
+                  <div className="flex flex-col justify-center sm:pl-1">
+                    <div className="text-[17px] sm:text-[18px] font-bold text-white leading-tight">₹{partialCodRevenue.toLocaleString()}</div>
+                    <span className="text-[11px] text-slate-400 block font-medium">Partial COD Order Value</span>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
             <div className="mt-4 pt-1">
-              <div className="text-[14px] sm:text-[15px] font-bold text-purple-400/90 leading-tight">₹{partialCodRemaining.toLocaleString()}</div>
-              <span className="text-[10px] text-slate-500 block font-medium uppercase tracking-wider mt-0.5">remaining COD</span>
+              {loading ? (
+                <div className="h-4 w-28 bg-slate-800/60 rounded animate-pulse" />
+              ) : (
+                <>
+                  <div className="text-[14px] sm:text-[15px] font-bold text-purple-400/90 leading-tight">₹{partialCodRemaining.toLocaleString()}</div>
+                  <span className="text-[10px] text-slate-500 block font-medium uppercase tracking-wider mt-0.5">remaining COD</span>
+                </>
+              )}
             </div>
           </div>
 
@@ -670,21 +710,34 @@ export const WebsiteDashboard: React.FC = () => {
           <div className="p-5 border-t-4 border-t-amber-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300 flex flex-col justify-between">
             <div>
               <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Full COD Orders</span>
-              <div className="grid grid-cols-1 sm:grid-cols-[minmax(90px,0.8fr)_1px_minmax(0,1.5fr)] items-stretch gap-4">
-                <div className="flex flex-col justify-center">
-                  <div className="text-2xl sm:text-3xl font-bold text-amber-400 leading-none">{fullCodCount.toLocaleString()}</div>
-                  <span className="text-[11px] text-slate-500 mt-1 font-semibold uppercase tracking-wider">Orders</span>
+              {loading ? (
+                <div className="space-y-2 py-1 animate-pulse">
+                  <div className="h-7 w-24 bg-slate-800 rounded" />
+                  <div className="h-4 w-32 bg-slate-800/60 rounded" />
                 </div>
-                <div className="hidden sm:block w-px bg-slate-800/80 self-stretch my-1" />
-                <div className="flex flex-col justify-center sm:pl-1">
-                  <div className="text-[17px] sm:text-[18px] font-bold text-white leading-tight">₹{fullCodRevenue.toLocaleString()}</div>
-                  <span className="text-[11px] text-slate-400 block font-medium">Full COD Order Value</span>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-[minmax(90px,0.8fr)_1px_minmax(0,1.5fr)] items-stretch gap-4">
+                  <div className="flex flex-col justify-center">
+                    <div className="text-2xl sm:text-3xl font-bold text-amber-400 leading-none">{fullCodCount.toLocaleString()}</div>
+                    <span className="text-[11px] text-slate-500 mt-1 font-semibold uppercase tracking-wider">Orders</span>
+                  </div>
+                  <div className="hidden sm:block w-px bg-slate-800/80 self-stretch my-1" />
+                  <div className="flex flex-col justify-center sm:pl-1">
+                    <div className="text-[17px] sm:text-[18px] font-bold text-white leading-tight">₹{fullCodRevenue.toLocaleString()}</div>
+                    <span className="text-[11px] text-slate-400 block font-medium">Full COD Order Value</span>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
             <div className="mt-4 pt-1">
-              <div className="text-[14px] sm:text-[15px] font-bold text-amber-400/90 leading-tight">₹{fullCodPending.toLocaleString()}</div>
-              <span className="text-[10px] text-slate-500 block font-medium uppercase tracking-wider mt-0.5">COD Pending</span>
+              {loading ? (
+                <div className="h-4 w-24 bg-slate-800/60 rounded animate-pulse" />
+              ) : (
+                <>
+                  <div className="text-[14px] sm:text-[15px] font-bold text-amber-400/90 leading-tight">₹{fullCodPending.toLocaleString()}</div>
+                  <span className="text-[10px] text-slate-500 block font-medium uppercase tracking-wider mt-0.5">COD Pending</span>
+                </>
+              )}
             </div>
           </div>
 
@@ -692,7 +745,11 @@ export const WebsiteDashboard: React.FC = () => {
           <div className="p-5 border-t-4 border-t-pink-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300 flex flex-col justify-between">
             <div>
               <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-2">Total COD Receivable</span>
-              <div className="text-2xl sm:text-3xl font-bold text-pink-400 mt-3">₹{totalCodReceivable.toLocaleString()}</div>
+              {loading ? (
+                <div className="h-8 w-28 bg-slate-800 rounded animate-pulse my-2" />
+              ) : (
+                <div className="text-2xl sm:text-3xl font-bold text-pink-400 mt-3">₹{totalCodReceivable.toLocaleString()}</div>
+              )}
             </div>
             <div className="mt-4 pt-1">
               <span className="text-[11px] text-slate-500 block leading-tight">Partial + Full COD pending</span>
@@ -711,25 +768,41 @@ export const WebsiteDashboard: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="p-5 border-t-4 border-t-cyan-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
             <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Units Dispatched</span>
-            <div className="text-2xl font-bold text-cyan-400">{dispatchedProductUnits}</div>
+            {loading ? (
+              <div className="h-8 w-20 bg-slate-800 rounded animate-pulse my-1" />
+            ) : (
+              <div className="text-2xl font-bold text-cyan-400">{dispatchedProductUnits}</div>
+            )}
             <span className="text-[11px] text-slate-500 mt-1 block">Total items dispatched</span>
           </div>
 
           <div className="p-5 border-t-4 border-t-emerald-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
             <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Products Dispatched</span>
-            <div className="text-2xl font-bold text-emerald-400">{dispatchedProductsList.length}</div>
+            {loading ? (
+              <div className="h-8 w-16 bg-slate-800 rounded animate-pulse my-1" />
+            ) : (
+              <div className="text-2xl font-bold text-emerald-400">{dispatchedProductsList.length}</div>
+            )}
             <span className="text-[11px] text-slate-500 mt-1 block">Distinct products</span>
           </div>
 
           <div className="p-5 border-t-4 border-t-purple-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
             <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Combos Dispatched</span>
-            <div className="text-2xl font-bold text-purple-400">{dispatchedComboOrdersCount}</div>
+            {loading ? (
+              <div className="h-8 w-16 bg-slate-800 rounded animate-pulse my-1" />
+            ) : (
+              <div className="text-2xl font-bold text-purple-400">{dispatchedComboOrdersCount}</div>
+            )}
             <span className="text-[11px] text-slate-500 mt-1 block">Combo / offer orders</span>
           </div>
 
           <div className="p-5 border-t-4 border-t-blue-500 bg-slate-900/50 border border-slate-800 rounded-xl backdrop-blur-sm hover:bg-slate-900/80 transition-all duration-300">
             <span className="text-slate-400 text-xs font-semibold uppercase tracking-wider block mb-1">Orders Dispatched</span>
-            <div className="text-2xl font-bold text-white">{totalOrdersCount}</div>
+            {loading ? (
+              <div className="h-8 w-20 bg-slate-800 rounded animate-pulse my-1" />
+            ) : (
+              <div className="text-2xl font-bold text-white">{totalOrdersCount}</div>
+            )}
             <span className="text-[11px] text-slate-500 mt-1 block">Unique order dispatches</span>
           </div>
         </div>

@@ -1,9 +1,10 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { 
   getTodayInBusinessTimezone, 
   shiftDateRange 
 } from '../websiteSalesUtils';
 import { websiteSalesService } from '../websiteSalesService';
+import type { WebsiteConsolidatedOrder, WebsiteUploadBatch } from '../types';
 import type { DateRangePreset } from '../components/DateRangePickerModal';
 
 export interface WebsiteSalesDateRangeContextType {
@@ -15,6 +16,13 @@ export interface WebsiteSalesDateRangeContextType {
   resetToToday: () => void;
   resetToLatestSalesDate: () => void;
   shiftRange: (direction: -1 | 1) => void;
+  // Shared Data & Synchronized Loading State
+  orders: WebsiteConsolidatedOrder[];
+  batches: WebsiteUploadBatch[];
+  isLoading: boolean;
+  loadingProgressText: string;
+  error: string | null;
+  refreshData: () => Promise<void>;
 }
 
 const WebsiteSalesDateRangeContext = createContext<WebsiteSalesDateRangeContextType | undefined>(undefined);
@@ -27,12 +35,58 @@ export const WebsiteSalesDateRangeProvider: React.FC<{ children: React.ReactNode
   const [preset, setPreset] = useState<DateRangePreset | undefined>('today');
   const [latestAvailableDate, setLatestAvailableDate] = useState<string>(todayStr);
 
+  // Synchronized Dataset and Loading States
+  const [orders, setOrders] = useState<WebsiteConsolidatedOrder[]>([]);
+  const [batches, setBatches] = useState<WebsiteUploadBatch[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [loadingProgressText, setLoadingProgressText] = useState<string>('Updating sales data...');
+  const [error, setError] = useState<string | null>(null);
+
+  // Active Request Counter to prevent race conditions and out-of-order execution
+  const activeRequestIdRef = useRef<number>(0);
+
+  // Fetch data with cancellation & race condition protection
+  const fetchData = useCallback(async (start: string, end: string, forceRefresh = false) => {
+    const requestId = ++activeRequestIdRef.current;
+    setIsLoading(true);
+    setLoadingProgressText('Updating sales data...');
+
+    try {
+      const [fetchedBatches, fetchedOrders] = await Promise.all([
+        websiteSalesService.getUploadBatches(forceRefresh),
+        websiteSalesService.getConsolidatedOrders({
+          startDate: start,
+          endDate: end,
+          forceRefresh
+        })
+      ]);
+
+      // If a newer date selection occurred while this query was in flight, ignore this stale result
+      if (requestId !== activeRequestIdRef.current) {
+        return;
+      }
+
+      setBatches(fetchedBatches);
+      setOrders(fetchedOrders);
+      setError(null);
+    } catch (err: any) {
+      if (requestId === activeRequestIdRef.current) {
+        console.error('[WebsiteSalesDateRangeContext] Fetch failed:', err);
+        setError(err?.message || 'Failed to update sales data');
+      }
+    } finally {
+      if (requestId === activeRequestIdRef.current) {
+        setIsLoading(false);
+      }
+    }
+  }, []);
+
+  // Initialize and check latest available date
   useEffect(() => {
     let isMounted = true;
     websiteSalesService.getLatestSalesDate().then(latestDate => {
       if (!isMounted) return;
       setLatestAvailableDate(latestDate);
-      // If latest order date exists and is different from today, intelligently start with the latest date that has orders
       if (latestDate && latestDate !== todayStr) {
         setStartDate(latestDate);
         setEndDate(latestDate);
@@ -42,13 +96,42 @@ export const WebsiteSalesDateRangeProvider: React.FC<{ children: React.ReactNode
     return () => { isMounted = false; };
   }, [todayStr]);
 
+  // Synchronize data fetch whenever startDate or endDate changes
+  useEffect(() => {
+    fetchData(startDate, endDate);
+  }, [startDate, endDate, fetchData]);
+
+  // Listen to background sync / upload events to refresh sales data automatically
+  useEffect(() => {
+    const handleUpdate = () => {
+      fetchData(startDate, endDate, true);
+    };
+    window.addEventListener('velmora:website_sales_updated', handleUpdate);
+    window.addEventListener('velmora:batch_deleted', handleUpdate);
+    return () => {
+      window.removeEventListener('velmora:website_sales_updated', handleUpdate);
+      window.removeEventListener('velmora:batch_deleted', handleUpdate);
+    };
+  }, [startDate, endDate, fetchData]);
+
+  const refreshData = useCallback(async () => {
+    websiteSalesService.clearCache();
+    await fetchData(startDate, endDate, true);
+  }, [startDate, endDate, fetchData]);
+
   const setDateRange = (start: string, end: string, newPreset?: DateRangePreset) => {
+    if (start === startDate && end === endDate && newPreset === preset) return;
+    setIsLoading(true);
+    setLoadingProgressText('Updating sales data...');
     setStartDate(start);
     setEndDate(end);
     setPreset(newPreset);
   };
 
   const resetToToday = () => {
+    if (startDate === todayStr && endDate === todayStr && preset === 'today') return;
+    setIsLoading(true);
+    setLoadingProgressText('Updating sales data...');
     setStartDate(todayStr);
     setEndDate(todayStr);
     setPreset('today');
@@ -56,6 +139,9 @@ export const WebsiteSalesDateRangeProvider: React.FC<{ children: React.ReactNode
 
   const resetToLatestSalesDate = () => {
     if (latestAvailableDate) {
+      if (startDate === latestAvailableDate && endDate === latestAvailableDate) return;
+      setIsLoading(true);
+      setLoadingProgressText('Updating sales data...');
       setStartDate(latestAvailableDate);
       setEndDate(latestAvailableDate);
       setPreset(latestAvailableDate === todayStr ? 'today' : 'custom');
@@ -66,6 +152,8 @@ export const WebsiteSalesDateRangeProvider: React.FC<{ children: React.ReactNode
 
   const shiftRange = (direction: -1 | 1) => {
     const { startDate: nextStart, endDate: nextEnd } = shiftDateRange(startDate, endDate, direction);
+    setIsLoading(true);
+    setLoadingProgressText('Updating sales data...');
     setStartDate(nextStart);
     setEndDate(nextEnd);
     setPreset(nextStart === nextEnd && nextStart === todayStr ? 'today' : 'custom');
@@ -81,7 +169,13 @@ export const WebsiteSalesDateRangeProvider: React.FC<{ children: React.ReactNode
         setDateRange,
         resetToToday,
         resetToLatestSalesDate,
-        shiftRange
+        shiftRange,
+        orders,
+        batches,
+        isLoading,
+        loadingProgressText,
+        error,
+        refreshData
       }}
     >
       {children}

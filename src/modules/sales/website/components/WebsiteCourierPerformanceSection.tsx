@@ -36,6 +36,7 @@ export interface DiagnosticCategorySummary {
 interface WebsiteCourierPerformanceSectionProps {
   courierPerformance: CourierPerformanceSummary[];
   allOrders?: WebsiteConsolidatedOrder[];
+  isLoading?: boolean;
   onViewCourierOrders: (
     courierName: string, 
     orders: WebsiteConsolidatedOrder[], 
@@ -48,6 +49,7 @@ type OutcomeFilter = 'ALL' | 'DELIVERED' | 'RTO' | 'IN_TRANSIT' | 'OTHER' | 'CAN
 export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanceSectionProps> = ({
   courierPerformance,
   allOrders = [],
+  isLoading = false,
   onViewCourierOrders
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -333,79 +335,103 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 p-3 bg-slate-950/70 border border-slate-800/90 rounded-xl text-xs">
         <div className="flex flex-col">
           <span className="text-[10px] font-bold uppercase text-slate-500">Total Period Orders</span>
-          <span className="text-base font-bold text-white font-mono mt-0.5">
-            {totals.totalOrders.toLocaleString('en-IN')}
-          </span>
+          {isLoading ? (
+            <div className="h-5 w-16 bg-slate-800 rounded animate-pulse mt-1 mb-0.5" />
+          ) : (
+            <span className="text-base font-bold text-white font-mono mt-0.5">
+              {totals.totalOrders.toLocaleString('en-IN')}
+            </span>
+          )}
           <span className="text-[10px] text-slate-500">Sales records in scope</span>
         </div>
 
         <div className="flex flex-col">
           <span className="text-[10px] font-bold uppercase text-slate-500">Active Shipments</span>
-          <span className="text-base font-bold text-indigo-300 font-mono mt-0.5">
-            {totals.activeShipments.toLocaleString('en-IN')}
-          </span>
+          {isLoading ? (
+            <div className="h-5 w-16 bg-slate-800 rounded animate-pulse mt-1 mb-0.5" />
+          ) : (
+            <span className="text-base font-bold text-indigo-300 font-mono mt-0.5">
+              {totals.activeShipments.toLocaleString('en-IN')}
+            </span>
+          )}
           <span className="text-[10px] text-slate-500">Dispatchable orders</span>
         </div>
 
         <div className="flex flex-col">
           <span className="text-[10px] font-bold uppercase text-slate-500">Cancelled Pre-Dispatch</span>
-          <button
-            type="button"
-            onClick={() => {
-              const cancOrders = courierPerformance.flatMap(c => c.cancelledOrders || []);
-              onViewCourierOrders('All Couriers', cancOrders, 'CANCELLED');
-            }}
-            className="text-left text-base font-bold text-slate-400 hover:text-rose-300 font-mono mt-0.5 cursor-pointer"
-            title="Click to view 5 cancelled orders"
-          >
-            {totals.totalCancelled.toLocaleString('en-IN')}
-            <span className="text-[10px] font-sans font-normal text-purple-400 hover:underline ml-1.5">View →</span>
-          </button>
+          {isLoading ? (
+            <div className="h-5 w-16 bg-slate-800 rounded animate-pulse mt-1 mb-0.5" />
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                const cancOrders = courierPerformance.flatMap(c => c.cancelledOrders || []);
+                onViewCourierOrders('All Couriers', cancOrders, 'CANCELLED');
+              }}
+              className="text-left text-base font-bold text-slate-400 hover:text-rose-300 font-mono mt-0.5 cursor-pointer"
+              title="Click to view 5 cancelled orders"
+            >
+              {totals.totalCancelled.toLocaleString('en-IN')}
+              <span className="text-[10px] font-sans font-normal text-purple-400 hover:underline ml-1.5">View →</span>
+            </button>
+          )}
           <span className="text-[10px] text-slate-500">Excluded from delivery SLA</span>
         </div>
 
         <div className="flex flex-col">
           <span className="text-[10px] font-bold uppercase text-slate-500">Delivered Outcomes</span>
-          <button
-            type="button"
-            onClick={() => {
-              const delOrders = courierPerformance.flatMap(c => c.deliveredOrders || []);
-              onViewCourierOrders('All Couriers', delOrders, 'DELIVERED');
-            }}
-            className="text-left text-base font-bold text-emerald-400 hover:text-emerald-300 font-mono mt-0.5 cursor-pointer"
-          >
-            {totals.totalDelivered.toLocaleString('en-IN')}
-            <span className="text-[10px] font-sans font-normal text-purple-400 hover:underline ml-1.5">View →</span>
-          </button>
+          {isLoading ? (
+            <div className="h-5 w-16 bg-slate-800 rounded animate-pulse mt-1 mb-0.5" />
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                const delOrders = courierPerformance.flatMap(c => c.deliveredOrders || []);
+                onViewCourierOrders('All Couriers', delOrders, 'DELIVERED');
+              }}
+              className="text-left text-base font-bold text-emerald-400 hover:text-emerald-300 font-mono mt-0.5 cursor-pointer"
+            >
+              {totals.totalDelivered.toLocaleString('en-IN')}
+              <span className="text-[10px] font-sans font-normal text-purple-400 hover:underline ml-1.5">View →</span>
+            </button>
+          )}
           <span className="text-[10px] text-emerald-400/80">{totals.overallDeliveryRate} delivery rate</span>
         </div>
 
         <div className="flex flex-col">
           <span className="text-[10px] font-bold uppercase text-slate-500">Total RTO Returns</span>
-          <button
-            type="button"
-            onClick={() => {
-              const rtoOrders = courierPerformance.flatMap(c => c.rtoOrders || []);
-              onViewCourierOrders('All Couriers', rtoOrders, 'RTO');
-            }}
-            className="text-left text-base font-bold text-rose-400 hover:text-rose-300 font-mono mt-0.5 cursor-pointer"
-          >
-            {totals.totalRto.toLocaleString('en-IN')}
-            <span className="text-[10px] font-sans font-normal text-purple-400 hover:underline ml-1.5">View →</span>
-          </button>
+          {isLoading ? (
+            <div className="h-5 w-16 bg-slate-800 rounded animate-pulse mt-1 mb-0.5" />
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                const rtoOrders = courierPerformance.flatMap(c => c.rtoOrders || []);
+                onViewCourierOrders('All Couriers', rtoOrders, 'RTO');
+              }}
+              className="text-left text-base font-bold text-rose-400 hover:text-rose-300 font-mono mt-0.5 cursor-pointer"
+            >
+              {totals.totalRto.toLocaleString('en-IN')}
+              <span className="text-[10px] font-sans font-normal text-purple-400 hover:underline ml-1.5">View →</span>
+            </button>
+          )}
           <span className="text-[10px] text-rose-400/80">{totals.overallRtoRate} return rate</span>
         </div>
 
         <div className="flex flex-col">
           <span className="text-[10px] font-bold uppercase text-slate-500">Missing Tracking Report</span>
-          <button
-            type="button"
-            onClick={() => setIsDiagnosticModalOpen(true)}
-            className="text-left text-base font-bold text-amber-300 hover:text-amber-200 font-mono mt-0.5 cursor-pointer"
-          >
-            {diagnosticAnalysis.totalUnknown.toLocaleString('en-IN')}
-            <span className="text-[10px] font-sans font-normal text-purple-400 hover:underline ml-1.5">Inspect →</span>
-          </button>
+          {isLoading ? (
+            <div className="h-5 w-16 bg-slate-800 rounded animate-pulse mt-1 mb-0.5" />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsDiagnosticModalOpen(true)}
+              className="text-left text-base font-bold text-amber-300 hover:text-amber-200 font-mono mt-0.5 cursor-pointer"
+            >
+              {diagnosticAnalysis.totalUnknown.toLocaleString('en-IN')}
+              <span className="text-[10px] font-sans font-normal text-purple-400 hover:underline ml-1.5">Inspect →</span>
+            </button>
+          )}
           <span className="text-[10px] text-slate-500">No courier file uploaded</span>
         </div>
       </div>
@@ -580,7 +606,21 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/60 font-mono">
-            {filteredRows.length > 0 ? (
+            {isLoading ? (
+              [...Array(5)].map((_, i) => (
+                <tr key={i} className="animate-pulse">
+                  <td className="py-3 px-4"><div className="h-4 w-32 bg-slate-800 rounded" /></td>
+                  <td className="py-3 px-3 text-right"><div className="h-4 w-12 bg-slate-800 rounded ml-auto" /></td>
+                  <td className="py-3 px-3 text-right"><div className="h-4 w-12 bg-slate-800 rounded ml-auto" /></td>
+                  <td className="py-3 px-3 text-right"><div className="h-4 w-12 bg-slate-800 rounded ml-auto" /></td>
+                  <td className="py-3 px-3 text-right"><div className="h-4 w-12 bg-slate-800 rounded ml-auto" /></td>
+                  <td className="py-3 px-3 text-right"><div className="h-4 w-12 bg-slate-800 rounded ml-auto" /></td>
+                  <td className="py-3 px-3 text-right"><div className="h-4 w-14 bg-slate-800 rounded ml-auto" /></td>
+                  <td className="py-3 px-3 text-right"><div className="h-4 w-14 bg-slate-800 rounded ml-auto" /></td>
+                  <td className="py-3 px-4 text-center"><div className="h-6 w-14 bg-slate-800 rounded mx-auto" /></td>
+                </tr>
+              ))
+            ) : filteredRows.length > 0 ? (
               filteredRows.map((row) => {
                 const isDelhivery = row.courier.toLowerCase().includes('delhivery');
                 const isIndiaPost = row.courier.toLowerCase().includes('india post');

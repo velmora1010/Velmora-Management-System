@@ -29,7 +29,8 @@ import {
   Search,
   SlidersHorizontal,
   FileSpreadsheet,
-  Ban
+  Ban,
+  Loader2
 } from 'lucide-react';
 import type { WebsiteConsolidatedOrder, WebsiteUploadBatch, WebsiteOrderItem } from './types';
 import { websiteSalesService } from './websiteSalesService';
@@ -167,11 +168,8 @@ const ORDERS_REV_SEGMENTS: SegmentOption<'orders' | 'revenue'>[] = [
 export const WebsiteAnalytics: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [allOrders, setAllOrders] = useState<WebsiteConsolidatedOrder[]>([]);
-  const [batches, setBatches] = useState<WebsiteUploadBatch[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
 
-  // Shared Website Sales Date Range State
+  // Shared Website Sales Date Range & Dataset State (Instant cached tab navigation)
   const { 
     startDate: analyticsStartDate, 
     endDate: analyticsEndDate, 
@@ -179,7 +177,12 @@ export const WebsiteAnalytics: React.FC = () => {
     resetToToday,
     resetToLatestSalesDate,
     latestAvailableDate,
-    shiftRange 
+    shiftRange,
+    orders: allOrders,
+    batches,
+    isLoading: loading,
+    loadingProgressText,
+    refreshData
   } = useWebsiteSalesDateRange();
 
   const [isDateModalOpen, setIsDateModalOpen] = useState<boolean>(false);
@@ -273,7 +276,6 @@ export const WebsiteAnalytics: React.FC = () => {
   const [showStateTable, setShowStateTable] = useState<boolean>(false);
 
   useEffect(() => {
-    loadData();
     const from = searchParams.get('from');
     const to = searchParams.get('to');
 
@@ -282,7 +284,7 @@ export const WebsiteAnalytics: React.FC = () => {
         setDateRange(from, to, 'custom');
       }
     }
-  }, [analyticsStartDate, analyticsEndDate]);
+  }, [searchParams, analyticsStartDate, analyticsEndDate, setDateRange]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -295,22 +297,11 @@ export const WebsiteAnalytics: React.FC = () => {
   }, []);
 
   const loadData = async () => {
-    setLoading(true);
     try {
-      const [bList, orders] = await Promise.all([
-        websiteSalesService.getUploadBatches(),
-        websiteSalesService.getConsolidatedOrders({
-          startDate: analyticsStartDate,
-          endDate: analyticsEndDate
-        })
-      ]);
-      setBatches(bList);
-      setAllOrders(orders);
+      await refreshData();
     } catch (err: any) {
       console.error('Failed to load analytics data:', err);
       toast.error('Failed to load analytics orders');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -1108,14 +1099,23 @@ export const WebsiteAnalytics: React.FC = () => {
             )}
           </div>
 
+          {/* Synchronized Loading Badge */}
+          {loading && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-950/80 border border-purple-500/40 text-purple-300 text-xs font-semibold shadow-sm animate-pulse">
+              <Loader2 size={13} className="animate-spin text-purple-400 shrink-0" />
+              <span>{loadingProgressText || 'Updating sales data...'}</span>
+            </div>
+          )}
+
           {/* DATE CONTROLS GROUP (PREV | DATE RANGE | NEXT | TODAY) */}
           <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 p-1 rounded-xl shadow-inner">
             <button
               type="button"
               onClick={handlePrevRange}
+              disabled={loading}
               title="Previous Range / Day"
               aria-label="Previous Range / Day"
-              className="p-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg transition-colors cursor-pointer flex items-center justify-center shrink-0"
+              className="p-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-slate-300 hover:text-white rounded-lg transition-colors cursor-pointer flex items-center justify-center shrink-0"
             >
               <ChevronLeft size={15} />
             </button>
@@ -1123,7 +1123,8 @@ export const WebsiteAnalytics: React.FC = () => {
             <button
               type="button"
               onClick={() => setIsDateModalOpen(true)}
-              className="px-2.5 py-1 text-xs font-semibold text-white hover:text-purple-300 flex items-center gap-1.5 transition-colors cursor-pointer"
+              disabled={loading}
+              className="px-2.5 py-1 text-xs font-semibold text-white hover:text-purple-300 flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
             >
               <Calendar size={13} className="text-purple-400 shrink-0" />
               <span className="truncate max-w-[150px] font-mono font-bold">{getResolvedDateLabel()}</span>
@@ -1132,7 +1133,7 @@ export const WebsiteAnalytics: React.FC = () => {
             <button
               type="button"
               onClick={handleNextRange}
-              disabled={analyticsEndDate >= todayStr}
+              disabled={loading || analyticsEndDate >= todayStr}
               title="Next Range / Day"
               aria-label="Next Range / Day"
               className="p-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-slate-300 hover:text-white rounded-lg transition-colors cursor-pointer flex items-center justify-center shrink-0"
@@ -1143,7 +1144,8 @@ export const WebsiteAnalytics: React.FC = () => {
             <button
               type="button"
               onClick={handleResetToday}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shadow-sm ${
+              disabled={loading}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shadow-sm disabled:opacity-50 ${
                 analyticsStartDate === todayStr && analyticsEndDate === todayStr
                   ? 'bg-purple-600 text-white'
                   : 'bg-slate-900 hover:bg-slate-850 text-slate-300 hover:text-white'
@@ -1339,9 +1341,13 @@ export const WebsiteAnalytics: React.FC = () => {
                 <ShoppingBag size={14} />
               </div>
             </div>
-            <div className="text-2xl font-bold text-white font-mono mt-2">
-              {totalOrdersCount.toLocaleString('en-IN')}
-            </div>
+            {loading ? (
+              <div className="h-7 w-20 bg-slate-800 rounded animate-pulse mt-2 mb-1" />
+            ) : (
+              <div className="text-2xl font-bold text-white font-mono mt-2">
+                {totalOrdersCount.toLocaleString('en-IN')}
+              </div>
+            )}
             <div className="flex items-center justify-between text-[10px] text-slate-500">
               <span>Orders in period</span>
               <button
@@ -1362,9 +1368,13 @@ export const WebsiteAnalytics: React.FC = () => {
                 <DollarSign size={14} />
               </div>
             </div>
-            <div className="text-2xl font-bold text-emerald-400 font-mono mt-2">
-              ₹{Math.round(totalRevenue).toLocaleString('en-IN')}
-            </div>
+            {loading ? (
+              <div className="h-7 w-28 bg-slate-800 rounded animate-pulse mt-2 mb-1" />
+            ) : (
+              <div className="text-2xl font-bold text-emerald-400 font-mono mt-2">
+                ₹{Math.round(totalRevenue).toLocaleString('en-IN')}
+              </div>
+            )}
             <div className="text-[10px] text-slate-500">Gross placed order value</div>
           </div>
 
@@ -1376,9 +1386,13 @@ export const WebsiteAnalytics: React.FC = () => {
                 <Package size={14} />
               </div>
             </div>
-            <div className="text-2xl font-bold text-cyan-300 font-mono mt-2">
-              {totalUnits.toLocaleString('en-IN')}
-            </div>
+            {loading ? (
+              <div className="h-7 w-16 bg-slate-800 rounded animate-pulse mt-2 mb-1" />
+            ) : (
+              <div className="text-2xl font-bold text-cyan-300 font-mono mt-2">
+                {totalUnits.toLocaleString('en-IN')}
+              </div>
+            )}
             <div className="text-[10px] text-slate-500">Cumulative items ordered</div>
           </div>
 
@@ -1390,9 +1404,13 @@ export const WebsiteAnalytics: React.FC = () => {
                 <CreditCard size={14} />
               </div>
             </div>
-            <div className="text-2xl font-bold text-purple-300 font-mono mt-2">
-              ₹{avgOrderValue.toLocaleString('en-IN')}
-            </div>
+            {loading ? (
+              <div className="h-7 w-20 bg-slate-800 rounded animate-pulse mt-2 mb-1" />
+            ) : (
+              <div className="text-2xl font-bold text-purple-300 font-mono mt-2">
+                ₹{avgOrderValue.toLocaleString('en-IN')}
+              </div>
+            )}
             <div className="text-[10px] text-slate-500">Average ticket size</div>
           </div>
         </div>
@@ -1406,10 +1424,14 @@ export const WebsiteAnalytics: React.FC = () => {
               <span className="w-2 h-2 rounded-full bg-emerald-400" />
             </div>
             <div className="mt-2">
-              <div className="flex items-baseline justify-between">
-                <span className="text-xl font-bold text-emerald-400 font-mono">{prepaidCount.toLocaleString('en-IN')}</span>
-                <span className="text-sm font-bold text-white font-mono">₹{Math.round(prepaidRevenue).toLocaleString('en-IN')}</span>
-              </div>
+              {loading ? (
+                <div className="h-6 w-28 bg-slate-800 rounded animate-pulse my-0.5" />
+              ) : (
+                <div className="flex items-baseline justify-between">
+                  <span className="text-xl font-bold text-emerald-400 font-mono">{prepaidCount.toLocaleString('en-IN')}</span>
+                  <span className="text-sm font-bold text-white font-mono">₹{Math.round(prepaidRevenue).toLocaleString('en-IN')}</span>
+                </div>
+              )}
             </div>
             <div className="text-[10px] text-slate-500">Full payment received</div>
           </div>
@@ -1421,12 +1443,20 @@ export const WebsiteAnalytics: React.FC = () => {
               <span className="w-2 h-2 rounded-full bg-purple-400" />
             </div>
             <div className="mt-2">
-              <div className="flex items-baseline justify-between">
-                <span className="text-xl font-bold text-purple-300 font-mono">{partialCodCount.toLocaleString('en-IN')}</span>
-                <span className="text-sm font-bold text-white font-mono">₹{Math.round(partialCodRevenue).toLocaleString('en-IN')}</span>
-              </div>
+              {loading ? (
+                <div className="h-6 w-28 bg-slate-800 rounded animate-pulse my-0.5" />
+              ) : (
+                <div className="flex items-baseline justify-between">
+                  <span className="text-xl font-bold text-purple-300 font-mono">{partialCodCount.toLocaleString('en-IN')}</span>
+                  <span className="text-sm font-bold text-white font-mono">₹{Math.round(partialCodRevenue).toLocaleString('en-IN')}</span>
+                </div>
+              )}
             </div>
-            <div className="text-[10px] text-purple-400/90 font-mono">₹{Math.round(partialCodRemaining).toLocaleString('en-IN')} remaining COD</div>
+            {loading ? (
+              <div className="h-3 w-24 bg-slate-800/60 rounded animate-pulse" />
+            ) : (
+              <div className="text-[10px] text-purple-400/90 font-mono">₹{Math.round(partialCodRemaining).toLocaleString('en-IN')} remaining COD</div>
+            )}
           </div>
 
           {/* Full COD Orders */}
@@ -1436,12 +1466,20 @@ export const WebsiteAnalytics: React.FC = () => {
               <span className="w-2 h-2 rounded-full bg-amber-400" />
             </div>
             <div className="mt-2">
-              <div className="flex items-baseline justify-between">
-                <span className="text-xl font-bold text-amber-400 font-mono">{fullCodCount.toLocaleString('en-IN')}</span>
-                <span className="text-sm font-bold text-white font-mono">₹{Math.round(fullCodRevenue).toLocaleString('en-IN')}</span>
-              </div>
+              {loading ? (
+                <div className="h-6 w-28 bg-slate-800 rounded animate-pulse my-0.5" />
+              ) : (
+                <div className="flex items-baseline justify-between">
+                  <span className="text-xl font-bold text-amber-400 font-mono">{fullCodCount.toLocaleString('en-IN')}</span>
+                  <span className="text-sm font-bold text-white font-mono">₹{Math.round(fullCodRevenue).toLocaleString('en-IN')}</span>
+                </div>
+              )}
             </div>
-            <div className="text-[10px] text-amber-400/90 font-mono">₹{Math.round(fullCodPending).toLocaleString('en-IN')} COD pending</div>
+            {loading ? (
+              <div className="h-3 w-20 bg-slate-800/60 rounded animate-pulse" />
+            ) : (
+              <div className="text-[10px] text-amber-400/90 font-mono">₹{Math.round(fullCodPending).toLocaleString('en-IN')} COD pending</div>
+            )}
           </div>
 
           {/* Total COD Receivable */}
@@ -1450,9 +1488,13 @@ export const WebsiteAnalytics: React.FC = () => {
               <span className="text-[11px] font-bold uppercase tracking-wider">COD Receivable</span>
               <span className="w-2 h-2 rounded-full bg-pink-400" />
             </div>
-            <div className="text-xl font-bold text-pink-300 font-mono mt-2">
-              ₹{Math.round(totalCodReceivable).toLocaleString('en-IN')}
-            </div>
+            {loading ? (
+              <div className="h-7 w-24 bg-slate-800 rounded animate-pulse mt-2 mb-1" />
+            ) : (
+              <div className="text-xl font-bold text-pink-300 font-mono mt-2">
+                ₹{Math.round(totalCodReceivable).toLocaleString('en-IN')}
+              </div>
+            )}
             <div className="text-[10px] text-slate-500">Partial + Full COD pending</div>
           </div>
         </div>
@@ -1836,9 +1878,13 @@ export const WebsiteAnalytics: React.FC = () => {
                     <CheckCircle2 size={14} />
                   </div>
                 </div>
-                <div className="text-2xl font-bold text-emerald-400 font-mono mt-2">
-                  {rtoMetrics.totalDeliveredOrders.toLocaleString('en-IN')}
-                </div>
+                {loading ? (
+                  <div className="h-7 w-20 bg-slate-800 rounded animate-pulse mt-2 mb-1" />
+                ) : (
+                  <div className="text-2xl font-bold text-emerald-400 font-mono mt-2">
+                    {rtoMetrics.totalDeliveredOrders.toLocaleString('en-IN')}
+                  </div>
+                )}
                 <div className="flex items-center justify-between text-[10px] text-slate-500">
                   <span>Rate: <strong className="text-emerald-300 font-mono">{rtoMetrics.deliveryRate}</strong></span>
                   <button
@@ -1865,9 +1911,13 @@ export const WebsiteAnalytics: React.FC = () => {
                     <TrendingUp size={14} />
                   </div>
                 </div>
-                <div className="text-2xl font-bold text-white font-mono mt-2">
-                  {formatINR(rtoMetrics.totalDeliveredValue)}
-                </div>
+                {loading ? (
+                  <div className="h-7 w-24 bg-slate-800 rounded animate-pulse mt-2 mb-1" />
+                ) : (
+                  <div className="text-2xl font-bold text-white font-mono mt-2">
+                    {formatINR(rtoMetrics.totalDeliveredValue)}
+                  </div>
+                )}
                 <div className="flex items-center justify-between text-[10px] text-slate-500">
                   <span>Avg: <strong className="text-emerald-300 font-mono">{formatINR(rtoMetrics.deliveredAvgValue)}</strong></span>
                   <button
@@ -1894,9 +1944,13 @@ export const WebsiteAnalytics: React.FC = () => {
                     <RotateCcw size={14} />
                   </div>
                 </div>
-                <div className="text-2xl font-bold text-rose-400 font-mono mt-2">
-                  {rtoMetrics.totalRtoOrders.toLocaleString('en-IN')}
-                </div>
+                {loading ? (
+                  <div className="h-7 w-16 bg-slate-800 rounded animate-pulse mt-2 mb-1" />
+                ) : (
+                  <div className="text-2xl font-bold text-rose-400 font-mono mt-2">
+                    {rtoMetrics.totalRtoOrders.toLocaleString('en-IN')}
+                  </div>
+                )}
                 <div className="flex items-center justify-between text-[10px] text-slate-500">
                   <span>Rate: <strong className="text-rose-300 font-mono">{rtoMetrics.rtoRate}%</strong></span>
                   <button
@@ -1923,9 +1977,13 @@ export const WebsiteAnalytics: React.FC = () => {
                     <CreditCard size={14} />
                   </div>
                 </div>
-                <div className="text-2xl font-bold text-white font-mono mt-2">
-                  {formatINR(rtoMetrics.totalRtoValue)}
-                </div>
+                {loading ? (
+                  <div className="h-7 w-24 bg-slate-800 rounded animate-pulse mt-2 mb-1" />
+                ) : (
+                  <div className="text-2xl font-bold text-white font-mono mt-2">
+                    {formatINR(rtoMetrics.totalRtoValue)}
+                  </div>
+                )}
                 <div className="flex items-center justify-between text-[10px] text-slate-500">
                   <span>Avg ticket: <strong className="text-amber-300 font-mono">{formatINR(rtoMetrics.rtoAvgValue)}</strong></span>
                   <button
@@ -1952,14 +2010,18 @@ export const WebsiteAnalytics: React.FC = () => {
                     <Ban size={14} />
                   </div>
                 </div>
-                <div className="mt-2">
-                  <div className="text-2xl font-bold text-red-400 font-mono">
-                    {rtoMetrics.cancelledCount.toLocaleString('en-IN')}
+                {loading ? (
+                  <div className="h-9 w-24 bg-slate-800 rounded animate-pulse mt-2 mb-1" />
+                ) : (
+                  <div className="mt-2">
+                    <div className="text-2xl font-bold text-red-400 font-mono">
+                      {rtoMetrics.cancelledCount.toLocaleString('en-IN')}
+                    </div>
+                    <div className="text-xs font-semibold text-slate-300 font-mono mt-0.5">
+                      {formatINR(rtoMetrics.cancelledValue)}
+                    </div>
                   </div>
-                  <div className="text-xs font-semibold text-slate-300 font-mono mt-0.5">
-                    {formatINR(rtoMetrics.cancelledValue)}
-                  </div>
-                </div>
+                )}
                 <div className="flex items-center justify-between text-[10px] text-slate-500 mt-2">
                   <span className="truncate">Cancelled before dispatch</span>
                   <button
@@ -1982,6 +2044,7 @@ export const WebsiteAnalytics: React.FC = () => {
         <WebsiteCourierPerformanceSection
           courierPerformance={rtoMetrics.courierPerformance}
           allOrders={filteredOrders}
+          isLoading={loading}
           onViewCourierOrders={(courierName, orders, filterStatus) => {
             let list = orders;
             if (filterStatus === 'DELIVERED') {

@@ -40,7 +40,25 @@ const UPLOADS_KEY = 'website_sales_upload_batches';
 const RAW_ROWS_KEY = 'website_sales_raw_order_rows';
 const ORDERS_KEY = 'website_sales_consolidated_orders';
 
+// In-memory cache and request deduplication for high-performance navigation
+interface ConsolidatedOrdersCacheEntry {
+  timestamp: number;
+  data: WebsiteConsolidatedOrder[];
+}
+
+const consolidatedOrdersCache = new Map<string, ConsolidatedOrdersCacheEntry>();
+const inFlightOrderPromises = new Map<string, Promise<WebsiteConsolidatedOrder[]>>();
+let trackingShipmentsCache: { timestamp: number; map: Map<string, any> } | null = null;
+let uploadBatchesCache: { timestamp: number; data: WebsiteUploadBatch[] } | null = null;
+
 export class WebsiteSalesService {
+  // Clear all in-memory caches on mutations
+  clearCache(): void {
+    consolidatedOrdersCache.clear();
+    inFlightOrderPromises.clear();
+    trackingShipmentsCache = null;
+    uploadBatchesCache = null;
+  }
   private isMigrated = false;
 
   constructor() {
@@ -163,6 +181,7 @@ export class WebsiteSalesService {
     const logisticsSync = await syncSalesUploadToLogistics(consolidatedOrders);
 
     batch.status = 'COMPLETED';
+    this.clearCache();
     return { 
       batch, 
       consolidatedOrders,
@@ -516,8 +535,13 @@ export class WebsiteSalesService {
   }
 
   // STEP 9: Get Upload Batches from sales_uploads
-  async getUploadBatches(): Promise<WebsiteUploadBatch[]> {
+  async getUploadBatches(forceRefresh = false): Promise<WebsiteUploadBatch[]> {
     await this.checkAndMigrateLocalStorage();
+
+    const now = Date.now();
+    if (!forceRefresh && uploadBatchesCache && now - uploadBatchesCache.timestamp < 30_000) {
+      return uploadBatchesCache.data;
+    }
 
     const data = await this.fetchAllPages<any>((start, end) =>
       supabase
@@ -529,7 +553,7 @@ export class WebsiteSalesService {
         .range(start, end)
     );
 
-    return (data || []).map(b => {
+    const batches = (data || []).map(b => {
       const minDate = b.order_date_from || getTodayInBusinessTimezone();
       const maxDate = b.order_date_to || minDate;
       const dateRangeStr = minDate === maxDate
@@ -552,6 +576,9 @@ export class WebsiteSalesService {
         order_date_range: dateRangeStr
       };
     });
+
+    uploadBatchesCache = { timestamp: now, data: batches };
+    return batches;
   }
 
   // STEP 10: Get Raw Order Rows from sales_raw_data
@@ -581,13 +608,14 @@ export class WebsiteSalesService {
   }
 
   // STEP 11, 12, 13: Fetch Consolidated Orders & Items from sales_orders and sales_order_items
-  async getConsolidatedOrders(filters?: WebsiteSalesFilterState & { batchId?: string; selectedDate?: string }): Promise<WebsiteConsolidatedOrder[]> {
+  private async fetchConsolidatedOrdersFromDb(filters?: { startDate?: string; endDate?: string; selectedDate?: string; batchId?: string }): Promise<WebsiteConsolidatedOrder[]> {
     await this.checkAndMigrateLocalStorage();
 
+    // Direct foreign-key embedding of items eliminates dozens of sequential N+1 round trips!
     const orderRows = await this.fetchAllPages<any>((start, end) => {
       let query = supabase
         .from('sales_orders')
-        .select('*')
+        .select('*, items:sales_order_items(id, sales_order_id, product_name, product_code, quantity, unit_price, line_total)')
         .eq('channel', 'WEBSITE')
         .neq('order_status', 'DELETED')
         .order('order_date', { ascending: false })
@@ -607,68 +635,55 @@ export class WebsiteSalesService {
 
     if (!orderRows || orderRows.length === 0) return [];
 
-    // Fetch matching sales_order_items for product details using chunked parent order IDs
-    const salesOrderIds = orderRows.map(o => o.id);
-    let itemRows: any[] = [];
-
-    for (let i = 0; i < salesOrderIds.length; i += 300) {
-      const chunkIds = salesOrderIds.slice(i, i + 300);
-      const chunkItems = await this.fetchAllPages<any>((start, end) =>
-        supabase
-          .from('sales_order_items')
-          .select('*')
-          .in('sales_order_id', chunkIds)
-          .order('id', { ascending: true })
-          .range(start, end)
-      );
-      itemRows = itemRows.concat(chunkItems);
-    }
-
-    // Group items by sales_order_id
-    const itemsByOrderId = new Map<string, WebsiteOrderItem[]>();
-    itemRows.forEach(it => {
-      if (!itemsByOrderId.has(it.sales_order_id)) {
-        itemsByOrderId.set(it.sales_order_id, []);
-      }
-      itemsByOrderId.get(it.sales_order_id)!.push({
-        id: it.id,
-        website_order_id: it.sales_order_id,
-        product_name: it.product_name,
-        product_code: it.product_code,
-        quantity: Number(it.quantity) || 1,
-        unit_price: it.unit_price != null ? Number(it.unit_price) : null,
-        line_total: it.line_total != null ? Number(it.line_total) : null
-      });
-    });
-
     // Attach live logistics tracking, courier, and RTO status from Supabase & Dexie
     const trackingMap = new Map<string, any>();
     const logisticsMap = new Map<string, any>();
     try {
       const rawIds = orderRows.map(o => cleanOrderId(o.order_id)).filter(Boolean);
 
-      // 1. Fetch authoritative shipments from Supabase customer_tracking_shipments in safe chunks
-      for (let i = 0; i < rawIds.length; i += 100) {
-        const chunk = rawIds.slice(i, i + 100);
-        const { data: shipments } = await supabase
-          .from('customer_tracking_shipments')
-          .select('order_id, display_order_id, awb_number, courier, status, raw_status, dispatch_date, delivered_date, remarks, last_location')
-          .in('order_id', chunk);
+      // 1. Authoritative shipments from Supabase customer_tracking_shipments with 60-second in-memory TTL
+      const now = Date.now();
+      if (!trackingShipmentsCache || now - trackingShipmentsCache.timestamp > 60_000) {
+        const shipRows = await this.fetchAllPages<any>((start, end) =>
+          supabase
+            .from('customer_tracking_shipments')
+            .select('order_id, display_order_id, awb_number, courier, status, raw_status, dispatch_date, delivered_date, remarks, last_location')
+            .order('id', { ascending: true })
+            .range(start, end)
+        );
 
-        (shipments || []).forEach(s => {
-          const cid = cleanOrderId(s.order_id || s.display_order_id).toLowerCase();
-          if (cid) trackingMap.set(cid, s);
+        const newMap = new Map<string, any>();
+        (shipRows || []).forEach(s => {
+          const cid1 = cleanOrderId(s.order_id).toLowerCase();
+          const cid2 = cleanOrderId(s.display_order_id).toLowerCase();
+          if (cid1) newMap.set(cid1, s);
+          if (cid2) newMap.set(cid2, s);
         });
+        trackingShipmentsCache = { timestamp: now, map: newMap };
       }
+      trackingShipmentsCache.map.forEach((val, key) => trackingMap.set(key, val));
 
       // 2. Fetch local Dexie db.logistics_orders as secondary/staging cache
-      for (let i = 0; i < rawIds.length; i += 300) {
-        const chunk = rawIds.slice(i, i + 300);
-        const dbRecs = await db.logistics_orders.where('orderId').anyOfIgnoreCase(chunk).toArray();
-        dbRecs.forEach(rec => {
-          const cid = cleanOrderId(rec.orderId).toLowerCase();
-          logisticsMap.set(cid, rec);
-        });
+      try {
+        const dexieCount = await db.logistics_orders.count();
+        if (dexieCount < 20000) {
+          const allDexie = await db.logistics_orders.toArray();
+          allDexie.forEach(rec => {
+            const cid = cleanOrderId(rec.orderId).toLowerCase();
+            if (cid) logisticsMap.set(cid, rec);
+          });
+        } else {
+          for (let i = 0; i < rawIds.length; i += 1000) {
+            const chunk = rawIds.slice(i, i + 1000);
+            const dbRecs = await db.logistics_orders.where('orderId').anyOfIgnoreCase(chunk).toArray();
+            dbRecs.forEach(rec => {
+              const cid = cleanOrderId(rec.orderId).toLowerCase();
+              if (cid) logisticsMap.set(cid, rec);
+            });
+          }
+        }
+      } catch (dexieErr) {
+        console.warn('Dexie logistics tracking fetch fallback:', dexieErr);
       }
     } catch (e) {
       console.warn('Logistics tracking fetch fallback:', e);
@@ -679,7 +694,18 @@ export class WebsiteSalesService {
       const trackRec = trackingMap.get(cid);
       const logRec = logisticsMap.get(cid);
       const extra = o.extra_data || {};
-      const items = itemsByOrderId.get(o.id) || [];
+      
+      // Items embedded directly from PostgREST query
+      const rawEmbeddedItems = Array.isArray(o.items) ? o.items : [];
+      const items: WebsiteOrderItem[] = rawEmbeddedItems.map((it: any) => ({
+        id: it.id,
+        website_order_id: it.sales_order_id || o.id,
+        product_name: it.product_name,
+        product_code: it.product_code,
+        quantity: Number(it.quantity) || 1,
+        unit_price: it.unit_price != null ? Number(it.unit_price) : null,
+        line_total: it.line_total != null ? Number(it.line_total) : null
+      }));
 
       const productNames = items.length > 0
         ? Array.from(new Set(items.map(it => it.product_name))).join(', ')
@@ -749,6 +775,51 @@ export class WebsiteSalesService {
       };
     });
 
+    return orders;
+  }
+
+  async getConsolidatedOrders(
+    filters?: WebsiteSalesFilterState & { batchId?: string; selectedDate?: string; forceRefresh?: boolean }
+  ): Promise<WebsiteConsolidatedOrder[]> {
+    const cacheKey = `${filters?.startDate || ''}__${filters?.endDate || ''}__${filters?.selectedDate || ''}__${filters?.batchId || ''}`;
+    const now = Date.now();
+
+    let baseOrders: WebsiteConsolidatedOrder[];
+
+    // 1. Check in-memory TTL cache (30 seconds)
+    const cachedEntry = consolidatedOrdersCache.get(cacheKey);
+    if (!filters?.forceRefresh && cachedEntry && now - cachedEntry.timestamp < 30_000) {
+      baseOrders = cachedEntry.data;
+    } else if (inFlightOrderPromises.has(cacheKey)) {
+      // 2. Request deduplication: join in-flight promise if identical query is already fetching
+      baseOrders = await inFlightOrderPromises.get(cacheKey)!;
+    } else {
+      // 3. Initiate query and share promise with simultaneous callers
+      const fetchPromise = this.fetchConsolidatedOrdersFromDb({
+        startDate: filters?.startDate,
+        endDate: filters?.endDate,
+        selectedDate: filters?.selectedDate,
+        batchId: filters?.batchId
+      });
+
+      inFlightOrderPromises.set(cacheKey, fetchPromise);
+      try {
+        baseOrders = await fetchPromise;
+        consolidatedOrdersCache.set(cacheKey, { timestamp: Date.now(), data: baseOrders });
+      } finally {
+        inFlightOrderPromises.delete(cacheKey);
+      }
+    }
+
+    const orders = baseOrders;
+    return this.filterOrders(orders, filters);
+  }
+
+  // Filter orders in memory using standard WebsiteSalesFilterState
+  filterOrders(
+    orders: WebsiteConsolidatedOrder[],
+    filters?: WebsiteSalesFilterState & { batchId?: string; selectedDate?: string }
+  ): WebsiteConsolidatedOrder[] {
     if (!filters) return orders;
 
     return orders.filter(o => {
@@ -903,6 +974,7 @@ export class WebsiteSalesService {
       consolidatedOrders
     );
 
+    this.clearCache();
     return consolidatedOrders;
   }
 
@@ -987,6 +1059,7 @@ export class WebsiteSalesService {
           detail: { batchId, orderIds: batchVariantsList, timestamp: Date.now() }
         }));
       }
+      this.clearCache();
     } catch (e: any) {
       console.error('[Supabase Error] Table: sales_uploads/orders, Op: DELETE, Message:', e.message);
       throw new Error(`Failed to delete upload batch: ${e.message}`);
@@ -1106,6 +1179,7 @@ export class WebsiteSalesService {
         }));
       }
 
+      this.clearCache();
       return {
         success: true,
         orderId: cleanId,
@@ -1911,6 +1985,7 @@ export class WebsiteSalesService {
       window.dispatchEvent(new CustomEvent('velmora:website_sales_updated', { detail: { orderId: cleanId } }));
       window.dispatchEvent(new CustomEvent('velmora:logistics_order_updated', { detail: { orderId: cleanId } }));
 
+      this.clearCache();
       return {
         success: true,
         mode: 'REQUESTED_LOGISTICS',
@@ -1975,6 +2050,7 @@ export class WebsiteSalesService {
       window.dispatchEvent(new CustomEvent('velmora:website_sales_updated', { detail: { orderId: cleanId } }));
       window.dispatchEvent(new CustomEvent('velmora:logistics_order_updated', { detail: { orderId: cleanId } }));
 
+      this.clearCache();
       return {
         success: true,
         mode: 'DIRECT_CANCELLED',
@@ -2067,6 +2143,7 @@ export class WebsiteSalesService {
     window.dispatchEvent(new CustomEvent('velmora:website_sales_updated', { detail: { orderId: cleanId } }));
     window.dispatchEvent(new CustomEvent('velmora:logistics_order_updated', { detail: { orderId: cleanId } }));
 
+    this.clearCache();
     return {
       success: true,
       message: `Logistics confirmed cancellation for Order #${cleanId}`
@@ -2151,6 +2228,7 @@ export class WebsiteSalesService {
     window.dispatchEvent(new CustomEvent('velmora:website_sales_updated', { detail: { orderId: cleanId } }));
     window.dispatchEvent(new CustomEvent('velmora:logistics_order_updated', { detail: { orderId: cleanId } }));
 
+    this.clearCache();
     return {
       success: true,
       message: `Cancellation rejected for Order #${cleanId}. Order remains in active workflow.`
@@ -2160,3 +2238,10 @@ export class WebsiteSalesService {
 }
 
 export const websiteSalesService = new WebsiteSalesService();
+
+// Automatically invalidate in-memory query caches on background sync & upload events
+if (typeof window !== 'undefined') {
+  window.addEventListener('velmora:website_sales_updated', () => websiteSalesService.clearCache());
+  window.addEventListener('velmora:logistics_order_updated', () => websiteSalesService.clearCache());
+  window.addEventListener('velmora:batch_deleted', () => websiteSalesService.clearCache());
+}
