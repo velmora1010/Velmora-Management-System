@@ -46,10 +46,11 @@ export const MonthlyPerformanceTab: React.FC<MonthlyPerformanceTabProps> = ({
     );
   }
 
-  // Aggregate totals
+  // Aggregate totals across active records
   const totalOrders = monthlyRecords.reduce((s, m) => s + m.totalOrders, 0);
   const totalGross = monthlyRecords.reduce((s, m) => s + m.grossOrderValue, 0);
   const totalNet = monthlyRecords.reduce((s, m) => s + m.netSales, 0);
+  const totalUnits = monthlyRecords.reduce((s, m) => s + m.unitsSold, 0);
   const totalDelivered = monthlyRecords.reduce((s, m) => s + m.deliveredOrders, 0);
   const totalRto = monthlyRecords.reduce((s, m) => s + m.rtoOrders, 0);
   const totalCancelled = monthlyRecords.reduce((s, m) => s + m.cancelledOrders, 0);
@@ -61,7 +62,7 @@ export const MonthlyPerformanceTab: React.FC<MonthlyPerformanceTabProps> = ({
         <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800">
           <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Total Orders</span>
           <div className="text-lg font-black font-mono text-white mt-0.5">{totalOrders.toLocaleString('en-IN')}</div>
-          <span className="text-[10px] text-slate-500">{monthlyRecords.length} months active</span>
+          <span className="text-[10px] text-slate-500">{monthlyRecords.length} calendar months</span>
         </div>
         <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800">
           <span className="text-[10px] font-bold uppercase text-emerald-400 tracking-wider">Gross Value</span>
@@ -90,7 +91,7 @@ export const MonthlyPerformanceTab: React.FC<MonthlyPerformanceTabProps> = ({
         </div>
       </div>
 
-      {/* 2. Monthly Charts Grid (5 Interactive Charts) */}
+      {/* 2. Monthly Charts Grid (All 6 Required Charts with Jan-Dec XAxis) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Chart 1: Monthly Order Trend */}
         <div className="p-4 bg-slate-950/60 rounded-xl border border-slate-800/80">
@@ -99,134 +100,175 @@ export const MonthlyPerformanceTab: React.FC<MonthlyPerformanceTabProps> = ({
               <TrendingUp size={13} className="text-purple-400" />
               1. Monthly Order Trend
             </span>
-            <span className="text-[10px] text-slate-500">Orders placed per month</span>
+            <span className="text-[10px] text-slate-500 font-mono">Jan → Dec</span>
           </div>
-          <div className="h-[200px] w-full">
+          <div className="h-[210px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={monthlyRecords} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
+              <BarChart data={monthlyRecords} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis dataKey="monthLabel" stroke="#64748b" fontSize={10} tickLine={false} />
+                <XAxis dataKey="monthShort" stroke="#64748b" fontSize={11} tickLine={false} />
                 <YAxis stroke="#64748b" fontSize={10} tickLine={false} />
                 <Tooltip
                   content={({ active, payload }) => {
                     if (active && payload && payload.length) {
                       const d = payload[0].payload as MonthlyPerformanceRecord;
                       return (
-                        <div className="bg-slate-900 border border-slate-700 p-2 rounded shadow text-xs">
-                          <p className="font-bold text-white">{d.monthLabel}</p>
-                          <p className="text-purple-300">Total Orders: <span className="font-mono font-bold">{d.totalOrders.toLocaleString('en-IN')}</span></p>
-                          <p className="text-slate-400 text-[10px]">Click row below to drill down</p>
+                        <div className="bg-slate-900 border border-slate-700 p-2.5 rounded shadow text-xs">
+                          <p className="font-bold text-white">{d.monthLong} {d.year}</p>
+                          <p className="text-purple-300 font-mono mt-0.5">
+                            Total Orders: <span className="font-bold">{d.totalOrders.toLocaleString('en-IN')}</span>
+                          </p>
+                          {d.totalOrders === 0 && <p className="text-slate-500 text-[10px]">No orders in this month</p>}
                         </div>
                       );
                     }
                     return null;
                   }}
                 />
-                <Bar dataKey="totalOrders" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="totalOrders" name="Orders" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        {/* Chart 2: Monthly Revenue Trend */}
+        {/* Chart 2: Monthly Revenue Trend (Gross Revenue) */}
         <div className="p-4 bg-slate-950/60 rounded-xl border border-slate-800/80">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
               <DollarSign size={13} className="text-emerald-400" />
-              2. Monthly Revenue Trend (₹)
+              2. Monthly Revenue Trend (Gross Revenue)
             </span>
-            <span className="text-[10px] text-slate-500">Gross vs Net Sales</span>
+            <span className="text-[10px] text-slate-500 font-mono">Gross Order Value (₹)</span>
           </div>
-          <div className="h-[200px] w-full">
+          <div className="h-[210px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={monthlyRecords} margin={{ top: 10, right: 10, left: -10, bottom: 20 }}>
+              <LineChart data={monthlyRecords} margin={{ top: 10, right: 10, left: -10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis dataKey="monthLabel" stroke="#64748b" fontSize={10} tickLine={false} />
+                <XAxis dataKey="monthShort" stroke="#64748b" fontSize={11} tickLine={false} />
                 <YAxis stroke="#64748b" fontSize={10} tickLine={false} />
                 <Tooltip
                   content={({ active, payload }) => {
                     if (active && payload && payload.length) {
                       const d = payload[0].payload as MonthlyPerformanceRecord;
                       return (
-                        <div className="bg-slate-900 border border-slate-700 p-2 rounded shadow text-xs">
-                          <p className="font-bold text-white">{d.monthLabel}</p>
-                          <p className="text-emerald-400">Gross: ₹{d.grossOrderValue.toLocaleString('en-IN')}</p>
-                          <p className="text-cyan-400">Net Sales: ₹{d.netSales.toLocaleString('en-IN')}</p>
-                          <p className="text-slate-400 text-[10px]">AOV: ₹{d.aov}</p>
+                        <div className="bg-slate-900 border border-slate-700 p-2.5 rounded shadow text-xs">
+                          <p className="font-bold text-white">{d.monthLong} {d.year}</p>
+                          <p className="text-emerald-400 font-mono mt-0.5">
+                            Gross Revenue: <span className="font-bold">₹{d.grossOrderValue.toLocaleString('en-IN')}</span>
+                          </p>
+                          <p className="text-slate-400 text-[10px] font-mono">Orders: {d.totalOrders}</p>
                         </div>
                       );
                     }
                     return null;
                   }}
                 />
-                <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                <Line type="monotone" dataKey="grossOrderValue" name="Gross (₹)" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="netSales" name="Net Sales (₹)" stroke="#06b6d4" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="grossOrderValue" name="Gross Revenue (₹)" stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        {/* Chart 3: Monthly Units Sold */}
+        {/* Chart 3: Monthly Net Sales Trend */}
         <div className="p-4 bg-slate-950/60 rounded-xl border border-slate-800/80">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-              <Package size={13} className="text-cyan-400" />
-              3. Monthly Units Sold
+              <DollarSign size={13} className="text-cyan-400" />
+              3. Monthly Net Sales Trend
             </span>
-            <span className="text-[10px] text-slate-500">Cumulative items sold</span>
+            <span className="text-[10px] text-slate-500 font-mono">Excl. Cancellations (₹)</span>
           </div>
-          <div className="h-[200px] w-full">
+          <div className="h-[210px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={monthlyRecords} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
+              <LineChart data={monthlyRecords} margin={{ top: 10, right: 10, left: -10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis dataKey="monthLabel" stroke="#64748b" fontSize={10} tickLine={false} />
+                <XAxis dataKey="monthShort" stroke="#64748b" fontSize={11} tickLine={false} />
                 <YAxis stroke="#64748b" fontSize={10} tickLine={false} />
                 <Tooltip
                   content={({ active, payload }) => {
                     if (active && payload && payload.length) {
                       const d = payload[0].payload as MonthlyPerformanceRecord;
                       return (
-                        <div className="bg-slate-900 border border-slate-700 p-2 rounded shadow text-xs">
-                          <p className="font-bold text-white">{d.monthLabel}</p>
-                          <p className="text-cyan-300">Units Sold: <span className="font-mono font-bold">{d.unitsSold.toLocaleString('en-IN')}</span></p>
+                        <div className="bg-slate-900 border border-slate-700 p-2.5 rounded shadow text-xs">
+                          <p className="font-bold text-white">{d.monthLong} {d.year}</p>
+                          <p className="text-cyan-400 font-mono mt-0.5">
+                            Net Sales: <span className="font-bold">₹{d.netSales.toLocaleString('en-IN')}</span>
+                          </p>
+                          <p className="text-slate-400 text-[10px] font-mono">AOV: ₹{d.aov}</p>
                         </div>
                       );
                     }
                     return null;
                   }}
                 />
-                <Bar dataKey="unitsSold" fill="#06b6d4" radius={[4, 4, 0, 0]} />
-              </BarChart>
+                <Line type="monotone" dataKey="netSales" name="Net Sales (₹)" stroke="#06b6d4" strokeWidth={2.5} dot={{ r: 3 }} />
+              </LineChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        {/* Chart 4: Delivered vs RTO vs Cancelled Orders */}
+        {/* Chart 4: Monthly Units Sold */}
         <div className="p-4 bg-slate-950/60 rounded-xl border border-slate-800/80">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-              <CheckCircle2 size={13} className="text-green-400" />
-              4. Delivered vs RTO vs Cancelled Orders
+              <Package size={13} className="text-cyan-400" />
+              4. Monthly Units Sold
             </span>
-            <span className="text-[10px] text-slate-500">Outcome breakdown</span>
+            <span className="text-[10px] text-slate-500 font-mono">Cumulative Items Sold</span>
           </div>
-          <div className="h-[200px] w-full">
+          <div className="h-[210px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={monthlyRecords} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
+              <BarChart data={monthlyRecords} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis dataKey="monthLabel" stroke="#64748b" fontSize={10} tickLine={false} />
+                <XAxis dataKey="monthShort" stroke="#64748b" fontSize={11} tickLine={false} />
                 <YAxis stroke="#64748b" fontSize={10} tickLine={false} />
                 <Tooltip
                   content={({ active, payload }) => {
                     if (active && payload && payload.length) {
                       const d = payload[0].payload as MonthlyPerformanceRecord;
                       return (
-                        <div className="bg-slate-900 border border-slate-700 p-2 rounded shadow text-xs">
-                          <p className="font-bold text-white">{d.monthLabel}</p>
-                          <p className="text-green-400">Delivered: {d.deliveredOrders.toLocaleString('en-IN')}</p>
-                          <p className="text-amber-400">RTO: {d.rtoOrders.toLocaleString('en-IN')}</p>
-                          <p className="text-rose-400">Cancelled: {d.cancelledOrders.toLocaleString('en-IN')}</p>
+                        <div className="bg-slate-900 border border-slate-700 p-2.5 rounded shadow text-xs">
+                          <p className="font-bold text-white">{d.monthLong} {d.year}</p>
+                          <p className="text-cyan-300 font-mono mt-0.5">
+                            Units Sold: <span className="font-bold">{d.unitsSold.toLocaleString('en-IN')}</span>
+                          </p>
+                        </div>
+                      );
+                    }
+                    return null;
+                  }}
+                />
+                <Bar dataKey="unitsSold" name="Units" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Chart 5: Delivered vs RTO vs Cancelled Orders */}
+        <div className="p-4 bg-slate-950/60 rounded-xl border border-slate-800/80">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+              <CheckCircle2 size={13} className="text-green-400" />
+              5. Delivered vs RTO vs Cancelled Orders
+            </span>
+            <span className="text-[10px] text-slate-500 font-mono">Fulfillment Outcomes</span>
+          </div>
+          <div className="h-[210px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={monthlyRecords} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                <XAxis dataKey="monthShort" stroke="#64748b" fontSize={11} tickLine={false} />
+                <YAxis stroke="#64748b" fontSize={10} tickLine={false} />
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (active && payload && payload.length) {
+                      const d = payload[0].payload as MonthlyPerformanceRecord;
+                      return (
+                        <div className="bg-slate-900 border border-slate-700 p-2.5 rounded shadow text-xs">
+                          <p className="font-bold text-white">{d.monthLong} {d.year}</p>
+                          <p className="text-green-400 font-mono">Delivered: {d.deliveredOrders.toLocaleString('en-IN')}</p>
+                          <p className="text-amber-400 font-mono">RTO: {d.rtoOrders.toLocaleString('en-IN')}</p>
+                          <p className="text-rose-400 font-mono">Cancelled: {d.cancelledOrders.toLocaleString('en-IN')}</p>
                         </div>
                       );
                     }
@@ -242,30 +284,30 @@ export const MonthlyPerformanceTab: React.FC<MonthlyPerformanceTabProps> = ({
           </div>
         </div>
 
-        {/* Chart 5: Monthly Repeat Customer Trend */}
-        <div className="p-4 bg-slate-950/60 rounded-xl border border-slate-800/80 lg:col-span-2">
+        {/* Chart 6: Monthly Repeat vs New Customer Trend */}
+        <div className="p-4 bg-slate-950/60 rounded-xl border border-slate-800/80">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
               <Users size={13} className="text-indigo-400" />
-              5. Monthly Repeat vs New Customer Trend
+              6. Monthly Repeat vs New Customer Trend
             </span>
-            <span className="text-[10px] text-slate-500">Customer loyalty & repeat buyers</span>
+            <span className="text-[10px] text-slate-500 font-mono">Buyer Retention & Cohorts</span>
           </div>
-          <div className="h-[200px] w-full">
+          <div className="h-[210px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={monthlyRecords} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
+              <LineChart data={monthlyRecords} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis dataKey="monthLabel" stroke="#64748b" fontSize={10} tickLine={false} />
+                <XAxis dataKey="monthShort" stroke="#64748b" fontSize={11} tickLine={false} />
                 <YAxis stroke="#64748b" fontSize={10} tickLine={false} />
                 <Tooltip
                   content={({ active, payload }) => {
                     if (active && payload && payload.length) {
                       const d = payload[0].payload as MonthlyPerformanceRecord;
                       return (
-                        <div className="bg-slate-900 border border-slate-700 p-2 rounded shadow text-xs">
-                          <p className="font-bold text-white">{d.monthLabel}</p>
-                          <p className="text-indigo-300">Repeat Customers: {d.repeatCustomers.toLocaleString('en-IN')}</p>
-                          <p className="text-slate-400">New Customers: {d.newCustomers.toLocaleString('en-IN')}</p>
+                        <div className="bg-slate-900 border border-slate-700 p-2.5 rounded shadow text-xs">
+                          <p className="font-bold text-white">{d.monthLong} {d.year}</p>
+                          <p className="text-indigo-300 font-mono">Repeat Buyers: {d.repeatCustomers.toLocaleString('en-IN')}</p>
+                          <p className="text-slate-400 font-mono">New Buyers: {d.newCustomers.toLocaleString('en-IN')}</p>
                         </div>
                       );
                     }
@@ -273,20 +315,30 @@ export const MonthlyPerformanceTab: React.FC<MonthlyPerformanceTabProps> = ({
                   }}
                 />
                 <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                <Line type="monotone" dataKey="repeatCustomers" name="Repeat Customers" stroke="#818cf8" strokeWidth={2} dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="newCustomers" name="New Customers" stroke="#94a3b8" strokeWidth={2} dot={{ r: 3 }} strokeDasharray="4 4" />
+                <Line type="monotone" dataKey="repeatCustomers" name="Repeat Buyers" stroke="#818cf8" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="newCustomers" name="New Buyers" stroke="#94a3b8" strokeWidth={2} dot={{ r: 3 }} strokeDasharray="4 4" />
               </LineChart>
             </ResponsiveContainer>
           </div>
         </div>
       </div>
 
-      {/* 3. Comprehensive Monthly Performance Table */}
+      {/* 3. Comprehensive Monthly Performance Table (All 12 Calendar Months Jan-Dec) */}
       <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950/40">
+        <div className="p-3 bg-slate-900/80 border-b border-slate-800 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Calendar size={14} className="text-purple-400" />
+            <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+              12-Month Calendar Performance Breakdown ({monthlyRecords[0]?.year || 'Full Year'})
+            </h4>
+          </div>
+          <span className="text-[10px] text-slate-400 font-mono">12 Calendar Months (Jan – Dec)</span>
+        </div>
+
         <table className="w-full text-left text-xs border-collapse">
           <thead>
             <tr className="bg-slate-900/90 text-[11px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800">
-              <th className="py-2.5 px-3">Month</th>
+              <th className="py-2.5 px-3 min-w-[130px]">Month</th>
               <th className="py-2.5 px-3 text-right">Orders</th>
               <th className="py-2.5 px-3 text-right">Gross Value</th>
               <th className="py-2.5 px-3 text-right">Net Sales</th>
@@ -304,48 +356,55 @@ export const MonthlyPerformanceTab: React.FC<MonthlyPerformanceTabProps> = ({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/60 font-mono">
-            {monthlyRecords.map((m) => (
-              <tr
-                key={m.monthKey}
-                onClick={() => setSelectedMonth(m)}
-                className="hover:bg-slate-900/60 transition-colors cursor-pointer group"
-              >
-                <td className="py-2.5 px-3 font-semibold text-white font-sans flex items-center gap-1.5">
-                  <Calendar size={12} className="text-purple-400" />
-                  <span>{m.monthLabel}</span>
-                </td>
-                <td className="py-2.5 px-3 text-right font-bold text-white">{m.totalOrders.toLocaleString('en-IN')}</td>
-                <td className="py-2.5 px-3 text-right text-emerald-400">₹{m.grossOrderValue.toLocaleString('en-IN')}</td>
-                <td className="py-2.5 px-3 text-right font-bold text-cyan-400">₹{m.netSales.toLocaleString('en-IN')}</td>
-                <td className="py-2.5 px-3 text-right text-slate-300">{m.unitsSold.toLocaleString('en-IN')}</td>
-                <td className="py-2.5 px-3 text-right text-slate-300">₹{m.aov}</td>
-                <td className="py-2.5 px-3 text-right text-green-400">{m.deliveredOrders}</td>
-                <td className="py-2.5 px-3 text-right text-green-400">₹{m.deliveredRevenue.toLocaleString('en-IN')}</td>
-                <td className="py-2.5 px-3 text-right text-amber-400">{m.rtoOrders}</td>
-                <td className="py-2.5 px-3 text-right text-amber-400">₹{m.rtoValue.toLocaleString('en-IN')}</td>
-                <td className="py-2.5 px-3 text-right text-rose-400">{m.cancelledOrders}</td>
-                <td className="py-2.5 px-3 text-right text-rose-400">₹{m.cancellationValue.toLocaleString('en-IN')}</td>
-                <td className="py-2.5 px-3 text-right text-indigo-300">{m.repeatCustomers}</td>
-                <td className="py-2.5 px-3 text-right text-slate-400">{m.newCustomers}</td>
-                <td className="py-2.5 px-3 text-center">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (onViewOrders) {
-                        onViewOrders(`Orders for ${m.monthLabel}`, m.matchingOrders);
-                      } else {
-                        setSelectedMonth(m);
-                      }
-                    }}
-                    className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-purple-300 hover:text-white border border-slate-700 text-[10px] font-sans font-medium transition-colors"
-                    title="Inspect Month Orders"
-                  >
-                    View
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {monthlyRecords.map((m) => {
+              const hasOrders = m.totalOrders > 0;
+              return (
+                <tr
+                  key={m.monthKey}
+                  onClick={() => hasOrders && setSelectedMonth(m)}
+                  className={`transition-colors ${hasOrders ? 'hover:bg-slate-900/60 cursor-pointer group' : 'opacity-60 bg-slate-950/20'}`}
+                >
+                  <td className="py-2.5 px-3 font-semibold text-white font-sans flex items-center gap-1.5">
+                    <Calendar size={12} className={hasOrders ? 'text-purple-400' : 'text-slate-600'} />
+                    <span>{m.monthLong}</span>
+                  </td>
+                  <td className="py-2.5 px-3 text-right font-bold text-white">{m.totalOrders.toLocaleString('en-IN')}</td>
+                  <td className="py-2.5 px-3 text-right text-emerald-400">₹{m.grossOrderValue.toLocaleString('en-IN')}</td>
+                  <td className="py-2.5 px-3 text-right font-bold text-cyan-400">₹{m.netSales.toLocaleString('en-IN')}</td>
+                  <td className="py-2.5 px-3 text-right text-slate-300">{m.unitsSold.toLocaleString('en-IN')}</td>
+                  <td className="py-2.5 px-3 text-right text-slate-300">{hasOrders ? `₹${m.aov}` : '—'}</td>
+                  <td className="py-2.5 px-3 text-right text-green-400">{m.deliveredOrders}</td>
+                  <td className="py-2.5 px-3 text-right text-green-400">₹{m.deliveredRevenue.toLocaleString('en-IN')}</td>
+                  <td className="py-2.5 px-3 text-right text-amber-400">{m.rtoOrders}</td>
+                  <td className="py-2.5 px-3 text-right text-amber-400">₹{m.rtoValue.toLocaleString('en-IN')}</td>
+                  <td className="py-2.5 px-3 text-right text-rose-400">{m.cancelledOrders}</td>
+                  <td className="py-2.5 px-3 text-right text-rose-400">₹{m.cancellationValue.toLocaleString('en-IN')}</td>
+                  <td className="py-2.5 px-3 text-right text-indigo-300">{m.repeatCustomers}</td>
+                  <td className="py-2.5 px-3 text-right text-slate-400">{m.newCustomers}</td>
+                  <td className="py-2.5 px-3 text-center">
+                    {hasOrders ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onViewOrders) {
+                            onViewOrders(`Orders for ${m.monthLong} ${m.year}`, m.matchingOrders);
+                          } else {
+                            setSelectedMonth(m);
+                          }
+                        }}
+                        className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-purple-300 hover:text-white border border-slate-700 text-[10px] font-sans font-medium transition-colors"
+                        title="Inspect Month Orders"
+                      >
+                        View
+                      </button>
+                    ) : (
+                      <span className="text-[10px] text-slate-600 font-sans">0 orders</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -357,15 +416,15 @@ export const MonthlyPerformanceTab: React.FC<MonthlyPerformanceTabProps> = ({
             <div className="flex items-center gap-2">
               <Calendar size={16} className="text-purple-400" />
               <h4 className="text-sm font-bold text-white">
-                Detailed Month Inspection: <span className="text-purple-300">{selectedMonth.monthLabel}</span>
+                Detailed Month Inspection: <span className="text-purple-300">{selectedMonth.monthLong} {selectedMonth.year}</span>
               </h4>
             </div>
             <div className="flex items-center gap-2">
               {onViewOrders && (
                 <button
                   type="button"
-                  onClick={() => onViewOrders(`Orders for ${selectedMonth.monthLabel}`, selectedMonth.matchingOrders)}
-                  className="px-2.5 py-1 rounded bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold"
+                  onClick={() => onViewOrders(`Orders for ${selectedMonth.monthLong} ${selectedMonth.year}`, selectedMonth.matchingOrders)}
+                  className="px-2.5 py-1 rounded bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold cursor-pointer"
                 >
                   View All {selectedMonth.matchingOrders.length} Orders
                 </button>
@@ -373,7 +432,7 @@ export const MonthlyPerformanceTab: React.FC<MonthlyPerformanceTabProps> = ({
               <button
                 type="button"
                 onClick={() => setSelectedMonth(null)}
-                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs"
+                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs cursor-pointer"
               >
                 Close
               </button>

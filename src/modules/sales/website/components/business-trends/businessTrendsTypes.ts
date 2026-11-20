@@ -1,11 +1,14 @@
 import type { WebsiteConsolidatedOrder, WebsiteOrderItem } from '../../types';
 
 export type BusinessTrendsPeriod = 'monthly' | 'yearly';
-export type BusinessTrendsDatePreset = 'all' | 'this_year' | 'last_year' | 'this_month' | 'last_month' | 'custom';
+export type BusinessTrendsDatePreset = '2026' | '2025' | '2024' | '2023' | 'all_years' | 'dashboard_range' | 'custom';
 
 export interface MonthlyPerformanceRecord {
   monthKey: string; // YYYY-MM
-  monthLabel: string; // e.g. "Sep 2026"
+  monthNumber: number; // 1 .. 12
+  monthShort: string; // "Jan"
+  monthLong: string; // "January"
+  monthLabel: string; // "Jan 2026"
   year: number;
   month: number;
   totalOrders: number;
@@ -45,6 +48,37 @@ export interface YearlyPerformanceRecord {
   yoyRevenueGrowthPercent: number | null;
   yoyNetSalesGrowthPercent: number | null;
   matchingOrders: WebsiteConsolidatedOrder[];
+  monthlyBreakdown?: MonthlyPerformanceRecord[]; // full 12 months Jan-Dec
+}
+
+export interface ProductMonthlyTrendPoint {
+  monthNumber: number;
+  monthShort: string; // "Jan"
+  monthLong: string; // "January"
+  monthKey: string; // "2026-01"
+  year: number;
+  quantity: number;
+  revenue: number;
+  orderCount: number;
+  repeatBuyers: number;
+  averageSellingPrice: number | null; // null if no sales in month
+  minSellingPrice: number | null;
+  maxSellingPrice: number | null;
+  hasSales: boolean;
+}
+
+export interface ComboMonthlyTrendPoint {
+  monthNumber: number;
+  monthShort: string; // "Jan"
+  monthLong: string; // "January"
+  monthKey: string; // "2026-01"
+  year: number;
+  orders: number;
+  quantity: number;
+  revenue: number;
+  repeatBuyers: number;
+  averageSellingPrice: number | null;
+  hasSales: boolean;
 }
 
 export interface ProductIntelligenceItem {
@@ -64,6 +98,7 @@ export interface ProductIntelligenceItem {
   firstPurchaseDate: string;
   lastPurchaseDate: string;
   matchingOrders: WebsiteConsolidatedOrder[];
+  monthlyTrend12Months?: ProductMonthlyTrendPoint[];
 }
 
 export interface ComboIntelligenceItem {
@@ -88,6 +123,7 @@ export interface ComboIntelligenceItem {
     revenue: number;
   }>;
   matchingOrders: WebsiteConsolidatedOrder[];
+  monthlyTrend12Months?: ComboMonthlyTrendPoint[];
 }
 
 export interface ProductPricingInsightItem {
@@ -104,6 +140,7 @@ export interface ProductPricingInsightItem {
     from1000to1499: number;
     above1500: number;
   };
+  monthlyTrend12Months?: ProductMonthlyTrendPoint[];
 }
 
 export interface PeriodComparisonMetric {
@@ -118,8 +155,23 @@ export interface PeriodComparisonMetric {
 }
 
 export interface PeriodComparisonResult {
-  periodType: 'monthly' | 'yearly';
+  periodType: 'monthly' | 'yearly' | 'same_month_multi_year' | 'full_year_12_months';
   currentLabel: string;
   previousLabel: string;
   metrics: PeriodComparisonMetric[];
+  monthByMonthComparison?: Array<{
+    monthShort: string;
+    monthLong: string;
+    monthNumber: number;
+    currentOrders: number;
+    previousOrders: number;
+    currentRevenue: number;
+    previousRevenue: number;
+    currentNetSales: number;
+    previousNetSales: number;
+    currentUnits: number;
+    previousUnits: number;
+    revenueDiff: number;
+    revenuePercentChange: number | null;
+  }>;
 }

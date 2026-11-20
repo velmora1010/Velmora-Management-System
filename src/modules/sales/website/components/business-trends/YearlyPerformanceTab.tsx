@@ -46,9 +46,9 @@ export const YearlyPerformanceTab: React.FC<YearlyPerformanceTabProps> = ({
     );
   }
 
-  // Active year inspection breakdown
+  // Active year inspection breakdown (guaranteed full 12 calendar months Jan-Dec)
   const yearMonthlyBreakdown = inspectedYear != null
-    ? monthlyRecords.filter(m => m.year === inspectedYear)
+    ? yearlyRecords.find(y => y.year === inspectedYear)?.monthlyBreakdown || monthlyRecords.filter(m => m.year === inspectedYear)
     : null;
 
   return (
@@ -333,19 +333,35 @@ export const YearlyPerformanceTab: React.FC<YearlyPerformanceTabProps> = ({
                   <th className="py-2 px-2.5 text-right">Delivered</th>
                   <th className="py-2 px-2.5 text-right">RTO</th>
                   <th className="py-2 px-2.5 text-right">Cancelled</th>
+                  {onViewOrders && <th className="py-2 px-2.5 text-center">Action</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 font-mono text-slate-300">
                 {yearMonthlyBreakdown.map(m => (
                   <tr key={m.monthKey} className="hover:bg-slate-800/40">
-                    <td className="py-2 px-2.5 font-sans font-semibold text-white">{m.monthLabel}</td>
-                    <td className="py-2 px-2.5 text-right">{m.totalOrders.toLocaleString('en-IN')}</td>
+                    <td className="py-2 px-2.5 font-sans font-semibold text-white">{m.monthLong}</td>
+                    <td className="py-2 px-2.5 text-right font-bold text-white">{m.totalOrders.toLocaleString('en-IN')}</td>
                     <td className="py-2 px-2.5 text-right text-emerald-400">₹{m.grossOrderValue.toLocaleString('en-IN')}</td>
-                    <td className="py-2 px-2.5 text-right text-cyan-400">₹{m.netSales.toLocaleString('en-IN')}</td>
+                    <td className="py-2 px-2.5 text-right text-cyan-400 font-bold">₹{m.netSales.toLocaleString('en-IN')}</td>
                     <td className="py-2 px-2.5 text-right">{m.unitsSold.toLocaleString('en-IN')}</td>
                     <td className="py-2 px-2.5 text-right text-green-400">{m.deliveredOrders}</td>
                     <td className="py-2 px-2.5 text-right text-amber-400">{m.rtoOrders}</td>
                     <td className="py-2 px-2.5 text-right text-rose-400">{m.cancelledOrders}</td>
+                    {onViewOrders && (
+                      <td className="py-2 px-2.5 text-center">
+                        {m.totalOrders > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => onViewOrders(`Orders for ${m.monthLong} ${m.year}`, m.matchingOrders)}
+                            className="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-purple-300 hover:text-white border border-slate-700 text-[10px] font-sans font-medium transition-colors cursor-pointer"
+                          >
+                            View
+                          </button>
+                        ) : (
+                          <span className="text-[10px] text-slate-600 font-sans">0 orders</span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

@@ -7,11 +7,18 @@ import type {
   ProductIntelligenceItem,
   ComboIntelligenceItem,
   ProductPricingInsightItem,
+  ProductMonthlyTrendPoint,
+  ComboMonthlyTrendPoint,
   PeriodComparisonMetric,
   PeriodComparisonResult
 } from './businessTrendsTypes';
 
-const MONTH_NAMES = [
+export const FULL_MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+export const SHORT_MONTH_NAMES = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
 ];
@@ -23,7 +30,7 @@ export function formatMonthYearLabel(monthKey: string): string {
   const y = parseInt(parts[0], 10);
   const m = parseInt(parts[1], 10);
   if (isNaN(y) || isNaN(m) || m < 1 || m > 12) return monthKey;
-  return `${MONTH_NAMES[m - 1]} ${y}`;
+  return `${SHORT_MONTH_NAMES[m - 1]} ${y}`;
 }
 
 export function sanitizeCustomerPhone(phone?: string | null): string {
@@ -59,10 +66,31 @@ export function isOrderRTO(order: WebsiteConsolidatedOrder): boolean {
 }
 
 /**
- * 1. Calculate Monthly Performance Records
+ * 1. Calculate Full-Year Monthly Performance Records (Strict 12 Months Jan-Dec)
+ * Guaranteed to return all 12 calendar months:
+ * January -> February -> March -> April -> May -> June -> July -> August -> September -> October -> November -> December.
+ * Months with 0 orders have all metrics set to 0.
  */
-export function calculateMonthlyPerformance(orders: WebsiteConsolidatedOrder[]): MonthlyPerformanceRecord[] {
-  const monthMap = new Map<string, {
+export function calculateMonthlyPerformance(
+  orders: WebsiteConsolidatedOrder[],
+  targetYear?: number | null
+): MonthlyPerformanceRecord[] {
+  // Determine target year
+  let year = targetYear;
+  if (!year) {
+    // If no year specified, look at the most recent order date or default to current year 2026
+    const dates = orders.map(o => o.order_date).filter(Boolean) as string[];
+    if (dates.length > 0) {
+      const sorted = [...dates].sort();
+      const latest = sorted[sorted.length - 1];
+      year = parseInt(latest.slice(0, 4), 10) || 2026;
+    } else {
+      year = new Date().getFullYear();
+    }
+  }
+
+  // Pre-initialize all 12 calendar months with zero values
+  const monthMap = new Map<number, {
     orders: WebsiteConsolidatedOrder[];
     grossRev: number;
     cancelledOrders: number;
@@ -75,7 +103,22 @@ export function calculateMonthlyPerformance(orders: WebsiteConsolidatedOrder[]):
     customerOrdersMap: Map<string, number>;
   }>();
 
-  // First build global customer order count map to identify repeat customers
+  for (let m = 1; m <= 12; m++) {
+    monthMap.set(m, {
+      orders: [],
+      grossRev: 0,
+      cancelledOrders: 0,
+      cancelVal: 0,
+      deliveredOrders: 0,
+      deliveredRev: 0,
+      rtoOrders: 0,
+      rtoVal: 0,
+      units: 0,
+      customerOrdersMap: new Map()
+    });
+  }
+
+  // Build global customer valid order count to distinguish repeat vs new buyers
   const globalCustomerValidOrders = new Map<string, number>();
   orders.forEach(o => {
     if (o.order_status === 'DELETED' || isOrderCancelled(o)) return;
@@ -85,28 +128,19 @@ export function calculateMonthlyPerformance(orders: WebsiteConsolidatedOrder[]):
     globalCustomerValidOrders.set(key, (globalCustomerValidOrders.get(key) || 0) + 1);
   });
 
+  // Populate data into months
   orders.forEach(o => {
     if (o.order_status === 'DELETED') return;
     const dateStr = o.order_date || '';
     if (!dateStr || dateStr.length < 7) return;
-    const monthKey = dateStr.slice(0, 7); // YYYY-MM
 
-    if (!monthMap.has(monthKey)) {
-      monthMap.set(monthKey, {
-        orders: [],
-        grossRev: 0,
-        cancelledOrders: 0,
-        cancelVal: 0,
-        deliveredOrders: 0,
-        deliveredRev: 0,
-        rtoOrders: 0,
-        rtoVal: 0,
-        units: 0,
-        customerOrdersMap: new Map()
-      });
-    }
+    const orderYear = parseInt(dateStr.slice(0, 4), 10);
+    if (orderYear !== year) return; // Only process orders for this specific year
 
-    const data = monthMap.get(monthKey)!;
+    const orderMonth = parseInt(dateStr.slice(5, 7), 10);
+    if (orderMonth < 1 || orderMonth > 12) return;
+
+    const data = monthMap.get(orderMonth)!;
     data.orders.push(o);
     const price = Number(o.price) || 0;
     const units = Number(o.total_quantity) || 1;
@@ -135,12 +169,15 @@ export function calculateMonthlyPerformance(orders: WebsiteConsolidatedOrder[]):
     }
   });
 
+  // Build final array of exactly 12 records in calendar order (Jan..Dec)
   const records: MonthlyPerformanceRecord[] = [];
 
-  monthMap.forEach((data, monthKey) => {
-    const parts = monthKey.split('-');
-    const year = parseInt(parts[0], 10);
-    const month = parseInt(parts[1], 10);
+  for (let m = 1; m <= 12; m++) {
+    const data = monthMap.get(m)!;
+    const monthKey = `${year}-${String(m).padStart(2, '0')}`;
+    const monthShort = SHORT_MONTH_NAMES[m - 1];
+    const monthLong = FULL_MONTH_NAMES[m - 1];
+    const monthLabel = `${monthShort} ${year}`;
     const totalOrders = data.orders.length;
     const netSales = Math.max(0, data.grossRev - data.cancelVal);
     const validOrdersCount = totalOrders - data.cancelledOrders;
@@ -160,9 +197,12 @@ export function calculateMonthlyPerformance(orders: WebsiteConsolidatedOrder[]):
 
     records.push({
       monthKey,
-      monthLabel: formatMonthYearLabel(monthKey),
+      monthNumber: m,
+      monthShort,
+      monthLong,
+      monthLabel,
       year,
-      month,
+      month: m,
       totalOrders,
       grossOrderValue: Math.round(data.grossRev),
       netSales: Math.round(netSales),
@@ -178,116 +218,109 @@ export function calculateMonthlyPerformance(orders: WebsiteConsolidatedOrder[]):
       newCustomers,
       matchingOrders: data.orders
     });
-  });
+  }
 
-  // Sort chronologically ascending
-  return records.sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+  return records;
 }
 
 /**
- * 2. Calculate Yearly Performance Records with YoY Growth
+ * 2. Calculate Yearly Performance Records with YoY Growth & All Calendar Years
  */
-export function calculateYearlyPerformance(monthlyRecords: MonthlyPerformanceRecord[]): YearlyPerformanceRecord[] {
-  const yearMap = new Map<number, {
-    totalOrders: number;
-    grossOrderValue: number;
-    netSales: number;
-    unitsSold: number;
-    deliveredOrders: number;
-    deliveredRevenue: number;
-    rtoOrders: number;
-    rtoValue: number;
-    cancelledOrders: number;
-    cancellationValue: number;
-    repeatCustomers: number;
-    newCustomers: number;
-    matchingOrders: WebsiteConsolidatedOrder[];
-  }>();
+export function calculateYearlyPerformance(
+  input: WebsiteConsolidatedOrder[] | MonthlyPerformanceRecord[],
+  yearsCatalog: number[] = [2023, 2024, 2025, 2026]
+): YearlyPerformanceRecord[] {
+  let allOrders: WebsiteConsolidatedOrder[] = [];
+  if (Array.isArray(input) && input.length > 0 && 'monthKey' in input[0]) {
+    (input as MonthlyPerformanceRecord[]).forEach(m => {
+      if (m.matchingOrders && m.matchingOrders.length > 0) {
+        allOrders.push(...m.matchingOrders);
+      }
+    });
+  } else {
+    allOrders = (input as WebsiteConsolidatedOrder[]) || [];
+  }
 
-  monthlyRecords.forEach(m => {
-    if (!yearMap.has(m.year)) {
-      yearMap.set(m.year, {
-        totalOrders: 0,
-        grossOrderValue: 0,
-        netSales: 0,
-        unitsSold: 0,
-        deliveredOrders: 0,
-        deliveredRevenue: 0,
-        rtoOrders: 0,
-        rtoValue: 0,
-        cancelledOrders: 0,
-        cancellationValue: 0,
-        repeatCustomers: 0,
-        newCustomers: 0,
-        matchingOrders: []
-      });
+  // Discover any additional years present in data
+  const yearsSet = new Set<number>(yearsCatalog);
+  allOrders.forEach(o => {
+    if (o.order_date && o.order_date.length >= 4) {
+      const y = parseInt(o.order_date.slice(0, 4), 10);
+      if (!isNaN(y) && y >= 2020 && y <= 2030) {
+        yearsSet.add(y);
+      }
     }
-
-    const yData = yearMap.get(m.year)!;
-    yData.totalOrders += m.totalOrders;
-    yData.grossOrderValue += m.grossOrderValue;
-    yData.netSales += m.netSales;
-    yData.unitsSold += m.unitsSold;
-    yData.deliveredOrders += m.deliveredOrders;
-    yData.deliveredRevenue += m.deliveredRevenue;
-    yData.rtoOrders += m.rtoOrders;
-    yData.rtoValue += m.rtoValue;
-    yData.cancelledOrders += m.cancelledOrders;
-    yData.cancellationValue += m.cancellationValue;
-    yData.repeatCustomers += m.repeatCustomers;
-    yData.newCustomers += m.newCustomers;
-    yData.matchingOrders.push(...m.matchingOrders);
   });
 
-  const sortedYears = Array.from(yearMap.keys()).sort((a, b) => a - b);
+  const sortedYears = Array.from(yearsSet).sort((a, b) => a - b);
   const yearlyRecords: YearlyPerformanceRecord[] = [];
 
   for (let i = 0; i < sortedYears.length; i++) {
     const year = sortedYears[i];
-    const data = yearMap.get(year)!;
-    const validOrdersCount = data.totalOrders - data.cancelledOrders;
-    const aov = validOrdersCount > 0 ? Math.round(data.netSales / validOrdersCount) : 0;
+    const yearOrders = allOrders.filter(o => o.order_date && o.order_date.startsWith(String(year)));
+    const monthlyBreakdown = calculateMonthlyPerformance(yearOrders, year);
+
+    const totalOrders = monthlyBreakdown.reduce((s, m) => s + m.totalOrders, 0);
+    const grossOrderValue = monthlyBreakdown.reduce((s, m) => s + m.grossOrderValue, 0);
+    const netSales = monthlyBreakdown.reduce((s, m) => s + m.netSales, 0);
+    const unitsSold = monthlyBreakdown.reduce((s, m) => s + m.unitsSold, 0);
+    const deliveredOrders = monthlyBreakdown.reduce((s, m) => s + m.deliveredOrders, 0);
+    const deliveredRevenue = monthlyBreakdown.reduce((s, m) => s + m.deliveredRevenue, 0);
+    const rtoOrders = monthlyBreakdown.reduce((s, m) => s + m.rtoOrders, 0);
+    const rtoValue = monthlyBreakdown.reduce((s, m) => s + m.rtoValue, 0);
+    const cancelledOrders = monthlyBreakdown.reduce((s, m) => s + m.cancelledOrders, 0);
+    const cancellationValue = monthlyBreakdown.reduce((s, m) => s + m.cancellationValue, 0);
+    const repeatCustomers = monthlyBreakdown.reduce((s, m) => s + m.repeatCustomers, 0);
+    const newCustomers = monthlyBreakdown.reduce((s, m) => s + m.newCustomers, 0);
+
+    const validOrdersCount = totalOrders - cancelledOrders;
+    const aov = validOrdersCount > 0 ? Math.round(netSales / validOrdersCount) : 0;
 
     let yoyOrdersGrowthPercent: number | null = null;
     let yoyRevenueGrowthPercent: number | null = null;
     let yoyNetSalesGrowthPercent: number | null = null;
 
     if (i > 0) {
-      const prevYear = sortedYears[i - 1];
-      const prevData = yearMap.get(prevYear)!;
+      const prevYearRec = yearlyRecords[i - 1];
+      if (prevYearRec && prevYearRec.totalOrders > 0) {
+        yoyOrdersGrowthPercent = Number((((totalOrders - prevYearRec.totalOrders) / prevYearRec.totalOrders) * 100).toFixed(1));
+      } else if (prevYearRec && prevYearRec.totalOrders === 0 && totalOrders > 0) {
+        yoyOrdersGrowthPercent = 100;
+      }
 
-      if (prevData.totalOrders > 0) {
-        yoyOrdersGrowthPercent = Number((((data.totalOrders - prevData.totalOrders) / prevData.totalOrders) * 100).toFixed(1));
+      if (prevYearRec && prevYearRec.grossOrderValue > 0) {
+        yoyRevenueGrowthPercent = Number((((grossOrderValue - prevYearRec.grossOrderValue) / prevYearRec.grossOrderValue) * 100).toFixed(1));
+      } else if (prevYearRec && prevYearRec.grossOrderValue === 0 && grossOrderValue > 0) {
+        yoyRevenueGrowthPercent = 100;
       }
-      if (prevData.grossOrderValue > 0) {
-        yoyRevenueGrowthPercent = Number((((data.grossOrderValue - prevData.grossOrderValue) / prevData.grossOrderValue) * 100).toFixed(1));
-      }
-      if (prevData.netSales > 0) {
-        yoyNetSalesGrowthPercent = Number((((data.netSales - prevData.netSales) / prevData.netSales) * 100).toFixed(1));
+
+      if (prevYearRec && prevYearRec.netSales > 0) {
+        yoyNetSalesGrowthPercent = Number((((netSales - prevYearRec.netSales) / prevYearRec.netSales) * 100).toFixed(1));
       }
     }
 
     yearlyRecords.push({
       year,
       yearLabel: String(year),
-      totalOrders: data.totalOrders,
-      grossOrderValue: data.grossOrderValue,
-      totalRevenue: data.grossOrderValue,
-      netSales: data.netSales,
-      unitsSold: data.unitsSold,
+      totalOrders,
+      grossOrderValue,
+      totalRevenue: grossOrderValue,
+      netSales,
+      unitsSold,
       aov,
-      deliveredOrders: data.deliveredOrders,
-      deliveredRevenue: data.deliveredRevenue,
-      rtoOrders: data.rtoOrders,
-      rtoValue: data.rtoValue,
-      cancelledOrders: data.cancelledOrders,
-      cancellationValue: data.cancellationValue,
-      repeatCustomers: data.repeatCustomers,
-      newCustomers: data.newCustomers,
+      deliveredOrders,
+      deliveredRevenue,
+      rtoOrders,
+      rtoValue,
+      cancelledOrders,
+      cancellationValue,
+      repeatCustomers,
+      newCustomers,
       yoyOrdersGrowthPercent,
       yoyRevenueGrowthPercent,
       yoyNetSalesGrowthPercent,
-      matchingOrders: data.matchingOrders
+      matchingOrders: yearOrders,
+      monthlyBreakdown
     });
   }
 
@@ -295,13 +328,268 @@ export function calculateYearlyPerformance(monthlyRecords: MonthlyPerformanceRec
 }
 
 /**
- * 3. Calculate Comprehensive Product Intelligence (Part 4)
+ * 3. Calculate 12-Month Monthly Trend for a Specific Product
+ * Generates all 12 months for that product with zero values for months with no sales.
  */
-export function calculateProductIntelligence(orders: WebsiteConsolidatedOrder[]): {
+export function calculateProduct12MonthTrend(
+  productKeyOrName: string,
+  orders: WebsiteConsolidatedOrder[],
+  year: number = 2026
+): ProductMonthlyTrendPoint[] {
+  const normTarget = normalizeProductGroupingKey(productKeyOrName);
+
+  // Initialize 12 months
+  const monthMap = new Map<number, {
+    qty: number;
+    rev: number;
+    orderSet: Set<string>;
+    repeatBuyersSet: Set<string>;
+    minPrice: number;
+    maxPrice: number;
+    hasSales: boolean;
+  }>();
+
+  for (let m = 1; m <= 12; m++) {
+    monthMap.set(m, {
+      qty: 0,
+      rev: 0,
+      orderSet: new Set(),
+      repeatBuyersSet: new Set(),
+      minPrice: Infinity,
+      maxPrice: -Infinity,
+      hasSales: false
+    });
+  }
+
+  // Global repeat customer detection
+  const customerValidOrders = new Map<string, number>();
+  orders.forEach(o => {
+    if (o.order_status === 'DELETED' || isOrderCancelled(o)) return;
+    const phone = sanitizeCustomerPhone(o.phone);
+    const key = phone || (o.customer_name || 'unknown').toLowerCase().trim();
+    if (!key) return;
+    customerValidOrders.set(key, (customerValidOrders.get(key) || 0) + 1);
+  });
+
+  orders.forEach(o => {
+    if (o.order_status === 'DELETED' || isOrderCancelled(o)) return;
+    const dateStr = o.order_date || '';
+    if (!dateStr || dateStr.length < 7) return;
+
+    const orderYear = parseInt(dateStr.slice(0, 4), 10);
+    if (orderYear !== year) return;
+
+    const m = parseInt(dateStr.slice(5, 7), 10);
+    if (m < 1 || m > 12) return;
+
+    const orderKey = o.order_id || o.id || 'unknown';
+    const phone = sanitizeCustomerPhone(o.phone);
+    const custKey = phone || (o.customer_name || 'unknown').toLowerCase().trim();
+    const isRepeatBuyer = (customerValidOrders.get(custKey) || 0) > 1;
+
+    const monthData = monthMap.get(m)!;
+
+    if (Array.isArray(o.items) && o.items.length > 0) {
+      o.items.forEach((it: WebsiteOrderItem) => {
+        const rawName = (it.product_name || '').trim();
+        const k = normalizeProductGroupingKey(rawName, it.product_code);
+        if (k === normTarget || rawName.toLowerCase() === productKeyOrName.toLowerCase()) {
+          const qty = Number(it.quantity) || 1;
+          const rev = it.line_total != null
+            ? Number(it.line_total)
+            : ((Number(o.price) || 0) / (Number(o.total_quantity) || 1)) * qty;
+          const unitPrice = qty > 0 ? rev / qty : rev;
+
+          monthData.qty += qty;
+          monthData.rev += rev;
+          monthData.hasSales = true;
+          monthData.orderSet.add(orderKey);
+          monthData.minPrice = Math.min(monthData.minPrice, unitPrice);
+          monthData.maxPrice = Math.max(monthData.maxPrice, unitPrice);
+
+          if (isRepeatBuyer && custKey) {
+            monthData.repeatBuyersSet.add(custKey);
+          }
+        }
+      });
+    } else {
+      const rawName = (o.product_name || '').trim();
+      const k = normalizeProductGroupingKey(rawName);
+      if (k === normTarget || rawName.toLowerCase() === productKeyOrName.toLowerCase()) {
+        const qty = Number(o.total_quantity) || 1;
+        const rev = Number(o.price) || 0;
+        const unitPrice = qty > 0 ? rev / qty : rev;
+
+        monthData.qty += qty;
+        monthData.rev += rev;
+        monthData.hasSales = true;
+        monthData.orderSet.add(orderKey);
+        monthData.minPrice = Math.min(monthData.minPrice, unitPrice);
+        monthData.maxPrice = Math.max(monthData.maxPrice, unitPrice);
+
+        if (isRepeatBuyer && custKey) {
+          monthData.repeatBuyersSet.add(custKey);
+        }
+      }
+    }
+  });
+
+  const points: ProductMonthlyTrendPoint[] = [];
+
+  for (let m = 1; m <= 12; m++) {
+    const d = monthMap.get(m)!;
+    const asp = d.hasSales && d.qty > 0 ? Math.round(d.rev / d.qty) : null;
+    const minP = d.hasSales && d.minPrice !== Infinity ? Math.round(d.minPrice) : null;
+    const maxP = d.hasSales && d.maxPrice !== -Infinity ? Math.round(d.maxPrice) : null;
+
+    points.push({
+      monthNumber: m,
+      monthShort: SHORT_MONTH_NAMES[m - 1],
+      monthLong: FULL_MONTH_NAMES[m - 1],
+      monthKey: `${year}-${String(m).padStart(2, '0')}`,
+      year,
+      quantity: d.qty,
+      revenue: Math.round(d.rev),
+      orderCount: d.orderSet.size,
+      repeatBuyers: d.repeatBuyersSet.size,
+      averageSellingPrice: asp,
+      minSellingPrice: minP,
+      maxSellingPrice: maxP,
+      hasSales: d.hasSales
+    });
+  }
+
+  return points;
+}
+
+/**
+ * 4. Calculate 12-Month Monthly Trend for a Specific Combo
+ */
+export function calculateCombo12MonthTrend(
+  comboKeyOrName: string,
+  orders: WebsiteConsolidatedOrder[],
+  year: number = 2026
+): ComboMonthlyTrendPoint[] {
+  const normTarget = normalizeProductGroupingKey(comboKeyOrName);
+
+  const monthMap = new Map<number, {
+    ordersSet: Set<string>;
+    qty: number;
+    rev: number;
+    repeatBuyersSet: Set<string>;
+    hasSales: boolean;
+  }>();
+
+  for (let m = 1; m <= 12; m++) {
+    monthMap.set(m, {
+      ordersSet: new Set(),
+      qty: 0,
+      rev: 0,
+      repeatBuyersSet: new Set(),
+      hasSales: false
+    });
+  }
+
+  const customerValidOrders = new Map<string, number>();
+  orders.forEach(o => {
+    if (o.order_status === 'DELETED' || isOrderCancelled(o)) return;
+    const phone = sanitizeCustomerPhone(o.phone);
+    const key = phone || (o.customer_name || 'unknown').toLowerCase().trim();
+    if (!key) return;
+    customerValidOrders.set(key, (customerValidOrders.get(key) || 0) + 1);
+  });
+
+  orders.forEach(o => {
+    if (o.order_status === 'DELETED' || isOrderCancelled(o)) return;
+    const dateStr = o.order_date || '';
+    if (!dateStr || dateStr.length < 7) return;
+
+    const orderYear = parseInt(dateStr.slice(0, 4), 10);
+    if (orderYear !== year) return;
+
+    const m = parseInt(dateStr.slice(5, 7), 10);
+    if (m < 1 || m > 12) return;
+
+    const orderKey = o.order_id || o.id || 'unknown';
+    const phone = sanitizeCustomerPhone(o.phone);
+    const custKey = phone || (o.customer_name || 'unknown').toLowerCase().trim();
+    const isRepeatBuyer = (customerValidOrders.get(custKey) || 0) > 1;
+
+    const monthData = monthMap.get(m)!;
+
+    if (Array.isArray(o.items) && o.items.length > 0) {
+      o.items.forEach((it: WebsiteOrderItem) => {
+        const rawName = (it.product_name || '').trim();
+        const k = normalizeProductGroupingKey(rawName, it.product_code);
+        if (k === normTarget || rawName.toLowerCase() === comboKeyOrName.toLowerCase()) {
+          const qty = Number(it.quantity) || 1;
+          const rev = it.line_total != null
+            ? Number(it.line_total)
+            : ((Number(o.price) || 0) / (Number(o.total_quantity) || 1)) * qty;
+
+          monthData.qty += qty;
+          monthData.rev += rev;
+          monthData.hasSales = true;
+          monthData.ordersSet.add(orderKey);
+
+          if (isRepeatBuyer && custKey) {
+            monthData.repeatBuyersSet.add(custKey);
+          }
+        }
+      });
+    } else {
+      const rawName = (o.product_name || '').trim();
+      const k = normalizeProductGroupingKey(rawName);
+      if (k === normTarget || rawName.toLowerCase() === comboKeyOrName.toLowerCase()) {
+        const qty = Number(o.total_quantity) || 1;
+        const rev = Number(o.price) || 0;
+
+        monthData.qty += qty;
+        monthData.rev += rev;
+        monthData.hasSales = true;
+        monthData.ordersSet.add(orderKey);
+
+        if (isRepeatBuyer && custKey) {
+          monthData.repeatBuyersSet.add(custKey);
+        }
+      }
+    }
+  });
+
+  const points: ComboMonthlyTrendPoint[] = [];
+
+  for (let m = 1; m <= 12; m++) {
+    const d = monthMap.get(m)!;
+    const asp = d.hasSales && d.qty > 0 ? Math.round(d.rev / d.qty) : null;
+
+    points.push({
+      monthNumber: m,
+      monthShort: SHORT_MONTH_NAMES[m - 1],
+      monthLong: FULL_MONTH_NAMES[m - 1],
+      monthKey: `${year}-${String(m).padStart(2, '0')}`,
+      year,
+      orders: d.ordersSet.size,
+      quantity: d.qty,
+      revenue: Math.round(d.rev),
+      repeatBuyers: d.repeatBuyersSet.size,
+      averageSellingPrice: asp,
+      hasSales: d.hasSales
+    });
+  }
+
+  return points;
+}
+
+/**
+ * 5. Calculate Comprehensive Product Intelligence (Part 4)
+ */
+export function calculateProductIntelligence(
+  orders: WebsiteConsolidatedOrder[],
+  selectedYear?: number
+): {
   products: ProductIntelligenceItem[];
   totalAllRevenue: number;
 } {
-  // Map of canonical key -> aggregation
   const pMap = new Map<string, {
     productName: string;
     isCombo: boolean;
@@ -318,7 +606,6 @@ export function calculateProductIntelligence(orders: WebsiteConsolidatedOrder[])
     matchingOrders: WebsiteConsolidatedOrder[];
   }>();
 
-  // Find repeat customer keys across dataset
   const customerValidOrders = new Map<string, number>();
   orders.forEach(o => {
     if (o.order_status === 'DELETED' || isOrderCancelled(o)) return;
@@ -396,7 +683,6 @@ export function calculateProductIntelligence(orders: WebsiteConsolidatedOrder[])
         }
       });
     } else {
-      // Fallback to order-level product name
       const rawName = (o.product_name || 'Unspecified').trim();
       if (!rawName || rawName === 'N/A') return;
 
@@ -455,6 +741,7 @@ export function calculateProductIntelligence(orders: WebsiteConsolidatedOrder[])
   const products: ProductIntelligenceItem[] = Array.from(pMap.entries()).map(([key, data]) => {
     const asp = data.totalQty > 0 ? data.totalRev / data.totalQty : 0;
     const contributionPercent = totalAllRevenue > 0 ? (data.totalRev / totalAllRevenue) * 100 : 0;
+    const trend = calculateProduct12MonthTrend(key, orders, selectedYear || 2026);
 
     return {
       productName: data.productName,
@@ -472,7 +759,8 @@ export function calculateProductIntelligence(orders: WebsiteConsolidatedOrder[])
       revenueContributionPercent: Number(contributionPercent.toFixed(2)),
       firstPurchaseDate: data.firstDate || '—',
       lastPurchaseDate: data.lastDate || '—',
-      matchingOrders: data.matchingOrders
+      matchingOrders: data.matchingOrders,
+      monthlyTrend12Months: trend
     };
   }).sort((a, b) => b.totalRevenue - a.totalRevenue);
 
@@ -480,11 +768,12 @@ export function calculateProductIntelligence(orders: WebsiteConsolidatedOrder[])
 }
 
 /**
- * 4. Calculate Best Performing Combos (Part 5)
+ * 6. Calculate Best Performing Combos (Part 5)
  */
 export function calculateComboIntelligence(
   products: ProductIntelligenceItem[],
-  orders: WebsiteConsolidatedOrder[]
+  orders: WebsiteConsolidatedOrder[],
+  selectedYear?: number
 ): {
   combos: ComboIntelligenceItem[];
   totalCombosRevenue: number;
@@ -492,7 +781,6 @@ export function calculateComboIntelligence(
   const comboProducts = products.filter(p => p.isCombo);
   const totalCombosRevenue = comboProducts.reduce((sum, c) => sum + c.totalRevenue, 0);
 
-  // Group monthly and yearly breakdowns for each combo
   const combos: ComboIntelligenceItem[] = comboProducts.map(cp => {
     const monthlyMap = new Map<string, { units: number; rev: number }>();
     const yearlyMap = new Map<number, { units: number; rev: number }>();
@@ -504,7 +792,6 @@ export function calculateComboIntelligence(
       const monthKey = dateStr.slice(0, 7);
       const year = parseInt(dateStr.slice(0, 4), 10);
 
-      // Find items in order that belong to this combo
       let itemQty = 0;
       let itemRev = 0;
 
@@ -557,6 +844,7 @@ export function calculateComboIntelligence(
       .sort((a, b) => a.year - b.year);
 
     const contrib = totalCombosRevenue > 0 ? (cp.totalRevenue / totalCombosRevenue) * 100 : 0;
+    const trend = calculateCombo12MonthTrend(cp.canonicalKey, orders, selectedYear || 2026);
 
     return {
       comboName: cp.productName,
@@ -570,7 +858,8 @@ export function calculateComboIntelligence(
       revenueContributionPercent: Number(contrib.toFixed(2)),
       monthlyPerformance,
       yearlyPerformance,
-      matchingOrders: cp.matchingOrders
+      matchingOrders: cp.matchingOrders,
+      monthlyTrend12Months: trend
     };
   }).sort((a, b) => b.totalRevenue - a.totalRevenue);
 
@@ -578,11 +867,12 @@ export function calculateComboIntelligence(
 }
 
 /**
- * 5. Calculate Product Pricing Insights (Part 6)
+ * 7. Calculate Product Pricing Insights (Part 6)
  */
 export function calculateProductPricingInsights(
   products: ProductIntelligenceItem[],
-  orders: WebsiteConsolidatedOrder[]
+  orders: WebsiteConsolidatedOrder[],
+  selectedYear?: number
 ): {
   items: ProductPricingInsightItem[];
   keyInsights: {
@@ -594,7 +884,6 @@ export function calculateProductPricingInsights(
     highestRevenueContributionProduct: ProductIntelligenceItem | null;
   };
 } {
-  // Compute price distribution brackets for each product
   const distMap = new Map<string, { under500: number; from500to999: number; from1000to1499: number; above1500: number }>();
 
   orders.forEach(o => {
@@ -629,6 +918,8 @@ export function calculateProductPricingInsights(
       above1500: p.averageSellingPrice >= 1500 ? p.totalQuantity : 0
     };
 
+    const trend = calculateProduct12MonthTrend(p.canonicalKey, orders, selectedYear || 2026);
+
     return {
       productName: p.productName,
       averageSellingPrice: p.averageSellingPrice,
@@ -637,11 +928,11 @@ export function calculateProductPricingInsights(
       totalRevenue: p.totalRevenue,
       totalQuantity: p.totalQuantity,
       orderCount: p.orderCount,
-      priceDistribution: dist
+      priceDistribution: dist,
+      monthlyTrend12Months: trend
     };
   });
 
-  // Calculate Key Insights (safely handling empty datasets)
   let highestRevenueProduct: ProductIntelligenceItem | null = null;
   let mostUnitsSoldProduct: ProductIntelligenceItem | null = null;
   let highestAspProduct: ProductIntelligenceItem | null = null;
@@ -672,12 +963,19 @@ export function calculateProductPricingInsights(
 }
 
 /**
- * 6. Calculate Period Comparison (Part 7)
+ * 8. Calculate Period Comparison (Part 7)
+ * Supports:
+ * - month vs month
+ * - year vs year
+ * - same month across multiple years (e.g. Sep 2025 vs Sep 2026)
+ * - full year 12 months comparison (Jan to Dec of Year A vs Year B)
  */
 export function comparePeriods(
   periodA: MonthlyPerformanceRecord | YearlyPerformanceRecord,
   periodB: MonthlyPerformanceRecord | YearlyPerformanceRecord,
-  periodType: 'monthly' | 'yearly'
+  periodType: 'monthly' | 'yearly' | 'same_month_multi_year' | 'full_year_12_months',
+  yearA12Months?: MonthlyPerformanceRecord[],
+  yearB12Months?: MonthlyPerformanceRecord[]
 ): PeriodComparisonResult {
   const currentLabel = 'monthLabel' in periodA ? periodA.monthLabel : periodA.yearLabel;
   const previousLabel = 'monthLabel' in periodB ? periodB.monthLabel : periodB.yearLabel;
@@ -728,10 +1026,44 @@ export function comparePeriods(
     buildMetric('newCustomers', 'New Customers', periodA.newCustomers, periodB.newCustomers)
   ];
 
+  // If comparing two full years, provide 12-month row breakdown
+  let monthByMonthComparison: PeriodComparisonResult['monthByMonthComparison'] | undefined;
+  if (yearA12Months && yearB12Months && yearA12Months.length === 12 && yearB12Months.length === 12) {
+    monthByMonthComparison = yearA12Months.map((mA, idx) => {
+      const mB = yearB12Months[idx];
+      const revDiff = mA.grossOrderValue - mB.grossOrderValue;
+      let revPct: number | null = null;
+      if (mB.grossOrderValue > 0) {
+        revPct = Number(((revDiff / mB.grossOrderValue) * 100).toFixed(1));
+      } else if (mB.grossOrderValue === 0 && mA.grossOrderValue > 0) {
+        revPct = 100;
+      } else if (mB.grossOrderValue === 0 && mA.grossOrderValue === 0) {
+        revPct = 0;
+      }
+
+      return {
+        monthShort: mA.monthShort,
+        monthLong: mA.monthLong,
+        monthNumber: mA.monthNumber,
+        currentOrders: mA.totalOrders,
+        previousOrders: mB.totalOrders,
+        currentRevenue: mA.grossOrderValue,
+        previousRevenue: mB.grossOrderValue,
+        currentNetSales: mA.netSales,
+        previousNetSales: mB.netSales,
+        currentUnits: mA.unitsSold,
+        previousUnits: mB.unitsSold,
+        revenueDiff: revDiff,
+        revenuePercentChange: revPct
+      };
+    });
+  }
+
   return {
     periodType,
     currentLabel,
     previousLabel,
-    metrics
+    metrics,
+    monthByMonthComparison
   };
 }
