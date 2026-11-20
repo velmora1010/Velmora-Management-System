@@ -25,7 +25,7 @@ import { AnalyticsProductCell } from './AnalyticsProductCell';
 import { OrderDetailsModal } from './OrderDetailsModal';
 import { resolveCanonicalLocation } from '../websiteSalesUtils';
 import { websiteSalesService } from '../websiteSalesService';
-import { getCanonicalStatus } from '../../../Logistics/utils/logisticsAnalyticsUtils';
+import { getCanonicalStatus, isDeletedOrder } from '../../../Logistics/utils/logisticsAnalyticsUtils';
 import { formatExcelDate } from '../services/websiteSalesExcelExportService';
 import toast from 'react-hot-toast';
 
@@ -102,6 +102,7 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
   const [filterShipmentStatus, setFilterShipmentStatus] = useState<string>('ALL');
 
   const isCancelledView = useMemo(() => title.toLowerCase().includes('cancel'), [title]);
+  const isDeletedView = useMemo(() => title.toLowerCase().includes('delete'), [title]);
 
   // Reset page when search or filters change
   useEffect(() => {
@@ -127,16 +128,21 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
     if (viewType !== 'orders') return [];
     let list = orders.filter(o => !locallyDeletedIds.has(o.order_id));
 
-    // For Cancelled Orders view, strictly filter only genuine Cancelled pre-dispatch records
+    // View-specific status filtering
     if (isCancelledView) {
       list = list.filter(o => getCanonicalStatus(o) === 'Cancelled');
+    } else if (isDeletedView) {
+      list = list.filter(o => isDeletedOrder(o) || getCanonicalStatus(o) === 'Deleted');
+    } else {
+      // Exclude deleted orders from all active operational and performance views
+      list = list.filter(o => !isDeletedOrder(o) && getCanonicalStatus(o) !== 'Deleted');
     }
 
     if (filterPaymentMode !== 'ALL') {
       list = list.filter(o => o.payment_mode === filterPaymentMode);
     }
 
-    if (!isCancelledView) {
+    if (!isCancelledView && !isDeletedView) {
       if (filterShipmentOutcome === 'DELIVERED') {
         list = list.filter(o => getCanonicalStatus(o) === 'Delivered');
       } else if (filterShipmentOutcome === 'RTO') {
@@ -187,7 +193,7 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
     }
 
     return list;
-  }, [viewType, orders, locallyDeletedIds, isCancelledView, filterPaymentMode, filterShipmentOutcome, searchQuery, sortField, sortOrder]);
+  }, [viewType, orders, locallyDeletedIds, isCancelledView, isDeletedView, filterPaymentMode, filterShipmentOutcome, searchQuery, sortField, sortOrder]);
 
   // 2. Process Customers View Dataset
   const filteredCustomers = useMemo(() => {
@@ -352,6 +358,46 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
           ];
         });
         csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      } else if (isDeletedView) {
+        const headers = [
+          'Order ID',
+          'Order Date',
+          'Customer Name',
+          'Phone Number',
+          'State',
+          'City',
+          'Order Value',
+          'Payment Mode',
+          'Product / Items',
+          'Quantity',
+          'Deletion Date',
+          'Deletion Reason',
+          'Fulfillment Status'
+        ];
+        const rows = filteredOrders.map(o => {
+          const resolvedLoc = resolveCanonicalLocation(o.state, o.city, o.pincode);
+          const cState = o.canonicalState || resolvedLoc.stateName || o.state || '';
+          const cCity = o.canonicalCity || resolvedLoc.cityName || o.city || '';
+          const delDateRaw = o.deleted_at || (o as any).deletedAt || o.extra_data?.deleted_at || o.order_date || '';
+          const delReason = o.deletion_reason || (o as any).trashReason || (o as any).trash_reason || o.extra_data?.deletion_reason || 'Order marked as DELETED';
+
+          return [
+            `"${o.order_id}"`,
+            `"${o.order_date || ''}"`,
+            `"${(o.customer_name || '').replace(/"/g, '""')}"`,
+            `"${o.phone || ''}"`,
+            `"${cState.replace(/"/g, '""')}"`,
+            `"${cCity.replace(/"/g, '""')}"`,
+            o.price,
+            `"${o.payment_mode || ''}"`,
+            `"${(o.order_formatted || o.product_name || '').replace(/"/g, '""')}"`,
+            o.total_quantity || 1,
+            `"${delDateRaw ? formatExcelDate(delDateRaw) : '-'}"`,
+            `"${delReason.replace(/"/g, '""')}"`,
+            '"DELETED"'
+          ];
+        });
+        csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
       } else {
         const headers = ['Order ID', 'Order Date', 'Customer Name', 'Phone', 'State', 'City', 'Pincode', 'Payment Mode', 'Order Value', 'Remaining COD', 'Quantity', 'Products'];
         const rows = filteredOrders.map(o => [
@@ -470,7 +516,9 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
             <span className="text-slate-300 font-medium">Full Dataset View</span>
           </div>
           <h2 className="text-xl font-black text-white tracking-tight flex items-center gap-2.5">
-            {isCancelledView ? (
+            {isDeletedView ? (
+              <Trash2 size={20} className="text-rose-400" />
+            ) : isCancelledView ? (
               <Ban size={20} className="text-red-400" />
             ) : viewType === 'orders' ? (
               <ShoppingBag size={20} className="text-purple-400" />
@@ -506,7 +554,34 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
       {/* 2. KPI SUMMARY METRIC CHIPS */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {viewType === 'orders' && metrics && (
-          isCancelledView ? (
+          isDeletedView ? (
+            <>
+              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Deleted</span>
+                <span className="text-base font-mono font-extrabold text-rose-400">{metrics.totalOrdersCount?.toLocaleString()}</span>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Value</span>
+                <span className="text-base font-mono font-extrabold text-rose-300">₹{Math.round(metrics.totalRev || 0).toLocaleString('en-IN')}</span>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Units</span>
+                <span className="text-base font-mono font-extrabold text-cyan-300">{metrics.totalUnits?.toLocaleString()}</span>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Avg Order Value</span>
+                <span className="text-base font-mono font-extrabold text-purple-300">₹{metrics.aov?.toLocaleString('en-IN')}</span>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Prepaid Value</span>
+                <span className="text-base font-mono font-extrabold text-emerald-300">₹{Math.round(metrics.prepaidRev || 0).toLocaleString('en-IN')}</span>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Status</span>
+                <span className="text-base font-mono font-extrabold text-rose-400">DELETED</span>
+              </div>
+            </>
+          ) : isCancelledView ? (
             <>
               <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
                 <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Cancelled</span>
@@ -647,7 +722,7 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
         <div className="flex items-center gap-2">
           {viewType === 'orders' && (
             <>
-              {!isCancelledView && (
+              {!isCancelledView && !isDeletedView && (
                 <select
                   value={filterShipmentOutcome}
                   onChange={e => setFilterShipmentOutcome(e.target.value as any)}
@@ -750,7 +825,99 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
           <div className="overflow-x-auto">
             {/* VIEW A: ORDERS TABLE */}
             {viewType === 'orders' && (
-              isCancelledView ? (
+              isDeletedView ? (
+                <table className="w-full text-left text-xs text-slate-300">
+                  <thead className="bg-slate-950 text-[10px] uppercase font-bold text-slate-400 border-b border-slate-800 whitespace-nowrap">
+                    <tr>
+                      <th onClick={() => handleSort('order_id')} className="py-3 px-3 cursor-pointer hover:text-white">
+                        <div className="flex items-center gap-1">Order ID <ArrowUpDown size={11} /></div>
+                      </th>
+                      <th onClick={() => handleSort('order_date')} className="py-3 px-3 cursor-pointer hover:text-white">
+                        <div className="flex items-center gap-1">Date <ArrowUpDown size={11} /></div>
+                      </th>
+                      <th onClick={() => handleSort('customer_name')} className="py-3 px-3 cursor-pointer hover:text-white">
+                        <div className="flex items-center gap-1">Customer <ArrowUpDown size={11} /></div>
+                      </th>
+                      <th className="py-3 px-3">Phone</th>
+                      <th className="py-3 px-3">State</th>
+                      <th className="py-3 px-3">City</th>
+                      <th onClick={() => handleSort('price')} className="py-3 px-3 cursor-pointer hover:text-white">
+                        <div className="flex items-center gap-1">Order Value <ArrowUpDown size={11} /></div>
+                      </th>
+                      <th className="py-3 px-3 text-center">Payment Mode</th>
+                      <th className="py-3 px-3 min-w-[200px] max-w-[340px]">Product / Items</th>
+                      <th onClick={() => handleSort('total_quantity')} className="py-3 px-3 text-center cursor-pointer hover:text-white">
+                        <div className="flex items-center justify-center gap-1">Qty <ArrowUpDown size={11} /></div>
+                      </th>
+                      <th className="py-3 px-3">Deletion Date</th>
+                      <th className="py-3 px-3">Deletion Reason</th>
+                      <th className="py-3 px-3 text-center">Status</th>
+                      <th className="py-3 px-3 text-center w-[80px]">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-sans">
+                    {paginatedOrders.map(o => {
+                      const resolvedLoc = resolveCanonicalLocation(o.state, o.city, o.pincode);
+                      const canonicalState = o.canonicalState || resolvedLoc.stateName || o.state || '—';
+                      const canonicalCity = o.canonicalCity || resolvedLoc.cityName || o.city || '—';
+                      const delDateRaw = o.deleted_at || (o as any).deletedAt || o.extra_data?.deleted_at || o.order_date;
+                      const delDateStr = delDateRaw ? formatExcelDate(delDateRaw) : '—';
+                      const delReason = o.deletion_reason || (o as any).trashReason || (o as any).trash_reason || o.extra_data?.deletion_reason || 'Order marked as DELETED';
+
+                      return (
+                        <tr key={o.order_id} className="hover:bg-slate-800/40 transition-colors text-[11px]">
+                          <td className="py-3 px-3 font-mono font-bold text-rose-300 whitespace-nowrap">#{o.order_id}</td>
+                          <td className="py-3 px-3 font-mono text-slate-400 whitespace-nowrap">{o.order_date || '—'}</td>
+                          <td className="py-3 px-3 font-bold text-white max-w-[160px] truncate" title={o.customer_name}>
+                            {o.customer_name || 'N/A'}
+                          </td>
+                          <td className="py-3 px-3 font-mono text-slate-300 whitespace-nowrap">{o.phone || '—'}</td>
+                          <td className="py-3 px-3 text-slate-300 whitespace-nowrap">{canonicalState}</td>
+                          <td className="py-3 px-3 text-slate-300 whitespace-nowrap">{canonicalCity}</td>
+                          <td className="py-3 px-3 font-mono font-bold text-rose-400 whitespace-nowrap">
+                            ₹{(o.price ?? 0).toLocaleString('en-IN')}
+                          </td>
+                          <td className="py-3 px-3 text-center whitespace-nowrap">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                              {o.payment_mode || 'UNKNOWN'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3">
+                            <AnalyticsProductCell order={o} />
+                          </td>
+                          <td className="py-3 px-3 text-center font-mono font-bold text-white whitespace-nowrap">
+                            {o.total_quantity ?? 1}
+                          </td>
+                          <td className="py-3 px-3 font-mono text-rose-300 whitespace-nowrap">
+                            {delDateStr}
+                          </td>
+                          <td className="py-3 px-3 max-w-[220px] truncate">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-rose-500/10 text-rose-300 border border-rose-500/20 truncate block" title={delReason}>
+                              {delReason}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-center whitespace-nowrap">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                              DELETED
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-center whitespace-nowrap">
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                onClick={() => setSelectedOrderForModal(o)}
+                                className="p-1.5 text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/10 rounded-md transition-colors cursor-pointer"
+                                title="Inspect Details"
+                              >
+                                <Eye size={13} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              ) : isCancelledView ? (
                 <table className="w-full text-left text-xs text-slate-300">
                   <thead className="bg-slate-950 text-[10px] uppercase font-bold text-slate-400 border-b border-slate-800 whitespace-nowrap">
                     <tr>

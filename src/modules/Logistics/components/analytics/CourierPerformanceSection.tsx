@@ -18,7 +18,8 @@ import type { UnifiedLogisticsOrder } from '../../../../types/unifiedLogistics';
 import { 
   getCanonicalStatus, 
   checkDeliverySla, 
-  formatINR 
+  formatINR,
+  isDeletedOrder
 } from '../../utils/logisticsAnalyticsUtils';
 import { CONFIGURED_COURIERS, normalizeCourier } from '../../../../config/courierConfig';
 import { isDispatchedOrder, parseOrderAmount } from '../../../../utils/logisticsOrderUtils';
@@ -106,6 +107,8 @@ export const CourierPerformanceSection: React.FC<CourierPerformanceSectionProps>
     });
 
     orders.forEach(o => {
+      if (isDeletedOrder(o) || getCanonicalStatus(o) === 'Deleted') return;
+
       if (!o.courier || o.courier.trim() === '' || o.workflowStage === 'active') {
         awaitingAssignment.push(o);
       }

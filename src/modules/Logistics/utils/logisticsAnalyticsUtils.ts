@@ -19,7 +19,8 @@ export type CanonicalLogisticsStatus =
   | 'RTO In Transit'
   | 'RTO Delivered to Seller'
   | 'Cancelled'
-  | 'Shipment Exception';
+  | 'Shipment Exception'
+  | 'Deleted';
 
 export const ALL_CANONICAL_STATUSES: CanonicalLogisticsStatus[] = [
   'Delivered',
@@ -34,7 +35,8 @@ export const ALL_CANONICAL_STATUSES: CanonicalLogisticsStatus[] = [
   'RTO In Transit',
   'RTO Delivered to Seller',
   'Cancelled',
-  'Shipment Exception'
+  'Shipment Exception',
+  'Deleted'
 ];
 
 export interface StatusMetadata {
@@ -150,11 +152,48 @@ export const STATUS_METADATA_MAP: Record<CanonicalLogisticsStatus, StatusMetadat
     badgeBorder: 'border-pink-600/40',
     badgeText: 'text-pink-400',
     category: 'exception'
+  },
+  'Deleted': {
+    label: 'Deleted',
+    color: '#ef4444', // red
+    badgeBg: 'bg-rose-950/70',
+    badgeBorder: 'border-rose-600/50',
+    badgeText: 'text-rose-400',
+    category: 'cancelled'
   }
 };
 
 /**
- * Universal canonical status classification for all 13 standard statuses.
+ * Robust predicate to determine whether an order is marked as DELETED or trashed across Sales and Logistics.
+ */
+export function isDeletedOrder(order: any): boolean {
+  if (!order) return false;
+  const extra = order.extra_data || {};
+  const statusStr = String(order.status || order.shipment_status || extra.delhivery_status_type || '').toLowerCase().trim();
+  const rawStatusStr = String(order.rawStatus || order.raw_status || extra.delhivery_current_status || extra.raw_status || '').toLowerCase().trim();
+  const orderStatusStr = String(order.order_status || '').toLowerCase().trim();
+  const stage = String(order.stage || order.workflowStage || '').toLowerCase().trim();
+
+  return (
+    orderStatusStr === 'deleted' ||
+    statusStr === 'deleted' ||
+    statusStr === 'order deleted' ||
+    rawStatusStr === 'deleted' ||
+    rawStatusStr === 'order deleted' ||
+    Boolean(order.isDeleted || order.is_deleted || extra.is_deleted || extra.tombstone) ||
+    Boolean(order.deletedAt || order.deleted_at || extra.deleted_at) ||
+    (stage === 'trash' && (
+      statusStr === 'deleted' || 
+      statusStr === 'order deleted' ||
+      Boolean(order.trashReason?.toLowerCase().includes('delete')) || 
+      Boolean(order.remarks?.toLowerCase().includes('delete')) || 
+      (!order.cancellation && !order.cancellationStatus && orderStatusStr !== 'cancelled')
+    ))
+  );
+}
+
+/**
+ * Universal canonical status classification for all standard statuses.
  * Guarantees zero duplicate counting and deterministic stage assignment.
  */
 export function getCanonicalStatus(order: any): CanonicalLogisticsStatus {
@@ -164,7 +203,13 @@ export function getCanonicalStatus(order: any): CanonicalLogisticsStatus {
   const eventStr = (order.lastEvent || extra.delhivery_remarks || '').toLowerCase().trim();
   const remarksStr = (order.remarks || extra.delhivery_remarks || '').toLowerCase().trim();
   const finStr = (order.financialStatus || order.financial_status || extra.financial_status || '').toLowerCase().trim();
+  const stage = (order.stage || order.workflowStage || '').toLowerCase().trim();
   const todayStr = formatLocalYMD(new Date());
+
+  // 0. Deleted (Highest priority: deleted orders must NEVER appear as active or pending dispatch)
+  if (isDeletedOrder(order)) {
+    return 'Deleted';
+  }
 
   // 1. Cancelled
   if (
@@ -713,6 +758,7 @@ export interface CourierPerformanceSummary {
   inTransit: number;
   otherStatuses: number;
   cancelled: number;
+  deleted?: number;
   deliveryRate: string;
   rtoRate: string;
   orders: any[];
@@ -721,6 +767,7 @@ export interface CourierPerformanceSummary {
   inTransitOrders?: any[];
   otherOrders?: any[];
   cancelledOrders?: any[];
+  deletedOrders?: any[];
 }
 
 export function normalizeCourierName(courierName?: string | null): string {
@@ -801,6 +848,10 @@ export interface RtoMetricsSummary {
   cancelledOrders: any[];
   cancelledCount: number;
   cancelledValue: number;
+  // Deleted metrics
+  deletedOrders?: any[];
+  deletedCount?: number;
+  deletedValue?: number;
   // Courier Performance
   courierPerformance: CourierPerformanceSummary[];
 }
@@ -851,6 +902,11 @@ export function calculateCanonicalRtoMetrics(orders: any[], options?: { delivere
   let cancelledCount = 0;
   let cancelledValue = 0;
 
+  // Deleted metrics
+  const deletedOrders: any[] = [];
+  let deletedCount = 0;
+  let deletedValue = 0;
+
   const rtoOrders: any[] = [];
   const seenOrderIds = new Set<string>();
   const courierMap = new Map<string, { 
@@ -861,12 +917,14 @@ export function calculateCanonicalRtoMetrics(orders: any[], options?: { delivere
     inTransit: number; 
     otherStatuses: number;
     cancelled: number;
+    deleted: number;
     orders: any[];
     deliveredOrders: any[];
     rtoOrders: any[];
     inTransitOrders: any[];
     otherOrders: any[];
     cancelledOrders: any[];
+    deletedOrders: any[];
   }>();
 
   orders.forEach(order => {
@@ -889,17 +947,29 @@ export function calculateCanonicalRtoMetrics(orders: any[], options?: { delivere
         inTransit: 0, 
         otherStatuses: 0,
         cancelled: 0,
+        deleted: 0,
         orders: [],
         deliveredOrders: [],
         rtoOrders: [],
         inTransitOrders: [],
         otherOrders: [],
-        cancelledOrders: []
+        cancelledOrders: [],
+        deletedOrders: []
       });
     }
     const cEntry = courierMap.get(courier)!;
     cEntry.total++;
     cEntry.orders.push(order);
+
+    // 0. Handle deleted orders (tracked under courier reconciliation, excluded from active shipments and delivery/RTO rates)
+    if (canonical === 'Deleted') {
+      deletedCount++;
+      deletedValue += rawAmt;
+      deletedOrders.push(order);
+      cEntry.deleted++;
+      cEntry.deletedOrders.push(order);
+      return;
+    }
 
     // 1. Handle cancelled orders (tracked under courier reconciliation, excluded from delivery/RTO rates)
     if (canonical === 'Cancelled') {
@@ -989,7 +1059,7 @@ export function calculateCanonicalRtoMetrics(orders: any[], options?: { delivere
   const deliveryRate = concluded > 0 ? ((deliveredCount / concluded) * 100).toFixed(1) : '0.0';
 
   const courierPerformance: CourierPerformanceSummary[] = Array.from(courierMap.values()).map(c => {
-    const activeTotal = c.total - c.cancelled;
+    const activeTotal = c.total - c.cancelled - (c.deleted || 0);
     const conc = c.delivered + c.rto;
     return {
       courier: c.courier,
@@ -999,6 +1069,7 @@ export function calculateCanonicalRtoMetrics(orders: any[], options?: { delivere
       inTransit: c.inTransit,
       otherStatuses: c.otherStatuses,
       cancelled: c.cancelled,
+      deleted: c.deleted || 0,
       deliveryRate: conc > 0 
         ? `${((c.delivered / conc) * 100).toFixed(1)}%` 
         : (activeTotal > 0 ? `${((c.delivered / activeTotal) * 100).toFixed(1)}%` : '0.0%'),
@@ -1010,7 +1081,8 @@ export function calculateCanonicalRtoMetrics(orders: any[], options?: { delivere
       rtoOrders: c.rtoOrders,
       inTransitOrders: c.inTransitOrders,
       otherOrders: c.otherOrders,
-      cancelledOrders: c.cancelledOrders
+      cancelledOrders: c.cancelledOrders,
+      deletedOrders: c.deletedOrders || []
     };
   }).sort((a, b) => b.total - a.total);
 
@@ -1057,13 +1129,16 @@ export function calculateCanonicalRtoMetrics(orders: any[], options?: { delivere
     deliveredPartialCodOrders,
     deliveredPartialCodValue,
     deliveryRate,
-    // In Transit & Cancelled
+    // In Transit & Cancelled & Deleted
     inTransitOrders,
     inTransitCount,
     inTransitValue,
     cancelledOrders,
     cancelledCount,
     cancelledValue,
+    deletedOrders,
+    deletedCount,
+    deletedValue,
     // Courier Performance
     courierPerformance
   };

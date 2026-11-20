@@ -50,6 +50,7 @@ import { DateRangePickerModal } from './components/DateRangePickerModal';
 import { useWebsiteSalesDateRange } from './context/WebsiteSalesDateRangeContext';
 import { 
   getCanonicalStatus,
+  isDeletedOrder,
   calculateCanonicalRtoMetrics, 
   isRtoOrder, 
   isCodOrder, 
@@ -2059,16 +2060,20 @@ export const WebsiteAnalytics: React.FC = () => {
             } else if (filterStatus === 'OTHER') {
               list = list.filter(o => {
                 const s = getCanonicalStatus(o);
-                return s !== 'Delivered' && !s.includes('RTO') && s !== 'In Transit' && s !== 'Out for Delivery' && s !== 'Cancelled';
+                return s !== 'Delivered' && !s.includes('RTO') && s !== 'In Transit' && s !== 'Out for Delivery' && s !== 'Cancelled' && s !== 'Deleted' && !isDeletedOrder(o);
               });
             } else if (filterStatus === 'CANCELLED') {
               list = list.filter(o => getCanonicalStatus(o) === 'Cancelled');
+            } else if (filterStatus === 'DELETED') {
+              list = list.filter(o => getCanonicalStatus(o) === 'Deleted' || isDeletedOrder(o));
             }
             const statusLabel = filterStatus && filterStatus !== 'ALL'
-              ? (filterStatus === 'DELIVERED' ? 'Delivered' : filterStatus === 'RTO' ? 'RTO' : filterStatus === 'IN_TRANSIT' ? 'In Transit' : filterStatus === 'OTHER' ? 'Other Statuses' : 'Cancelled')
+              ? (filterStatus === 'DELIVERED' ? 'Delivered' : filterStatus === 'RTO' ? 'RTO' : filterStatus === 'IN_TRANSIT' ? 'In Transit' : filterStatus === 'OTHER' ? 'Other Statuses' : filterStatus === 'CANCELLED' ? 'Cancelled' : 'Deleted')
               : '';
             const label = filterStatus === 'CANCELLED'
               ? 'Cancelled Orders'
+              : filterStatus === 'DELETED'
+              ? 'Deleted Orders'
               : statusLabel
                 ? `${courierName} – ${statusLabel} Records`
                 : `${courierName} Shipments`;

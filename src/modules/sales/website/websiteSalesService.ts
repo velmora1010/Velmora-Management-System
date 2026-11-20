@@ -617,7 +617,6 @@ export class WebsiteSalesService {
         .from('sales_orders')
         .select('*, items:sales_order_items(id, sales_order_id, product_name, product_code, quantity, unit_price, line_total)')
         .eq('channel', 'WEBSITE')
-        .neq('order_status', 'DELETED')
         .order('order_date', { ascending: false })
         .order('id', { ascending: true });
 
@@ -720,6 +719,14 @@ export class WebsiteSalesService {
       const rawPincode = o.pincode || '';
       const canonicalLoc = resolveCanonicalLocation(rawState, rawCity, rawPincode);
 
+      const isOrderDeleted =
+        o.order_status === 'DELETED' ||
+        Boolean(extra.is_deleted || extra.tombstone) ||
+        logRec?.status === 'Deleted' ||
+        logRec?.stage === 'trash' ||
+        trackRec?.status === 'Order Deleted' ||
+        trackRec?.raw_status === 'DELETED';
+
       return {
         id: o.id,
         order_id: o.order_id,
@@ -752,16 +759,22 @@ export class WebsiteSalesService {
         conflict_details: extra.conflict_details || '',
         created_at: o.created_at,
         items,
-        fulfillment_status: extra.fulfillment_status || o.dispatch_status || o.order_status || 'unfulfilled',
+        fulfillment_status: isOrderDeleted ? 'Deleted' : (extra.fulfillment_status || o.dispatch_status || o.order_status || 'unfulfilled'),
         financial_status: extra.financial_status || '',
         awb_number: trackRec?.awb_number || logRec?.awbNumber || extra.awb_number || o.awb_number || '',
         courier: trackRec?.courier || logRec?.courier || extra.courier || o.courier || '',
-        shipment_status: trackRec?.status || logRec?.status || logRec?.stage || (trackRec?.awb_number || logRec?.awbNumber || extra.awb_number || o.awb_number ? 'Dispatched' : (o.dispatch_status === 'DELIVERED' ? 'Delivered' : 'Pending Manifest')),
-        raw_status: trackRec?.raw_status || logRec?.rawStatus || (logRec as any)?.raw_status || extra.delhivery_current_status || extra.raw_status || '',
+        shipment_status: isOrderDeleted ? 'Deleted' : (trackRec?.status || logRec?.status || logRec?.stage || (trackRec?.awb_number || logRec?.awbNumber || extra.awb_number || o.awb_number ? 'Dispatched' : (o.dispatch_status === 'DELIVERED' ? 'Delivered' : 'Pending Manifest'))),
+        raw_status: isOrderDeleted ? 'DELETED' : (trackRec?.raw_status || logRec?.rawStatus || (logRec as any)?.raw_status || extra.delhivery_current_status || extra.raw_status || ''),
         delhivery_remarks: trackRec?.remarks || extra.delhivery_remarks || '',
-        extra_data: extra,
+        extra_data: {
+          ...extra,
+          is_deleted: isOrderDeleted ? true : extra.is_deleted,
+          deleted_at: isOrderDeleted ? (extra.deleted_at || logRec?.deletedAt || trackRec?.updated_at || o.updated_at) : extra.deleted_at,
+          deletion_reason: isOrderDeleted ? (extra.deletion_reason || logRec?.trashReason || trackRec?.remarks || 'Order deleted') : extra.deletion_reason
+        },
         fulfilled_date: trackRec?.delivered_date || trackRec?.dispatch_date || extra.fulfilled_date || o.dispatch_date || '',
-        order_status: o.order_status,
+        order_status: isOrderDeleted ? 'DELETED' : o.order_status,
+        isDeleted: isOrderDeleted,
         cancellation: extra.cancellation || (o.order_status === 'CANCELLED' ? {
           status: 'CANCELLED',
           reason: extra.cancellation_reason || 'Order cancelled',

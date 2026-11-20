@@ -6,7 +6,8 @@ import {
   getCanonicalStatus,
   normalizeCourierName,
   isCodOrder,
-  isPrepaidOrder
+  isPrepaidOrder,
+  isDeletedOrder
 } from '../../../Logistics/utils/logisticsAnalyticsUtils';
 import {
   normalizeCustomerPhone,
@@ -124,14 +125,16 @@ function enhanceWorksheet(
 export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSalesAnalyticsOptions): Promise<void> {
   const { startDate, endDate, orders } = options;
 
-  // Filter out cancelled / deleted orders for product and customer analytics
+  // Identify deleted orders and cancelled orders separately for accurate reconciliation
+  const deletedOrders = orders.filter(o => isDeletedOrder(o) || getCanonicalStatus(o) === 'Deleted');
   const validOrders = orders.filter(o => {
+    if (isDeletedOrder(o) || getCanonicalStatus(o) === 'Deleted') return false;
     const isCancelled =
       o.order_status === 'CANCELLED' ||
       o.cancellation?.status === 'CANCELLED' ||
       Boolean(o.cancelled_at) ||
       o.fulfillment_status === 'cancelled' ||
-      o.order_status === 'DELETED';
+      getCanonicalStatus(o) === 'Cancelled';
     const finStatus = (o.financial_status || '').toLowerCase();
     const isRefunded = finStatus === 'refunded' || finStatus === 'voided';
     return !isCancelled && !isRefunded;
@@ -145,8 +148,8 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
   const totalUnits = orders.reduce((sum, o) => sum + (Number(o.total_quantity) || 0), 0);
   const avgOrderValue = totalOrdersCount > 0 ? Math.round(totalRevenue / totalOrdersCount) : 0;
 
-  // Cancelled orders calculation for reconciliation
-  const cancelledOrders = orders.filter(o => !validOrders.includes(o));
+  // Cancelled orders calculation for reconciliation (strictly excluding deleted orders)
+  const cancelledOrders = orders.filter(o => !isDeletedOrder(o) && getCanonicalStatus(o) !== 'Deleted' && !validOrders.includes(o));
   const cancelledOrdersCount = cancelledOrders.length;
   const cancelledRevenue = cancelledOrders.reduce((sum, o) => sum + (Number(o.price) || 0), 0);
   const cancelledUnits = cancelledOrders.reduce((sum, o) => sum + (Number(o.total_quantity) || 0), 0);
@@ -826,6 +829,9 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
   orders.forEach(o => {
     // Exclude cancelled / deleted orders
     if (
+      isDeletedOrder(o) ||
+      getCanonicalStatus(o) === 'Deleted' ||
+      getCanonicalStatus(o) === 'Cancelled' ||
       o.order_status === 'CANCELLED' ||
       o.cancellation?.status === 'CANCELLED' ||
       Boolean(o.cancelled_at) ||
@@ -1070,25 +1076,27 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
   // SHEET 10: Courier Reconciliation & Performance Breakdown
   // =========================================================================
   const courierPerfList = rtoMetrics.courierPerformance || [];
-  const activeOrdersCount = orders.length - cancelledOrdersList.length;
+  const deletedOrdersList = rtoMetrics.deletedOrders || orders.filter(o => isDeletedOrder(o) || getCanonicalStatus(o) === 'Deleted');
+  const activeOrdersCount = Math.max(0, orders.length - cancelledOrdersList.length - deletedOrdersList.length);
 
   let totalOtherStatuses = 0;
   courierPerfList.forEach(c => {
     totalOtherStatuses += c.otherStatuses || 0;
   });
 
-  // Count missing AWB and unknown courier orders
+  // Count missing AWB and unknown courier orders (strictly excluding cancelled and deleted orders)
   let missingAwbCount = 0;
   let unknownCourierCount = 0;
   orders.forEach(o => {
+    if (isDeletedOrder(o)) return;
     const canonical = getCanonicalStatus(o);
-    if (canonical === 'Cancelled') return;
+    if (canonical === 'Cancelled' || canonical === 'Deleted') return;
     const awb = (o.awb_number || (o as any).extra_data?.awb_number || '').trim();
     const cour = (o.courier || (o as any).extra_data?.courier || '').trim();
     if (!awb) missingAwbCount++;
     if (!cour || cour.toLowerCase().includes('unknown') || cour.toLowerCase().includes('not available')) unknownCourierCount++;
   });
-  const reconciledRecordsCount = orders.length - unknownCourierCount - cancelledOrdersList.length;
+  const reconciledRecordsCount = Math.max(0, orders.length - unknownCourierCount - cancelledOrdersList.length - deletedOrdersList.length);
 
   const s10ReconRows: (string | number)[][] = [
     ['VELMORA - COURIER RECONCILIATION & PERFORMANCE'],
@@ -1098,8 +1106,9 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
     ['SECTION A - EXECUTIVE RECONCILIATION SUMMARY'],
     ['Metric Name', 'Value', 'Unit / Detail'],
     ['Total Website Orders', orders.length, 'Total orders recorded in sales dataset for period'],
-    ['Active Fulfillable Shipments', activeOrdersCount, 'Orders requiring carrier fulfillment (excluding cancelled)'],
+    ['Active Fulfillable Shipments', activeOrdersCount, 'Orders requiring carrier fulfillment (excluding cancelled and deleted)'],
     ['Cancelled Orders (Pre-Dispatch)', cancelledOrdersList.length, 'Orders cancelled prior to dispatch; excluded from carrier SLAs'],
+    ['Deleted Orders', deletedOrdersList.length, 'Orders marked deleted; excluded from carrier SLAs and fulfillment'],
     ['Reconciled with Carrier Manifest', reconciledRecordsCount, 'Shipments linked to verified courier partner reports'],
     ['Unmatched / Awaiting Tracking Report', unknownCourierCount, 'Orders lacking uploaded carrier tracking reports'],
     ['Missing AWB Tracking Numbers', missingAwbCount, 'Orders without waybill numbers assigned'],
@@ -1119,6 +1128,7 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
       'In Transit',
       'Other Statuses',
       'Cancelled',
+      'Deleted',
       'Delivery Rate (%)',
       'RTO Rate (%)'
     ],
@@ -1128,10 +1138,11 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
       c.delivered,
       c.rto,
       c.inTransit,
-      c.otherStatuses || 0,
-      c.cancelled || 0,
-      c.deliveryRate,
-      c.rtoRate
+      c.otherStatuses,
+      c.cancelled ?? 0,
+      c.deleted ?? 0,
+      `${c.deliveryRate}%`,
+      `${c.rtoRate}%`
     ]),
     [
       'Total Reconciled',
@@ -1141,6 +1152,7 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
       rtoMetrics.inTransitCount,
       totalOtherStatuses,
       cancelledOrdersList.length,
+      deletedOrdersList.length,
       `${deliveryRate}%`,
       `${rtoRate}%`
     ]
@@ -1246,8 +1258,9 @@ export async function exportWebsiteSalesAnalyticsExcel(options: ExportWebsiteSal
   // SHEET 11: Unknown Records Detail (Actionable Missing Courier Audit)
   // =========================================================================
   const unknownOrdersList = orders.filter(o => {
+    if (isDeletedOrder(o)) return false;
     const canonical = getCanonicalStatus(o);
-    if (canonical === 'Cancelled') return false;
+    if (canonical === 'Cancelled' || canonical === 'Deleted') return false;
     const cour = (o.courier || (o as any).extra_data?.courier || '').trim();
     const awb = (o.awb_number || (o as any).extra_data?.awb_number || '').trim();
     return !cour || !awb || cour.toLowerCase().includes('unknown') || cour.toLowerCase().includes('not available');

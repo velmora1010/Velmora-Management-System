@@ -258,7 +258,15 @@ export const validateCourierAwb = (
  */
 export const isDispatchedOrder = (order: any): boolean => {
   if (!order) return false;
-  if (order.stage === 'trash') return false;
+  if (
+    order.stage === 'trash' || 
+    order.workflowStage === 'trash' || 
+    order.status === 'Deleted' || 
+    order.status === 'Order Deleted' || 
+    order.order_status === 'DELETED' ||
+    order.shipment_status === 'Deleted' ||
+    Boolean(order.isDeleted || order.is_deleted)
+  ) return false;
   const stage = (order.stage || '').toLowerCase();
   const workflowStage = (order.workflowStage || '').toLowerCase();
   const status = (order.status || '').toLowerCase();
