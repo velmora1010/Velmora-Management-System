@@ -87,18 +87,21 @@ export class ExpenseRuleEngine {
   }
 
   /**
-   * Safely matches a single keyword token using word/non-word boundaries.
+   * Safely matches a single keyword token using word/non-word boundaries,
+   * tolerating unexpected whitespace between characters in the narration.
    */
   private static matchesKeyword(description: string, keyword: string | null | undefined): boolean {
     if (!keyword || !description) return false;
-    const cleanKeyword = keyword.trim().toLowerCase();
-    if (!cleanKeyword) return false;
+    const compact = keyword.trim().toLowerCase().replace(/\s+/g, '');
+    if (!compact) return false;
 
-    // Escape regex special characters
-    const escaped = cleanKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Escape each character individually and allow arbitrary whitespace between characters
+    const pattern = Array.from(compact)
+      .map(ch => ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('\\s*');
 
     // Ensure the keyword matches as a distinct boundary, not inside another word.
-    const regex = new RegExp(`(^|\\W)${escaped}((?=\\W)|$)`, 'i');
+    const regex = new RegExp(`(^|\\W)${pattern}((?=\\W)|$)`, 'i');
 
     return regex.test(description.toLowerCase());
   }
