@@ -636,13 +636,13 @@ export class WebsiteSalesService {
 
     // Attach live logistics tracking, courier, and RTO status from Supabase & Dexie
     const trackingMap = new Map<string, any>();
+    const trackingAwbMap = new Map<string, any>();
     const logisticsMap = new Map<string, any>();
     try {
       const rawIds = orderRows.map(o => cleanOrderId(o.order_id)).filter(Boolean);
 
       // 1. Authoritative shipments from Supabase customer_tracking_shipments with 60-second in-memory TTL
       const now = Date.now();
-      let trackingAwbMap = new Map<string, any>();
       if (!trackingShipmentsCache || now - trackingShipmentsCache.timestamp > 60_000) {
         const shipRows = await this.fetchAllPages<any>((start, end) =>
           supabase
@@ -665,7 +665,9 @@ export class WebsiteSalesService {
         trackingShipmentsCache = { timestamp: now, map: newMap, awbMap: newAwbMap };
       }
       trackingShipmentsCache.map.forEach((val, key) => trackingMap.set(key, val));
-      trackingAwbMap = trackingShipmentsCache.awbMap || new Map();
+      if (trackingShipmentsCache.awbMap) {
+        trackingShipmentsCache.awbMap.forEach((val, key) => trackingAwbMap.set(key, val));
+      }
 
       // 2. Fetch local Dexie db.logistics_orders as secondary/staging cache
       try {
