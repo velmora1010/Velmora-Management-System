@@ -172,19 +172,11 @@ export function isDeletedOrder(order: any): boolean {
   if (!order) return false;
   const extra = order.extra_data || {};
   const orderStatusStr = String(order.order_status || '').toLowerCase().trim();
-  if (orderStatusStr === 'deleted') return true;
-  if (Boolean(order.isDeleted || order.is_deleted || extra.is_deleted || extra.tombstone)) return true;
-
   const statusStr = String(order.status || order.shipment_status || extra.delhivery_status_type || '').toLowerCase().trim();
   const rawStatusStr = String(order.rawStatus || order.raw_status || extra.delhivery_current_status || extra.raw_status || '').toLowerCase().trim();
-
-  // Explicit tracking tombstone
-  if (statusStr === 'order deleted' || rawStatusStr === 'order deleted' || (statusStr === 'deleted' && rawStatusStr === 'deleted')) {
-    return true;
-  }
+  const dispatchStatusStr = String(order.dispatch_status || '').toLowerCase().trim();
 
   // Authoritative protection: Orders with verified terminal delivery cannot be marked deleted
-  const dispatchStatusStr = String(order.dispatch_status || '').toLowerCase().trim();
   const isDelivered = 
     statusStr === 'delivered' || 
     rawStatusStr === 'delivered' || 
@@ -195,7 +187,30 @@ export function isDeletedOrder(order: any): boolean {
     return false;
   }
 
-  // Deletion timestamp on an un-delivered order
+  // Authoritative protection: Orders cancelled in source/Shopify cannot be marked deleted
+  const isCancelled =
+    orderStatusStr === 'cancelled' ||
+    statusStr === 'cancelled' ||
+    rawStatusStr.includes('cancel') ||
+    Boolean(order.cancellation && (order.cancellation.status === 'CANCELLED' || String(order.cancellation.status).toLowerCase() === 'cancelled')) ||
+    Boolean(extra.cancellation && (extra.cancellation.status === 'CANCELLED' || String(extra.cancellation.status).toLowerCase() === 'cancelled')) ||
+    order.cancellationStatus === 'Completed' ||
+    Boolean(order.isCancelled) ||
+    Boolean(extra.cancellation_requested_at || extra.cancelled_at);
+
+  if (isCancelled) {
+    return false;
+  }
+
+  if (orderStatusStr === 'deleted') return true;
+  if (Boolean(order.isDeleted || order.is_deleted || extra.is_deleted || extra.tombstone)) return true;
+
+  // Explicit tracking tombstone
+  if (statusStr === 'order deleted' || rawStatusStr === 'order deleted' || (statusStr === 'deleted' && rawStatusStr === 'deleted')) {
+    return true;
+  }
+
+  // Deletion timestamp on an un-delivered, non-cancelled order
   if (Boolean(order.deletedAt || order.deleted_at || extra.deleted_at)) {
     return true;
   }
@@ -222,23 +237,38 @@ export function getCanonicalStatus(order: any): CanonicalLogisticsStatus {
   const finStr = (order.financialStatus || order.financial_status || extra.financial_status || '').toLowerCase().trim();
   const todayStr = formatLocalYMD(new Date());
 
-  // 0. Deleted (Highest priority: genuinely deleted orders must NEVER appear as active or pending dispatch)
-  if (isDeletedOrder(order)) {
-    return 'Deleted';
+  // 0. Delivered (Terminal delivery protection: physical delivery takes precedence)
+  const isDelivered = 
+    statusStr === 'delivered' || 
+    rawStatusStr === 'delivered' || 
+    String(order.dispatch_status || '').toLowerCase().trim() === 'delivered' ||
+    Boolean(order.delivered_date || order.deliveredDate) ||
+    (eventStr.includes('delivered') && !eventStr.includes('undelivered') && !eventStr.includes('attempt'));
+
+  if (isDelivered) {
+    return 'Delivered';
   }
 
-  // 1. Cancelled
-  if (
+  // 1. Cancelled (Commercial source cancellation takes precedence over batch removal/soft delete)
+  const isCancelled =
     order.order_status === 'CANCELLED' ||
     (order.order_status || '').toLowerCase() === 'cancelled' ||
     statusStr === 'cancelled' || 
     finStr === 'voided' || 
     rawStatusStr.includes('cancel') ||
-    (order.cancellation && order.cancellation.status === 'CANCELLED') ||
+    Boolean(order.cancellation && (order.cancellation.status === 'CANCELLED' || String(order.cancellation.status).toLowerCase() === 'cancelled')) ||
+    Boolean(extra.cancellation && (extra.cancellation.status === 'CANCELLED' || String(extra.cancellation.status).toLowerCase() === 'cancelled')) ||
     order.cancellationStatus === 'Completed' ||
-    order.isCancelled
-  ) {
+    Boolean(order.isCancelled) ||
+    Boolean(extra.cancellation_requested_at || extra.cancelled_at);
+
+  if (isCancelled) {
     return 'Cancelled';
+  }
+
+  // 2. Deleted (Genuinely deleted orders with no terminal delivery or valid cancellation)
+  if (isDeletedOrder(order)) {
+    return 'Deleted';
   }
 
   // 2. RTO (Return to Origin) categories

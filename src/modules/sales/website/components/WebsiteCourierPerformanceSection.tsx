@@ -151,18 +151,22 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
 
     list.forEach(o => {
       const canonical = getCanonicalStatus(o);
-      const isDeleted = canonical === 'Deleted' || isDeletedOrder(o);
-      const isCancelled = canonical === 'Cancelled' || o.order_status === 'CANCELLED';
+      const isCancelled =
+        canonical === 'Cancelled' ||
+        o.order_status === 'CANCELLED' ||
+        Boolean(o.cancellation && (o.cancellation.status === 'CANCELLED' || String(o.cancellation.status).toLowerCase() === 'cancelled')) ||
+        Boolean((o as any).extra_data?.cancellation && ((o as any).extra_data.cancellation.status === 'CANCELLED' || String((o as any).extra_data.cancellation.status).toLowerCase() === 'cancelled'));
+      const isDeleted = !isCancelled && (canonical === 'Deleted' || isDeletedOrder(o));
       const awb = (o.awb_number || (o as any).extra_data?.awb_number || '').trim();
       const courier = (o.courier || (o as any).extra_data?.courier || '').trim();
 
-      if (isDeleted) {
-        categories.DELETED_ORDERS.orders.push(o);
+      if (isCancelled) {
+        categories.CANCELLED_PRIOR_DISPATCH.orders.push(o);
         return;
       }
 
-      if (isCancelled) {
-        categories.CANCELLED_PRIOR_DISPATCH.orders.push(o);
+      if (isDeleted) {
+        categories.DELETED_ORDERS.orders.push(o);
         return;
       }
 
@@ -197,8 +201,12 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
       deletedCount: categories.DELETED_ORDERS.orders.length,
       allDiagnosticOrders: list.filter(o => {
         const canonical = getCanonicalStatus(o);
-        const isDeleted = canonical === 'Deleted' || isDeletedOrder(o);
-        const isCancelled = canonical === 'Cancelled' || o.order_status === 'CANCELLED';
+        const isCancelled =
+          canonical === 'Cancelled' ||
+          o.order_status === 'CANCELLED' ||
+          Boolean(o.cancellation && (o.cancellation.status === 'CANCELLED' || String(o.cancellation.status).toLowerCase() === 'cancelled')) ||
+          Boolean((o as any).extra_data?.cancellation && ((o as any).extra_data.cancellation.status === 'CANCELLED' || String((o as any).extra_data.cancellation.status).toLowerCase() === 'cancelled'));
+        const isDeleted = !isCancelled && (canonical === 'Deleted' || isDeletedOrder(o));
         const awb = (o.awb_number || (o as any).extra_data?.awb_number || '').trim();
         const courier = (o.courier || (o as any).extra_data?.courier || '').trim();
         return isDeleted || isCancelled || !awb || !courier;
@@ -260,6 +268,30 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
   // Helper to get diagnostic reason text for an order
   const getDiagnosticReason = (order: WebsiteConsolidatedOrder): string => {
     const canonical = getCanonicalStatus(order);
+    const isCancelled =
+      canonical === 'Cancelled' ||
+      order.order_status === 'CANCELLED' ||
+      Boolean(order.cancellation && (order.cancellation.status === 'CANCELLED' || String(order.cancellation.status).toLowerCase() === 'cancelled')) ||
+      Boolean((order as any).extra_data?.cancellation && ((order as any).extra_data.cancellation.status === 'CANCELLED' || String((order as any).extra_data.cancellation.status).toLowerCase() === 'cancelled'));
+
+    if (isCancelled) {
+      const extra = order.extra_data || {};
+      const cancelInfo = order.cancellation || extra.cancellation || {};
+      const cancelDate = cancelInfo.cancelled_at || extra.cancelled_at || extra.cancellation_requested_at || order.order_date;
+      const formattedDate = cancelDate ? formatSalesDateShort(cancelDate) : '';
+
+      const finStatus = (order.financial_status || extra.financial_status || '').toLowerCase();
+      const finTag = finStatus ? ` (${finStatus.charAt(0).toUpperCase() + finStatus.slice(1)})` : '';
+
+      const reasonText = String(cancelInfo.reason || extra.cancellation_reason || '');
+      const source = reasonText.toLowerCase().includes('shopify') ? 'in Shopify ' : '';
+
+      if (formattedDate) {
+        return `Cancelled ${source}on ${formattedDate}${finTag}; excluded from carrier manifest.`;
+      }
+      return `Cancelled ${source}${finTag ? finTag + ' ' : ''}pre-fulfillment; excluded from carrier manifest.`;
+    }
+
     if (canonical === 'Deleted' || isDeletedOrder(order)) {
       const extra = order.extra_data || {};
       const delDate = extra.deleted_at || (order as any).deletedAt;
@@ -267,9 +299,6 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
       const datePart = delDate ? `Deleted on ${formatSalesDateShort(delDate)}` : 'Order marked as DELETED';
       const reasonPart = delReason ? `: ${delReason}` : '; excluded from logistics manifests and dispatch.';
       return `${datePart}${reasonPart}`;
-    }
-    if (canonical === 'Cancelled' || order.order_status === 'CANCELLED') {
-      return 'Order cancelled pre-fulfillment; excluded from carrier manifest.';
     }
     const awb = (order.awb_number || (order as any).extra_data?.awb_number || '').trim();
     const courier = (order.courier || (order as any).extra_data?.courier || '').trim();
@@ -1036,8 +1065,8 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                       <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
                         {displayedOrders.slice(0, 300).map(o => {
                           const canonical = getCanonicalStatus(o);
-                          const isDeleted = canonical === 'Deleted' || isDeletedOrder(o);
-                          const isCancelled = !isDeleted && (canonical === 'Cancelled' || o.order_status === 'CANCELLED');
+                          const isCancelled = canonical === 'Cancelled' || o.order_status === 'CANCELLED' || Boolean(o.cancellation && (o.cancellation.status === 'CANCELLED' || String(o.cancellation.status).toLowerCase() === 'cancelled'));
+                          const isDeleted = !isCancelled && (canonical === 'Deleted' || isDeletedOrder(o));
                           const awb = o.awb_number || (o as any).extra_data?.awb_number || '';
                           const courier = o.courier || (o as any).extra_data?.courier || '';
                           const reason = getDiagnosticReason(o);
@@ -1066,7 +1095,7 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                                     ? 'bg-emerald-500/20 text-emerald-300'
                                     : 'bg-blue-500/20 text-blue-300'
                                 }`}>
-                                  {isDeleted ? 'DELETED' : canonical}
+                                  {isDeleted ? 'DELETED' : isCancelled ? 'CANCELLED' : canonical}
                                 </span>
                               </td>
                               <td className="py-2.5 px-3 font-sans">

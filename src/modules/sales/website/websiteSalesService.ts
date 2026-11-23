@@ -736,15 +736,28 @@ export class WebsiteSalesService {
         (extra.delhivery_current_status && extra.delhivery_current_status.toLowerCase().includes('deliv')) ||
         (o.dispatch_status && o.dispatch_status.toUpperCase() === 'DELIVERED');
 
-      // Genuinely deleted orders carry explicit tombstones in sales_orders or customer_tracking_shipments
-      const isExplicitlyDeleted =
+      // Authoritative source cancellation detection:
+      // Orders that were cancelled in Shopify / source system must retain their business status
+      // and must NEVER be overridden as "Deleted Orders" due to subsequent sales batch deletion or Dexie trash.
+      const isCancelledInSource =
+        o.order_status === 'CANCELLED' ||
+        Boolean(extra.cancellation && (extra.cancellation.status === 'CANCELLED' || String(extra.cancellation.status).toLowerCase() === 'cancelled')) ||
+        (extra.fulfillment_status && extra.fulfillment_status.toLowerCase() === 'cancelled') ||
+        (extra.financial_status && extra.financial_status.toLowerCase() === 'voided') ||
+        Boolean(extra.cancellation_requested_at || extra.cancelled_at);
+
+      // Genuinely deleted orders carry explicit tombstones in sales_orders or customer_tracking_shipments,
+      // and must NOT be an order that already has a terminal delivery or source cancellation.
+      const isExplicitlyDeleted = !hasTerminalDelivery && !isCancelledInSource && (
         o.order_status === 'DELETED' ||
         Boolean(extra.is_deleted || extra.tombstone) ||
         trackRec?.status === 'Order Deleted' ||
-        trackRec?.raw_status === 'DELETED';
+        trackRec?.raw_status === 'DELETED'
+      );
 
       const isOrderDeleted = isExplicitlyDeleted || (
         !hasTerminalDelivery &&
+        !isCancelledInSource &&
         logRec?.status === 'Deleted' &&
         Boolean(logRec?.isDeleted || logRec?.trashReason?.toLowerCase().includes('deleted from sales'))
       );
@@ -753,10 +766,10 @@ export class WebsiteSalesService {
       const finalAwb = trackRec?.awb_number || logRec?.awbNumber || extra.awb_number || o.awb_number || '';
       const finalShipmentStatus = isOrderDeleted
         ? 'Deleted'
-        : (trackRec?.status || logRec?.status || (finalAwb ? 'Dispatched' : (o.dispatch_status === 'DELIVERED' ? 'Delivered' : (o.order_status === 'CANCELLED' ? 'Cancelled' : 'Pending Manifest'))));
+        : (trackRec?.status || logRec?.status || (finalAwb ? 'Dispatched' : (o.dispatch_status === 'DELIVERED' ? 'Delivered' : (isCancelledInSource ? 'Cancelled' : 'Pending Manifest'))));
       const finalRawStatus = isOrderDeleted
         ? 'DELETED'
-        : (trackRec?.raw_status || logRec?.rawStatus || (logRec as any)?.raw_status || extra.delhivery_current_status || extra.raw_status || (o.dispatch_status === 'DELIVERED' ? 'DELIVERED' : ''));
+        : (trackRec?.raw_status || logRec?.rawStatus || (logRec as any)?.raw_status || extra.delhivery_current_status || extra.raw_status || (o.dispatch_status === 'DELIVERED' ? 'DELIVERED' : (isCancelledInSource ? 'CANCELLED' : '')));
 
       return {
         id: o.id,
@@ -790,7 +803,7 @@ export class WebsiteSalesService {
         conflict_details: extra.conflict_details || '',
         created_at: o.created_at,
         items,
-        fulfillment_status: isOrderDeleted ? 'Deleted' : (extra.fulfillment_status || o.dispatch_status || o.order_status || 'unfulfilled'),
+        fulfillment_status: isOrderDeleted ? 'Deleted' : (extra.fulfillment_status || (isCancelledInSource ? 'cancelled' : (o.dispatch_status || o.order_status || 'unfulfilled'))),
         financial_status: extra.financial_status || '',
         awb_number: finalAwb,
         courier: finalCourier,
@@ -799,21 +812,24 @@ export class WebsiteSalesService {
         delhivery_remarks: trackRec?.remarks || extra.delhivery_remarks || '',
         extra_data: {
           ...extra,
-          is_deleted: isOrderDeleted ? true : extra.is_deleted,
-          deleted_at: isOrderDeleted ? (extra.deleted_at || logRec?.deletedAt || trackRec?.updated_at || o.updated_at) : extra.deleted_at,
-          deletion_reason: isOrderDeleted ? (extra.deletion_reason || logRec?.trashReason || trackRec?.remarks || 'Order deleted') : extra.deletion_reason
+          is_deleted: isOrderDeleted ? true : false,
+          deleted_at: isOrderDeleted ? (extra.deleted_at || logRec?.deletedAt || trackRec?.updated_at || o.updated_at) : (isCancelledInSource ? undefined : extra.deleted_at),
+          deletion_reason: isOrderDeleted ? (extra.deletion_reason || logRec?.trashReason || trackRec?.remarks || 'Order deleted') : (isCancelledInSource ? undefined : extra.deletion_reason),
+          batch_removal_audit: (logRec?.trashReason?.toLowerCase().includes('deleted from sales') || extra.deletion_reason?.toLowerCase().includes('deleted from sales'))
+            ? (logRec?.trashReason || extra.deletion_reason)
+            : undefined
         },
         fulfilled_date: trackRec?.delivered_date || trackRec?.dispatch_date || extra.fulfilled_date || o.dispatch_date || '',
-        order_status: isOrderDeleted ? 'DELETED' : o.order_status,
+        order_status: isOrderDeleted ? 'DELETED' : (isCancelledInSource ? 'CANCELLED' : o.order_status),
         isDeleted: isOrderDeleted,
-        cancellation: extra.cancellation || (o.order_status === 'CANCELLED' ? {
+        cancellation: extra.cancellation || (isCancelledInSource ? {
           status: 'CANCELLED',
-          reason: extra.cancellation_reason || 'Order cancelled',
+          reason: extra.cancellation_reason || 'Cancelled in source export (Shopify)',
           notes: extra.cancellation_notes,
-          requested_by: extra.cancellation_requested_by || 'Sales Team',
-          requested_at: extra.cancellation_requested_at || o.updated_at || o.created_at,
-          confirmed_by: extra.cancellation_confirmed_by || 'Sales Team',
-          confirmed_at: extra.cancellation_confirmed_at || o.updated_at || o.created_at,
+          requested_by: extra.cancellation_requested_by || 'Source System',
+          requested_at: extra.cancellation_requested_at || extra.cancelled_at || o.updated_at || o.created_at,
+          confirmed_by: extra.cancellation_confirmed_by || 'Source System',
+          confirmed_at: extra.cancellation_confirmed_at || extra.cancelled_at || o.updated_at || o.created_at,
           logistics_action: extra.logistics_action || 'CONFIRMED'
         } : undefined)
       };

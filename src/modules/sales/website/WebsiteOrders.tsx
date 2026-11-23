@@ -730,8 +730,11 @@ export const WebsiteOrders: React.FC = () => {
                 {orders.map((o) => {
                   const displayPhone = formatPhoneNumber(o.phone);
                   const isMulti = o.items && o.items.length > 1;
-                  const isDeleted = isDeletedOrder(o) || o.order_status === 'DELETED' || (o.fulfillment_status || '').toLowerCase().trim() === 'deleted';
-                  const isCancelledOrder = !isDeleted && (o.order_status === 'CANCELLED' || o.cancellation?.status === 'CANCELLED' || (o.fulfillment_status || '').toLowerCase().trim() === 'cancelled');
+                  const isCancelledOrder = (o.order_status || '').toUpperCase() === 'CANCELLED' || 
+                    o.cancellation?.status === 'CANCELLED' || 
+                    (o.fulfillment_status || '').toLowerCase().trim() === 'cancelled' ||
+                    Boolean((o as any).extra_data?.cancellation && ((o as any).extra_data.cancellation.status === 'CANCELLED' || String((o as any).extra_data.cancellation.status).toLowerCase() === 'cancelled'));
+                  const isDeleted = !isCancelledOrder && (isDeletedOrder(o) || o.order_status === 'DELETED' || (o.fulfillment_status || '').toLowerCase().trim() === 'deleted');
                   const rawFulfillment = (o.fulfillment_status || '').toLowerCase().trim();
                   const rawDispatch = (o.dispatch_status || '').toUpperCase().trim();
                   const isFulfilled = !isDeleted && !isCancelledOrder && (
