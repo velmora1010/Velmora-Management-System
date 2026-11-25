@@ -54,6 +54,7 @@ export interface NormalizedTransaction extends Partial<FinanceExpense> {
   approved_by?: string | null;
   source?: string | null; // Credit specific
   ruleConflict?: ExpenseRuleConflict;
+  matchedRuleId?: string | null;
 }
 
 export interface DocumentParser {

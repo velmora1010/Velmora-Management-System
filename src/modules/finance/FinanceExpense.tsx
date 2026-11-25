@@ -1,6 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Search, X, Plus, RefreshCw } from 'lucide-react';
+import { Search, X, Plus, RefreshCw, AlertTriangle } from 'lucide-react';
 import { useExpenses, type FinanceExpense as FinanceExpenseType } from '../../hooks/finance/useExpenses';
+import {
+  resolveExpenseCategoryPaths,
+  getCategoryCompletionStatus
+} from './services/expenseCategoryPathUtils';
 import { ExpenseForm } from './ExpenseForm';
 import { ExpenseCardEditor } from './ExpenseCardEditor';
 import { ExpenseCard } from './ExpenseCard';
@@ -12,9 +16,11 @@ import { ExpenseAnalytics } from './ExpenseAnalytics';
 import toast from 'react-hot-toast';
 
 export const FinanceExpense = () => {
-  const { expenses, isLoading, archiveExpense, refreshExpenses } = useExpenses();
+  const { expenses, isLoading, pathError, archiveExpense, refreshExpenses } = useExpenses();
   const [searchQuery, setSearchQuery] = useState('');
-  const [categorizationFilter, setCategorizationFilter] = useState<'all' | 'categorized' | 'uncategorized'>('all');
+  const [categorizationFilter, setCategorizationFilter] = useState<
+    'all' | 'categorized' | 'uncategorized' | 'conflict' | 'load_error'
+  >('all');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const handleRefresh = async () => {
@@ -45,43 +51,63 @@ export const FinanceExpense = () => {
   const [selectedSub2Filter, setSelectedSub2Filter] = useState<string>('all');
   const [selectedSub3Filter, setSelectedSub3Filter] = useState<string>('all');
 
-  // Dynamic Filter Options
+  // Dynamic Filter Options (across all assigned category paths)
   const dynamicDepartments = useMemo(() => {
-    const depts = new Set(expenses.map(e => e.main_category).filter(Boolean));
-    return Array.from(depts).sort() as string[];
+    const depts = new Set<string>();
+    expenses.forEach(e => {
+      resolveExpenseCategoryPaths(e).paths.forEach(p => {
+        if (p.main_category) depts.add(p.main_category);
+      });
+    });
+    return Array.from(depts).sort();
   }, [expenses]);
 
   const dynamicSections = useMemo(() => {
     if (selectedDeptFilter === 'all') return [];
-    const secs = new Set(
-      expenses
-        .filter(e => e.main_category === selectedDeptFilter)
-        .map(e => e.sub_category1)
-        .filter(Boolean)
-    );
-    return Array.from(secs).sort() as string[];
+    const secs = new Set<string>();
+    expenses.forEach(e => {
+      resolveExpenseCategoryPaths(e).paths.forEach(p => {
+        if (p.main_category === selectedDeptFilter && p.sub_category1) {
+          secs.add(p.sub_category1);
+        }
+      });
+    });
+    return Array.from(secs).sort();
   }, [expenses, selectedDeptFilter]);
 
   const dynamicSub2 = useMemo(() => {
     if (selectedDeptFilter === 'all' || selectedSectionFilter === 'all') return [];
-    const sub2s = new Set(
-      expenses
-        .filter(e => e.main_category === selectedDeptFilter && e.sub_category1 === selectedSectionFilter)
-        .map(e => e.sub_category2)
-        .filter(Boolean)
-    );
-    return Array.from(sub2s).sort() as string[];
+    const sub2s = new Set<string>();
+    expenses.forEach(e => {
+      resolveExpenseCategoryPaths(e).paths.forEach(p => {
+        if (
+          p.main_category === selectedDeptFilter &&
+          p.sub_category1 === selectedSectionFilter &&
+          p.sub_category2
+        ) {
+          sub2s.add(p.sub_category2);
+        }
+      });
+    });
+    return Array.from(sub2s).sort();
   }, [expenses, selectedDeptFilter, selectedSectionFilter]);
 
   const dynamicSub3 = useMemo(() => {
     if (selectedDeptFilter === 'all' || selectedSectionFilter === 'all' || selectedSub2Filter === 'all') return [];
-    const sub3s = new Set(
-      expenses
-        .filter(e => e.main_category === selectedDeptFilter && e.sub_category1 === selectedSectionFilter && e.sub_category2 === selectedSub2Filter)
-        .map(e => e.sub_category3)
-        .filter(Boolean)
-    );
-    return Array.from(sub3s).sort() as string[];
+    const sub3s = new Set<string>();
+    expenses.forEach(e => {
+      resolveExpenseCategoryPaths(e).paths.forEach(p => {
+        if (
+          p.main_category === selectedDeptFilter &&
+          p.sub_category1 === selectedSectionFilter &&
+          p.sub_category2 === selectedSub2Filter &&
+          p.sub_category3
+        ) {
+          sub3s.add(p.sub_category3);
+        }
+      });
+    });
+    return Array.from(sub3s).sort();
   }, [expenses, selectedDeptFilter, selectedSectionFilter, selectedSub2Filter]);
 
   // Reset child filters if parent filter changes
@@ -101,44 +127,71 @@ export const FinanceExpense = () => {
   }, [selectedSub2Filter]);
 
   const filteredExpenses = useMemo(() => {
+    const hasAnyCategoryFilter =
+      selectedDeptFilter !== 'all' ||
+      selectedSectionFilter !== 'all' ||
+      selectedSub2Filter !== 'all' ||
+      selectedSub3Filter !== 'all';
+
     const filtered = expenses.filter(expense => {
-      // Dept filter
-      if (selectedDeptFilter !== 'all' && expense.main_category !== selectedDeptFilter) {
-        return false;
-      }
-      // Section filter
-      if (selectedSectionFilter !== 'all' && expense.sub_category1 !== selectedSectionFilter) {
-        return false;
-      }
-      // Sub 2 filter
-      if (selectedSub2Filter !== 'all' && expense.sub_category2 !== selectedSub2Filter) {
-        return false;
-      }
-      // Sub 3 filter
-      if (selectedSub3Filter !== 'all' && expense.sub_category3 !== selectedSub3Filter) {
-        return false;
+      const resolved = resolveExpenseCategoryPaths(expense);
+      const completionStatus = getCategoryCompletionStatus(expense);
+
+      // Path-coherent category filtering: all active levels must match the same path
+      if (hasAnyCategoryFilter) {
+        const matchesPath = resolved.paths.some(path => {
+          if (selectedDeptFilter !== 'all' && path.main_category !== selectedDeptFilter) {
+            return false;
+          }
+          if (selectedSectionFilter !== 'all' && path.sub_category1 !== selectedSectionFilter) {
+            return false;
+          }
+          if (selectedSub2Filter !== 'all' && path.sub_category2 !== selectedSub2Filter) {
+            return false;
+          }
+          if (selectedSub3Filter !== 'all' && path.sub_category3 !== selectedSub3Filter) {
+            return false;
+          }
+          return true;
+        });
+        if (!matchesPath) return false;
       }
 
-      // Categorization filter
-      if (categorizationFilter === 'categorized' && expense.main_category === 'Uncategorized') {
-        return false;
-      }
-      if (categorizationFilter === 'uncategorized' && expense.main_category !== 'Uncategorized') {
-        return false;
+      // Revised Categorization Status Filter
+      if (categorizationFilter === 'categorized') {
+        if (completionStatus !== 'fully_categorized' && completionStatus !== 'unsynced_scalar_fallback') {
+          return false;
+        }
+      } else if (categorizationFilter === 'uncategorized') {
+        if (completionStatus !== 'uncategorized') {
+          return false;
+        }
+      } else if (categorizationFilter === 'conflict') {
+        if (completionStatus !== 'conflict') {
+          return false;
+        }
+      } else if (categorizationFilter === 'load_error') {
+        if (completionStatus !== 'load_error') {
+          return false;
+        }
       }
 
       if (!searchQuery) return true;
       const q = searchQuery.toLowerCase();
-      const resolvedDept = (expense.main_category || '-').toLowerCase();
-      const resolvedSection = (expense.sub_category1 || '-').toLowerCase();
+
+      const matchesCategorySearch = resolved.paths.some(path =>
+        (path.main_category || '').toLowerCase().includes(q) ||
+        (path.sub_category1 || '').toLowerCase().includes(q) ||
+        (path.sub_category2 || '').toLowerCase().includes(q) ||
+        (path.sub_category3 || '').toLowerCase().includes(q) ||
+        (path.sub_category3_values || []).some(tag => tag.toLowerCase().includes(q))
+      );
 
       return (
-        resolvedDept.includes(q) ||
-        resolvedSection.includes(q) ||
-        (expense.sub_category2 || '').toLowerCase().includes(q) ||
-        (expense.sub_category3 || '').toLowerCase().includes(q) ||
+        matchesCategorySearch ||
         (expense.vendor || '').toLowerCase().includes(q) ||
-        (expense.purchased_by || '').toLowerCase().includes(q)
+        (expense.purchased_by || '').toLowerCase().includes(q) ||
+        (expense.notes || '').toLowerCase().includes(q)
       );
     });
 
@@ -353,11 +406,13 @@ export const FinanceExpense = () => {
             <select
               value={categorizationFilter}
               onChange={(e) => setCategorizationFilter(e.target.value as any)}
-              className="h-[42px] shrink-0 bg-slate-800/80 border border-slate-700/80 text-slate-200 text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 transition-all max-w-[125px] cursor-pointer"
+              className="h-[42px] shrink-0 bg-slate-800/80 border border-slate-700/80 text-slate-200 text-xs rounded-xl px-3 py-2 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 transition-all max-w-[135px] cursor-pointer"
             >
               <option value="all" className="bg-slate-900 text-slate-100">All</option>
               <option value="categorized" className="bg-slate-900 text-slate-100">Categorized</option>
               <option value="uncategorized" className="bg-slate-900 text-slate-100">Uncategorized</option>
+              <option value="conflict" className="bg-slate-900 text-slate-100">Conflict</option>
+              <option value="load_error" className="bg-slate-900 text-slate-100">Load Error</option>
             </select>
 
             {/* 7. Refresh Button */}
@@ -421,6 +476,24 @@ export const FinanceExpense = () => {
 
         {activeTab === 'view' && (
           <>
+            {pathError && (
+              <div className="mb-4 p-3.5 bg-amber-500/10 border border-amber-500/30 text-amber-200 rounded-xl text-xs sm:text-sm font-medium flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <AlertTriangle size={16} className="shrink-0 text-amber-400" />
+                  <span>{pathError}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRefresh}
+                  disabled={isRefreshing || isLoading}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 text-xs font-semibold shrink-0 transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw size={13} className={isRefreshing ? 'animate-spin' : ''} />
+                  {isRefreshing ? 'Retrying...' : 'Retry'}
+                </button>
+              </div>
+            )}
+
             {isLoading && expenses.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-64 gap-3">
                 <div className="animate-spin rounded-full h-8 w-8 border-2 border-purple-500/20 border-t-purple-500"></div>
@@ -462,7 +535,7 @@ export const FinanceExpense = () => {
                 </button>
               </div>
             ) : (
-              <div className="flex flex-col gap-8 pb-12">
+              <div className="@container flex flex-col gap-8 pb-12">
                 {groupedExpenses.map(group => (
                   <div key={group.date} className="flex flex-col gap-4">
                     <div className="flex items-center gap-4">
@@ -473,7 +546,7 @@ export const FinanceExpense = () => {
                       <div className="h-px bg-slate-700/60 flex-1"></div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 items-start">
+                    <div className="grid grid-cols-1 @[520px]:grid-cols-2 @[780px]:grid-cols-3 gap-5 items-start">
                       {group.items.map(expense => (
                         <ExpenseCard
                           key={expense.id}

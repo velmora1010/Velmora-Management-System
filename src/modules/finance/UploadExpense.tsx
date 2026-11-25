@@ -159,6 +159,7 @@ export const UploadExpense = ({ onClose }: UploadExpenseProps) => {
           purchased_by: tx.purchased_by || null,
           approved_by: tx.approved_by || null,
           manually_edited: false,
+          matched_rule_id: !tx.ruleConflict && tx.matchedRuleId ? tx.matchedRuleId : null,
           categorization_source: tx.ruleConflict
             ? ('conflict' as const)
             : tx.main_category && tx.main_category !== 'Uncategorized'
@@ -172,6 +173,26 @@ export const UploadExpense = ({ onClose }: UploadExpenseProps) => {
 
       if (!result.success) {
         throw new Error(result.error || 'Failed to upload batch to database.');
+      }
+
+      if ((result.insertFailures?.length || 0) > 0) {
+        toast.error(
+          `${result.insertFailures!.length} expense(s) failed to insert (${result.insertedCount ?? 0} saved).`
+        );
+      }
+
+      if ((result.uncertainInserts?.length || 0) > 0) {
+        toast(
+          `${result.uncertainInserts!.length} expense(s) had an interrupted network response. Refresh Expenses/Imports before retrying to avoid duplicates.`,
+          { icon: '⚠️' }
+        );
+      }
+
+      if ((result.pathSyncFailures?.length || 0) > 0) {
+        toast(
+          `Expenses saved, but ${result.pathSyncFailures!.length} auto-categorized row(s) failed category-path sync and remain in Legacy/Unsynced fallback.`,
+          { icon: '⚠️' }
+        );
       }
 
       return result.batch_id;

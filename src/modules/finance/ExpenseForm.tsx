@@ -1,8 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, Receipt, AlertCircle } from 'lucide-react';
+import { X, Receipt, AlertCircle, Plus, RotateCcw, RefreshCw, Lock, AlertTriangle } from 'lucide-react';
 import { useExpenses, type FinanceExpense } from '../../hooks/finance/useExpenses';
+import { useRBAC } from '../../hooks/useRBAC';
 import { supabase } from '../../lib/supabase';
-import { MultiSelect } from '../../components/ui/MultiSelect';
+import { CategoryPathSelector, validateCategoryPathHierarchy } from './components/CategoryPathSelector';
+import {
+  type ExpenseCategoryPath,
+  resolveExpenseCategoryPaths,
+  getCategoryPathKey,
+  hasDuplicateCategoryPaths,
+  sanitizeCategoryPathForRpc,
+  isValidRowVersion
+} from './services/expenseCategoryPathUtils';
 
 interface ExpenseFormProps {
   expense: FinanceExpense | null;
@@ -13,9 +22,25 @@ interface ExpenseFormProps {
 }
 
 export const ExpenseForm = ({ expense, onClose, onSuccess, isInline, formId = "expenseForm" }: ExpenseFormProps) => {
-  const { addExpense, updateExpense } = useExpenses();
+  const {
+    addExpense,
+    saveExpenseWithCategories,
+    resetExpenseToUncategorized,
+    refreshExpenseById
+  } = useExpenses();
+  const { role, isEnabled } = useRBAC();
+  const isEditMode = Boolean(expense?.id);
+  const isExactAdmin = role === 'Admin' && isEnabled;
+  const isImported = Boolean(expense?.import_batch_id);
+  const isReadOnlyEdit = isEditMode && !isExactAdmin;
+
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [staleVersionWarning, setStaleVersionWarning] = useState<string | null>(null);
+  const [expectedRowVersion, setExpectedRowVersion] = useState<number | undefined>(() =>
+    expense && isValidRowVersion(expense.row_version) ? expense.row_version : undefined
+  );
 
   const [vendors, setVendors] = useState<string[]>([]);
 
@@ -34,45 +59,27 @@ export const ExpenseForm = ({ expense, onClose, onSuccess, isInline, formId = "e
     }
   );
 
-  // Hierarchy State
-  const [selectedMain, setSelectedMain] = useState(expense?.main_category || '');
-  const [selectedSub1, setSelectedSub1] = useState(expense?.sub_category1 || '');
-  const [selectedSub2, setSelectedSub2] = useState(expense?.sub_category2 || '');
-  const [selectedSub3, setSelectedSub3] = useState(expense?.sub_category3 || '');
-  const [selectedSub4Values, setSelectedSub4Values] = useState<string[]>(
-    expense?.sub_category3_values || []
+  // Multi-Category Paths State (single path for Create mode; multi-path for Edit mode)
+  const initialResolved = expense
+    ? resolveExpenseCategoryPaths(expense)
+    : { paths: [], source: 'none' as const, hasSyncWarning: false };
+  const [pathLoadError, setPathLoadError] = useState<boolean>(
+    initialResolved.source === 'load_error'
   );
-
-  // Options State
-  const [mainOptions, setMainOptions] = useState<string[]>([]);
-  const [sub1Options, setSub1Options] = useState<string[]>([]);
-  const [sub2Options, setSub2Options] = useState<string[]>([]);
-  const [sub3Options, setSub3Options] = useState<string[]>([]);
-  const [sub4Options, setSub4Options] = useState<string[]>([]);
-
-  const [isLoadingLevels, setIsLoadingLevels] = useState(true);
-
-  // Reusable Loader
-  const loadOptions = useCallback(async (
-    targetCol: string,
-    filters: Record<string, string> = {}
-  ): Promise<string[]> => {
-    try {
-      let query = supabase.from('finance_categories_rows').select(targetCol).eq('status', 'active');
-      for (const [key, val] of Object.entries(filters)) {
-        if (val) query = query.eq(key, val);
-      }
-      const { data, error } = await query;
-      if (error) throw error;
-      if (!data) return [];
-
-      const values = data.map((row: any) => row[targetCol]).filter(Boolean);
-      return Array.from(new Set(values)) as string[];
-    } catch (err) {
-      console.error(`Failed to load ${targetCol} options:`, err);
-      return [];
+  const [categoryPaths, setCategoryPaths] = useState<ExpenseCategoryPath[]>(() => {
+    if (initialResolved.paths.length > 0) {
+      return initialResolved.paths;
     }
-  }, []);
+    return [
+      {
+        main_category: '',
+        sub_category1: '',
+        sub_category2: null,
+        sub_category3: null,
+        sub_category3_values: []
+      }
+    ];
+  });
 
   // Preload Vendors
   useEffect(() => {
@@ -102,60 +109,6 @@ export const ExpenseForm = ({ expense, onClose, onSuccess, isInline, formId = "e
     return () => { mounted = false; };
   }, []);
 
-  // Preload & Cascade Fetching
-  useEffect(() => {
-    let mounted = true;
-    const preload = async () => {
-      setIsLoadingLevels(true);
-
-      const pMain = loadOptions('main');
-      const pSub1 = selectedMain ? loadOptions('sub1', { main: selectedMain }) : Promise.resolve([]);
-      const pSub2 = selectedMain && selectedSub1 ? loadOptions('sub2', { main: selectedMain, sub1: selectedSub1 }) : Promise.resolve([]);
-      const pSub3 = selectedMain && selectedSub1 && selectedSub2 ? loadOptions('sub3', { main: selectedMain, sub1: selectedSub1, sub2: selectedSub2 }) : Promise.resolve([]);
-      const pSub4 = selectedMain && selectedSub1 && selectedSub2 && selectedSub3 ? loadOptions('sub_sub_sub_category', { main: selectedMain, sub1: selectedSub1, sub2: selectedSub2, sub3: selectedSub3 }) : Promise.resolve([]);
-
-      const [m, s1, s2, s3, s4] = await Promise.all([pMain, pSub1, pSub2, pSub3, pSub4]);
-
-      if (mounted) {
-        setMainOptions(m);
-        setSub1Options(s1);
-        setSub2Options(s2);
-        setSub3Options(s3);
-        setSub4Options(s4);
-        setIsLoadingLevels(false);
-      }
-    };
-    preload();
-    return () => { mounted = false; };
-  }, [loadOptions, selectedMain, selectedSub1, selectedSub2, selectedSub3]);
-
-  // Hierarchy Reset Handlers
-  const handleMainChange = (val: string) => {
-    setSelectedMain(val);
-    setSelectedSub1('');
-    setSelectedSub2('');
-    setSelectedSub3('');
-    setSelectedSub4Values([]);
-  };
-
-  const handleSub1Change = (val: string) => {
-    setSelectedSub1(val);
-    setSelectedSub2('');
-    setSelectedSub3('');
-    setSelectedSub4Values([]);
-  };
-
-  const handleSub2Change = (val: string) => {
-    setSelectedSub2(val);
-    setSelectedSub3('');
-    setSelectedSub4Values([]);
-  };
-
-  const handleSub3Change = (val: string) => {
-    setSelectedSub3(val);
-    setSelectedSub4Values([]);
-  };
-
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({
@@ -164,30 +117,210 @@ export const ExpenseForm = ({ expense, onClose, onSuccess, isInline, formId = "e
     }));
   };
 
+  const handleAddCategoryPath = () => {
+    setCategoryPaths(prev => [
+      ...prev,
+      {
+        main_category: '',
+        sub_category1: '',
+        sub_category2: null,
+        sub_category3: null,
+        sub_category3_values: []
+      }
+    ]);
+  };
+
+  const handleUpdateCategoryPath = (index: number, nextPath: ExpenseCategoryPath) => {
+    setCategoryPaths(prev => prev.map((item, idx) => (idx === index ? nextPath : item)));
+  };
+
+  const handleRemoveCategoryPath = (index: number) => {
+    if (categoryPaths.length <= 1) return;
+    setCategoryPaths(prev => prev.filter((_, idx) => idx !== index));
+  };
+
+  const handleRefreshLatest = useCallback(async (syncPathsFromServer: boolean) => {
+    if (!expense?.id) return;
+    setIsRefreshing(true);
+    setError(null);
+    try {
+      const res = await refreshExpenseById(String(expense.id));
+      if (!res.success || !res.data) {
+        setError(res.error || 'Failed to refresh expense from database.');
+        return;
+      }
+
+      if (isValidRowVersion(res.data.row_version)) {
+        setExpectedRowVersion(res.data.row_version);
+      }
+      setStaleVersionWarning(null);
+
+      if (!res.pathLoadError) {
+        setPathLoadError(false);
+        if (syncPathsFromServer) {
+          const resolved = resolveExpenseCategoryPaths(res.data);
+          if (resolved.paths.length > 0) {
+            setCategoryPaths(resolved.paths);
+          }
+        }
+      } else {
+        setPathLoadError(true);
+        setError('Category paths could not be loaded. Please try refreshing again.');
+      }
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [expense?.id, refreshExpenseById]);
+
+  const buildExpenseUpdates = (): Record<string, unknown> => {
+    const updates: Record<string, unknown> = {
+      quantity:
+        formData.quantity !== undefined && formData.quantity !== null && String(formData.quantity) !== ''
+          ? Number(formData.quantity)
+          : null,
+      vendor: formData.vendor || null,
+      gst_status: formData.gst_status || null,
+      payment_mode: formData.payment_mode || null,
+      bank_account: formData.bank_account || null,
+      purchased_by: formData.purchased_by || null,
+      approved_by: formData.approved_by || null,
+      notes: formData.notes || null
+    };
+    if (!isImported) {
+      updates.amount = Number(formData.amount);
+    }
+    return updates;
+  };
+
+  const duplicateIndices = new Set<number>();
+  {
+    const seenKeys = new Map<string, number>();
+    categoryPaths.forEach((path, idx) => {
+      if (!path.main_category?.trim() || !path.sub_category1?.trim()) return;
+      const key = getCategoryPathKey(path);
+      if (seenKeys.has(key)) {
+        duplicateIndices.add(seenKeys.get(key)!);
+        duplicateIndices.add(idx);
+      } else {
+        seenKeys.set(key, idx);
+      }
+    });
+  }
+
+  const handleResetToUncategorized = async () => {
+    if (!isEditMode || !isExactAdmin) {
+      setError('Only enabled Admin users can reset expense categories.');
+      return;
+    }
+    if (pathLoadError) {
+      setError('Category paths failed to load. Refresh the expense before resetting.');
+      return;
+    }
+    if (!expense?.id) return;
+
+    setError(null);
+    setStaleVersionWarning(null);
+    setIsSubmitting(true);
+
+    try {
+      const res = await resetExpenseToUncategorized({
+        expenseId: String(expense.id),
+        expectedRowVersion,
+        expenseUpdates: buildExpenseUpdates()
+      });
+
+      if (!res.success) {
+        if (res.isStaleVersion) {
+          setStaleVersionWarning(
+            res.error || 'This expense was modified elsewhere. Refresh the version and retry.'
+          );
+        }
+        setError(res.error || 'Failed to reset expense to uncategorized.');
+        return;
+      }
+
+      if (res.data && isValidRowVersion(res.data.row_version)) {
+        setExpectedRowVersion(res.data.row_version);
+      }
+      onSuccess();
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedMain || !selectedSub1 || !formData.amount) {
-      setError('Please fill in Department, Category, and Amount.');
+
+    if (isEditMode && !isExactAdmin) {
+      setError('Only enabled Admin users can modify categorized expenses.');
+      return;
+    }
+
+    if (isEditMode && pathLoadError) {
+      setError(
+        'Category paths failed to load. Refresh the expense before saving to prevent overwriting existing categories.'
+      );
+      return;
+    }
+
+    if (!isImported && (!formData.amount || Number(formData.amount) <= 0)) {
+      setError('Please enter a valid Amount.');
+      return;
+    }
+
+    if (categoryPaths.length === 0) {
+      setError('At least one category path is required.');
+      return;
+    }
+
+    for (let i = 0; i < categoryPaths.length; i++) {
+      const check = validateCategoryPathHierarchy(categoryPaths[i]);
+      if (!check.valid) {
+        setError(`Category Path ${i + 1}: ${check.error}`);
+        return;
+      }
+    }
+
+    if (hasDuplicateCategoryPaths(categoryPaths)) {
+      setError('Duplicate category paths are not allowed. Please remove or change duplicate entries.');
       return;
     }
 
     setIsSubmitting(true);
     setError(null);
-
-    const payload = {
-      ...formData,
-      main_category: selectedMain,
-      sub_category1: selectedSub1,
-      sub_category2: selectedSub2,
-      sub_category3: selectedSub3,
-      sub_category3_values: selectedSub4Values,
-    };
+    setStaleVersionWarning(null);
 
     try {
-      if (expense?.id) {
-        const res = await updateExpense(expense.id, payload);
-        if (!res.success) throw new Error(res.error);
+      if (isEditMode && expense?.id) {
+        const res = await saveExpenseWithCategories({
+          expenseId: String(expense.id),
+          expectedRowVersion,
+          expenseUpdates: buildExpenseUpdates(),
+          categoryPaths: categoryPaths.map(sanitizeCategoryPathForRpc)
+        });
+        if (!res.success) {
+          if (res.isStaleVersion) {
+            setStaleVersionWarning(
+              res.error || 'This expense was updated elsewhere. Refresh version and retry without losing your edits.'
+            );
+          }
+          setError(res.error || 'Failed to save expense');
+          return;
+        }
+        if (res.data && isValidRowVersion(res.data.row_version)) {
+          setExpectedRowVersion(res.data.row_version);
+        }
       } else {
+        // Keep new expense creation workflow unchanged
+        const primaryPath = sanitizeCategoryPathForRpc(categoryPaths[0]);
+        const payload = {
+          ...formData,
+          main_category: primaryPath.main_category,
+          sub_category1: primaryPath.sub_category1,
+          sub_category2: primaryPath.sub_category2 || '',
+          sub_category3: primaryPath.sub_category3 || '',
+          sub_category3_values: primaryPath.sub_category3_values,
+        };
         const res = await addExpense(payload as FinanceExpense);
         if (!res.success) throw new Error(res.error);
       }
@@ -207,10 +340,55 @@ export const ExpenseForm = ({ expense, onClose, onSuccess, isInline, formId = "e
 
   const selectClasses = "w-full h-[42px] bg-slate-900/80 border border-slate-700/80 text-slate-100 text-sm rounded-xl px-3.5 py-2 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/40 transition-all disabled:opacity-40 disabled:cursor-not-allowed";
 
-  const textareaClasses = "w-full bg-slate-900/80 border border-slate-700/80 text-slate-100 text-sm rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/40 placeholder:text-slate-500 transition-all resize-none";
+  const textareaClasses = "w-full bg-slate-900/80 border border-slate-700/80 text-slate-100 text-sm rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/40 placeholder:text-slate-500 transition-all resize-none disabled:opacity-40 disabled:cursor-not-allowed";
+  const isFormFieldsDisabled = isReadOnlyEdit || (isEditMode && pathLoadError);
 
   const formContent = (
     <>
+      {isReadOnlyEdit && (
+        <div className="mb-4 p-4 bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-xl text-sm font-medium flex items-center gap-2.5">
+          <Lock size={18} className="shrink-0 text-amber-400" />
+          <span>
+            Category editing and resetting are restricted to enabled Admin users. This expense is read-only for your role ({role || 'Unknown'}).
+          </span>
+        </div>
+      )}
+
+      {isEditMode && pathLoadError && (
+        <div className="mb-4 p-4 bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-xl text-sm font-medium flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle size={18} className="shrink-0 text-amber-400" />
+            <span>
+              Category paths failed to load. Saving is blocked to prevent overwriting existing categories.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => handleRefreshLatest(true)}
+            disabled={isRefreshing}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 rounded-lg text-xs font-semibold text-amber-200 shrink-0 transition-colors"
+          >
+            <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
+            {isRefreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
+      )}
+
+      {staleVersionWarning && (
+        <div className="mb-4 p-4 bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-xl text-sm font-medium flex items-center justify-between gap-3">
+          <span>{staleVersionWarning}</span>
+          <button
+            type="button"
+            onClick={() => handleRefreshLatest(false)}
+            disabled={isRefreshing}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 rounded-lg text-xs font-semibold text-amber-200 shrink-0 transition-colors"
+          >
+            <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
+            {isRefreshing ? 'Refreshing...' : 'Refresh Version'}
+          </button>
+        </div>
+      )}
+
       {error && (
         <div className="mb-6 p-4 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl text-sm font-medium flex items-center gap-2.5">
           <AlertCircle size={18} className="shrink-0 text-rose-400" />
@@ -221,116 +399,53 @@ export const ExpenseForm = ({ expense, onClose, onSuccess, isInline, formId = "e
       <form id={formId} onSubmit={handleSubmit} className="space-y-6">
         {/* Section A: Categorization */}
         <div className="bg-slate-800/40 border border-slate-700/70 rounded-xl p-4 sm:p-5 space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-700/60">
+          <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-700/60">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-purple-500 shrink-0"></div>
               <h3 className="text-xs sm:text-sm font-semibold text-slate-200 uppercase tracking-wider">
-                Categorization
+                Categorization {isEditMode ? `(${categoryPaths.length})` : ''}
               </h3>
             </div>
-            <span className="text-xs text-slate-400 hidden sm:inline-block">
-              Department & category hierarchy
-            </span>
+
+            {isEditMode && isExactAdmin && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleResetToUncategorized}
+                  disabled={isSubmitting || isRefreshing || pathLoadError}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <RotateCcw size={14} />
+                  Reset to Uncategorized
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAddCategoryPath}
+                  disabled={isSubmitting || pathLoadError}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-300 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Plus size={14} />
+                  Add Category
+                </button>
+              </div>
+            )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Department */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                Department <span className="text-purple-400">*</span>
-              </label>
-              <select
-                required
-                value={selectedMain}
-                onChange={(e) => handleMainChange(e.target.value)}
-                disabled={isLoadingLevels && mainOptions.length === 0}
-                className={selectClasses}
-              >
-                <option value="" className="bg-slate-900 text-slate-400">
-                  {isLoadingLevels && mainOptions.length === 0 ? 'Loading departments...' : 'Select Department'}
-                </option>
-                {mainOptions.map(opt => (
-                  <option key={opt} value={opt} className="bg-slate-900 text-slate-100">
-                    {opt}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Category */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                Category <span className="text-purple-400">*</span>
-              </label>
-              <select
-                required
-                value={selectedSub1}
-                onChange={(e) => handleSub1Change(e.target.value)}
-                disabled={!selectedMain}
-                className={selectClasses}
-              >
-                <option value="" className="bg-slate-900 text-slate-400">Select Category</option>
-                {sub1Options.map(opt => (
-                  <option key={opt} value={opt} className="bg-slate-900 text-slate-100">
-                    {opt}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Sub Category 1 */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                Sub Category 1
-              </label>
-              <select
-                value={selectedSub2}
-                onChange={(e) => handleSub2Change(e.target.value)}
-                disabled={!selectedSub1 || sub2Options.length === 0}
-                className={selectClasses}
-              >
-                <option value="" className="bg-slate-900 text-slate-400">Select Sub Category 1</option>
-                {sub2Options.map(opt => (
-                  <option key={opt} value={opt} className="bg-slate-900 text-slate-100">
-                    {opt}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Sub Category 2 */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                Sub Category 2
-              </label>
-              <select
-                value={selectedSub3}
-                onChange={(e) => handleSub3Change(e.target.value)}
-                disabled={!selectedSub2 || sub3Options.length === 0}
-                className={selectClasses}
-              >
-                <option value="" className="bg-slate-900 text-slate-400">Select Sub Category 2</option>
-                {sub3Options.map(opt => (
-                  <option key={opt} value={opt} className="bg-slate-900 text-slate-100">
-                    {opt}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Sub Category 3 (MultiSelect) */}
-            <div className="space-y-1.5 md:col-span-2">
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                Sub Category 3
-              </label>
-              <MultiSelect
-                options={sub4Options}
-                selectedValues={selectedSub4Values}
-                onChange={setSelectedSub4Values}
-                placeholder="Select Sub Category 3 Values..."
-                disabled={!selectedSub3 || sub4Options.length === 0}
+          <div className="space-y-3">
+            {categoryPaths.map((path, index) => (
+              <CategoryPathSelector
+                key={`form-cat-path-${index}`}
+                index={index}
+                value={path}
+                onChange={(nextPath) => handleUpdateCategoryPath(index, nextPath)}
+                onRemove={() => handleRemoveCategoryPath(index)}
+                canRemove={isEditMode && isExactAdmin && categoryPaths.length > 1}
+                disabled={isReadOnlyEdit || (isEditMode && pathLoadError) || isSubmitting}
+                showHeader={isEditMode}
+                variant="form"
+                isDuplicate={duplicateIndices.has(index)}
               />
-            </div>
+            ))}
           </div>
         </div>
 
@@ -351,9 +466,17 @@ export const ExpenseForm = ({ expense, onClose, onSuccess, isInline, formId = "e
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Amount */}
             <div className="space-y-1.5">
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                Amount <span className="text-purple-400">*</span>
-              </label>
+              <div className="flex items-center justify-between gap-2">
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                  Amount <span className="text-purple-400">*</span>
+                </label>
+                {isImported && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-400">
+                    <Lock size={12} />
+                    Imported (Locked)
+                  </span>
+                )}
+              </div>
               <div className="relative">
                 <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-semibold text-sm">
                   ₹
@@ -361,7 +484,8 @@ export const ExpenseForm = ({ expense, onClose, onSuccess, isInline, formId = "e
                 <input
                   type="number"
                   name="amount"
-                  required
+                  required={!isImported}
+                  disabled={isFormFieldsDisabled || isImported}
                   value={formData.amount || ''}
                   onChange={handleChange}
                   className={`${inputClasses} pl-8`}
@@ -378,6 +502,7 @@ export const ExpenseForm = ({ expense, onClose, onSuccess, isInline, formId = "e
               <input
                 type="number"
                 name="quantity"
+                disabled={isFormFieldsDisabled}
                 value={formData.quantity || ''}
                 onChange={handleChange}
                 className={inputClasses}
@@ -392,6 +517,7 @@ export const ExpenseForm = ({ expense, onClose, onSuccess, isInline, formId = "e
               </label>
               <select
                 name="vendor"
+                disabled={isFormFieldsDisabled}
                 value={formData.vendor || ''}
                 onChange={handleChange}
                 className={selectClasses}
@@ -412,6 +538,7 @@ export const ExpenseForm = ({ expense, onClose, onSuccess, isInline, formId = "e
               </label>
               <select
                 name="gst_status"
+                disabled={isFormFieldsDisabled}
                 value={formData.gst_status || ''}
                 onChange={handleChange}
                 className={selectClasses}
@@ -447,6 +574,7 @@ export const ExpenseForm = ({ expense, onClose, onSuccess, isInline, formId = "e
               </label>
               <select
                 name="payment_mode"
+                disabled={isFormFieldsDisabled}
                 value={formData.payment_mode || ''}
                 onChange={handleChange}
                 className={selectClasses}
@@ -467,6 +595,7 @@ export const ExpenseForm = ({ expense, onClose, onSuccess, isInline, formId = "e
               <input
                 type="text"
                 name="bank_account"
+                disabled={isFormFieldsDisabled}
                 value={formData.bank_account || ''}
                 onChange={handleChange}
                 className={inputClasses}
@@ -482,6 +611,7 @@ export const ExpenseForm = ({ expense, onClose, onSuccess, isInline, formId = "e
               <input
                 type="text"
                 name="purchased_by"
+                disabled={isFormFieldsDisabled}
                 value={formData.purchased_by || ''}
                 onChange={handleChange}
                 className={inputClasses}
@@ -497,6 +627,7 @@ export const ExpenseForm = ({ expense, onClose, onSuccess, isInline, formId = "e
               <input
                 type="text"
                 name="approved_by"
+                disabled={isFormFieldsDisabled}
                 value={formData.approved_by || ''}
                 onChange={handleChange}
                 className={inputClasses}
@@ -512,6 +643,7 @@ export const ExpenseForm = ({ expense, onClose, onSuccess, isInline, formId = "e
               <textarea
                 name="notes"
                 rows={2}
+                disabled={isFormFieldsDisabled}
                 value={formData.notes || ''}
                 onChange={handleChange}
                 className={textareaClasses}
@@ -572,7 +704,7 @@ export const ExpenseForm = ({ expense, onClose, onSuccess, isInline, formId = "e
         <button
           type="submit"
           form={formId}
-          disabled={isSubmitting}
+          disabled={isReadOnlyEdit || (isEditMode && pathLoadError) || isSubmitting}
           className="px-6 py-2.5 rounded-xl text-sm font-semibold bg-purple-600 text-white shadow-md shadow-purple-600/25 hover:bg-purple-500 transition-all active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none flex items-center gap-2"
         >
           {isSubmitting ? (
