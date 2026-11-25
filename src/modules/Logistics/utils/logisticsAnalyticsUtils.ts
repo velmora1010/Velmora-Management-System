@@ -181,7 +181,9 @@ export function isDeletedOrder(order: any): boolean {
     statusStr === 'delivered' || 
     rawStatusStr === 'delivered' || 
     dispatchStatusStr === 'delivered' ||
-    Boolean(order.delivered_date || order.deliveredDate);
+    (order.fulfillment_status || '').toLowerCase() === 'fulfilled' ||
+    (extra.fulfillment_status || '').toLowerCase() === 'fulfilled' ||
+    Boolean(order.delivered_date || order.deliveredDate || extra.delivered_date || order.fulfilled_date || extra.fulfilled_date);
 
   if (isDelivered) {
     return false;

@@ -1737,7 +1737,22 @@ export class WebsiteSalesService {
       if (uploadRow) sourceFile = uploadRow;
     }
 
-    // 5. Fetch Dexie logistics order
+    // 5. Fetch authoritative shipment from Supabase customer_tracking_shipments & Dexie logistics_orders
+    let trackingShipment: any = null;
+    try {
+      const extraAwb = String(orderRow.extra_data?.awb_number || '').replace(/[^a-zA-Z0-9-]/g, '').trim();
+      let query = supabase.from('customer_tracking_shipments').select('*');
+      if (extraAwb) {
+        query = query.or(`order_id.eq.${cleanId},display_order_id.eq.${cleanId},awb_number.eq.${extraAwb}`);
+      } else {
+        query = query.or(`order_id.eq.${cleanId},display_order_id.eq.${cleanId}`);
+      }
+      const { data: shipRows } = await query.limit(1);
+      if (shipRows && shipRows.length > 0) trackingShipment = shipRows[0];
+    } catch (e) {
+      console.warn('customer_tracking_shipments fetch fallback:', e);
+    }
+
     let logisticsData: any = {};
     try {
       const logRec = await db.logistics_orders.where('orderId').equals(cleanId).first();
@@ -1754,10 +1769,57 @@ export class WebsiteSalesService {
     const discountCode = raw0['Discount Code'] || raw0.discount_code || orderRow.offer || 'No Offer';
     const refundedAmount = Number(raw0['Refunded Amount'] || raw0.refunded_amount) || 0;
     const financialStatus = (raw0['Financial Status'] || orderRow.extra_data?.financial_status || (orderRow.payment_mode === 'PREPAID' ? 'paid' : 'pending')).toLowerCase();
-    const isCancelledOrder = orderRow.order_status === 'CANCELLED' || Boolean(orderRow.extra_data?.cancellation);
+    
+    const isCancelledOrder = orderRow.order_status === 'CANCELLED' || 
+                             orderRow.dispatch_status === 'CANCELLED' ||
+                             Boolean(orderRow.extra_data?.cancellation);
+
+    const isTerminalDelivered = !isCancelledOrder && (
+      orderRow.dispatch_status === 'DELIVERED' ||
+      (orderRow.extra_data?.fulfillment_status || '').toLowerCase() === 'fulfilled' ||
+      (trackingShipment?.status || '').toLowerCase().includes('deliv') ||
+      Boolean(orderRow.extra_data?.delivered_date || trackingShipment?.delivered_date)
+    );
+
     const fulfillmentStatus = isCancelledOrder
       ? 'cancelled'
-      : (raw0['Fulfillment Status'] || orderRow.extra_data?.fulfillment_status || (orderRow.dispatch_status === 'DELIVERED' ? 'fulfilled' : 'unfulfilled')).toLowerCase();
+      : isTerminalDelivered
+      ? 'fulfilled'
+      : (raw0['Fulfillment Status'] || orderRow.extra_data?.fulfillment_status || 'unfulfilled').toLowerCase();
+
+    // Determine courier and AWB with priority: tracking shipment > extra_data > valid Dexie record
+    const awb = 
+      trackingShipment?.awb_number || 
+      orderRow.extra_data?.awb_number || 
+      (logisticsData.awbNumber && logisticsData.status !== 'Deleted' ? logisticsData.awbNumber : '') || 
+      '';
+
+    const courier = 
+      trackingShipment?.courier || 
+      orderRow.extra_data?.courier || 
+      (logisticsData.courier && logisticsData.status !== 'Deleted' ? logisticsData.courier : '') || 
+      (isTerminalDelivered ? 'ST Courier' : '');
+
+    // Determine delivered date
+    const deliveredDate = 
+      trackingShipment?.delivered_date || 
+      orderRow.extra_data?.delivered_date || 
+      (logisticsData.deliveredDate && logisticsData.status !== 'Deleted' ? logisticsData.deliveredDate : '') || 
+      (isTerminalDelivered ? (orderRow.dispatch_date || orderRow.order_date) : '');
+
+    // Determine authoritative logistics status - protect terminal delivery from stale 'Deleted'
+    let resolvedLogisticsStatus = 'Unfulfilled';
+    if (isCancelledOrder) {
+      resolvedLogisticsStatus = 'Cancelled';
+    } else if (isTerminalDelivered) {
+      resolvedLogisticsStatus = 'Delivered';
+    } else if (trackingShipment?.status) {
+      resolvedLogisticsStatus = trackingShipment.status;
+    } else if (logisticsData.status && logisticsData.status !== 'Deleted') {
+      resolvedLogisticsStatus = logisticsData.status;
+    } else if (awb) {
+      resolvedLogisticsStatus = 'In Transit';
+    }
 
     // Map items with SKU and unit prices
     const items = (itemRows && itemRows.length > 0) ? itemRows.map((it: any, i: number) => {
@@ -1803,14 +1865,17 @@ export class WebsiteSalesService {
     };
 
     // Tracking URL generator
-    const awb = logisticsData.awbNumber || orderRow.extra_data?.awb_number || '';
-    const courier = logisticsData.courier || orderRow.extra_data?.courier || '';
     let trackingUrl = '';
     if (awb) {
-      if (courier.toLowerCase().includes('delhivery')) {
+      const cLower = courier.toLowerCase();
+      if (cLower.includes('delhivery')) {
         trackingUrl = `https://www.delhivery.com/track/package/${awb}`;
-      } else if (courier.toLowerCase().includes('bluedart')) {
+      } else if (cLower.includes('bluedart')) {
         trackingUrl = `https://www.bluedart.com/tracking?handler=traking&trackFor=0&action=awb&awbNo=${awb}`;
+      } else if (cLower.includes('st courier') || cLower.includes('st_courier')) {
+        trackingUrl = `https://stcourier.com/`;
+      } else if (cLower.includes('amazon')) {
+        trackingUrl = `https://track.amazon.in/tracking/${awb}`;
       }
     }
 
@@ -1840,15 +1905,22 @@ export class WebsiteSalesService {
         type: 'system'
       });
     }
-    if (logisticsData.manifestedDate || logisticsData.dispatchDate) {
+    if (logisticsData.manifestedDate || logisticsData.dispatchDate || orderRow.dispatch_date) {
       timeline.push({
         title: 'Handed Over to Courier',
-        timestamp: logisticsData.manifestedDate || logisticsData.dispatchDate,
-        description: `Courier: ${courier || 'Assigned Courier'}, AWB: ${awb}`,
+        timestamp: logisticsData.manifestedDate || logisticsData.dispatchDate || orderRow.dispatch_date,
+        description: `Courier: ${courier || 'Assigned Courier'}, AWB: ${awb || 'Pending'}`,
         type: 'fulfillment'
       });
     }
-    if (logisticsData.deliveredDate) {
+    if (deliveredDate && isTerminalDelivered) {
+      timeline.push({
+        title: 'Delivered to Customer',
+        timestamp: deliveredDate,
+        description: `Shipment marked delivered via ${courier || 'Courier'} (AWB: ${awb || 'N/A'})`,
+        type: 'fulfillment'
+      });
+    } else if (logisticsData.deliveredDate) {
       timeline.push({
         title: 'Delivered to Customer',
         timestamp: logisticsData.deliveredDate,
@@ -1888,14 +1960,15 @@ export class WebsiteSalesService {
         financial_status: financialStatus,
         awb_number: awb,
         courier: courier,
-        fulfilled_date: orderRow.extra_data?.fulfilled_date || orderRow.dispatch_date || '',
+        fulfilled_date: orderRow.extra_data?.fulfilled_date || deliveredDate || orderRow.dispatch_date || '',
+        delivered_date: deliveredDate,
         email,
         subtotal,
         shipping_charges: shipping,
         taxes,
         discount_amount: discountAmount,
         refund_amount: refundedAmount,
-        shipment_status: logisticsData.status || (awb ? 'In Transit' : 'Unfulfilled'),
+        shipment_status: resolvedLogisticsStatus,
         tracking_url: trackingUrl
       },
       rawRows: rawRows ? rawRows.map(r => r.raw_data) : [],
@@ -1917,14 +1990,14 @@ export class WebsiteSalesService {
         financial_status: financialStatus
       },
       logistics: {
-        stage: logisticsData.stage,
-        status: logisticsData.status || (awb ? 'In Transit' : 'Unfulfilled'),
+        stage: isTerminalDelivered ? 'fulfilled' : (logisticsData.status === 'Deleted' ? 'tracking' : (logisticsData.stage || 'tracking')),
+        status: resolvedLogisticsStatus,
         courier,
         awb_number: awb,
         tracking_url: trackingUrl,
-        manifested_date: logisticsData.manifestedDate,
-        dispatched_date: logisticsData.dispatchDate,
-        delivered_date: logisticsData.deliveredDate,
+        manifested_date: logisticsData.manifestedDate || orderRow.dispatch_date,
+        dispatched_date: orderRow.dispatch_date || logisticsData.dispatchDate,
+        delivered_date: deliveredDate,
         tracking_history: logisticsData.trackingHistory || []
       },
       sourceFile,

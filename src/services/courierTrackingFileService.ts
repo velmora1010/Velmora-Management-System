@@ -328,7 +328,7 @@ export const normalizeTrackingStatus = (
  * Prioritizes exact column names first to prevent false matches (e.g. 'Status Type' overriding 'Current Status').
  */
 export const detectTrackingColumns = (headers: string[]) => {
-  const normHeaders = headers.map(normalizeKey);
+  const normHeaders = headers.map(h => normalizeKey(String(h || '').replace(/^\ufeff/, '')));
 
   const findIdx = (exactCandidates: string[], fallbackCandidates: string[] = []) => {
     const normExact = exactCandidates.map(normalizeKey);
@@ -346,21 +346,23 @@ export const detectTrackingColumns = (headers: string[]) => {
     return -1;
   };
 
-  // Order ID / Reference column (Delhivery uses "Reference No.", ST Courier uses "Ref No" or "Order No")
+  // Order ID / Reference column (Delhivery uses "Reference No.", ST Courier uses "Ref No" or "Order No" or "Order")
   const orderIdIdx = findIdx(
     [
+      'order', 'order#', 'orderid', 'order_id', 'ordernumber', 'order_number', 'orderno', 'order_no',
+      'name',
       'referenceno', 'referencenumber', 'reference', 'refno', 'ref_no',
-      'orderid', 'ordernumber', 'order_id', 'orderno',
       'invoiceno', 'invoicenumber', 'customerno', 'consigneeref', 'bookingref'
     ],
-    ['ref', 'order']
+    ['order', 'ref']
   );
 
-  // AWB / Waybill Column (Delhivery uses "Waybill", ST Courier uses "Awb" or "Consignment No")
+  // AWB / Waybill Column (Delhivery uses "Waybill", ST Courier uses "Awb", "Consignment No", or "Tracking number")
   const awbIdx = findIdx(
     [
+      'trackingnumber', 'trackingno', 'tracking_number', 'tracking_no',
       'waybill', 'waybillnumber', 'waybillno', 'awb', 'awbnumber', 'awbno', 'awb_no',
-      'trackingnumber', 'trackingno', 'consignmentnumber', 'consignmentno', 'cnno',
+      'consignmentnumber', 'consignmentno', 'cnno',
       'articlenumber', 'barcode', 'trackingid', 'docketno', 'podno'
     ]
   );

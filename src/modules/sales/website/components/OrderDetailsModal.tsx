@@ -350,20 +350,33 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
                     (order.fulfillment_status || '').toLowerCase() === 'cancelled' ||
                     Boolean((order as any).cancellation && ((order as any).cancellation.status === 'CANCELLED' || String((order as any).cancellation.status).toLowerCase() === 'cancelled')) ||
                     Boolean((order as any).extra_data?.cancellation && ((order as any).extra_data.cancellation.status === 'CANCELLED' || String((order as any).extra_data.cancellation.status).toLowerCase() === 'cancelled'));
-                  const isDeleted = !isCancelled && (isDeletedOrder(order) || (order.fulfillment_status || '').toLowerCase() === 'deleted' || (order.order_status || '').toLowerCase() === 'deleted' || (logistics.status || '').toLowerCase() === 'deleted');
+
+                  const hasTerminalDelivery = 
+                    (order.dispatch_status || '').toLowerCase() === 'delivered' ||
+                    (order.fulfillment_status || '').toLowerCase() === 'fulfilled' ||
+                    (logistics.status || '').toLowerCase().includes('deliv') ||
+                    (order.shipment_status || '').toLowerCase().includes('deliv') ||
+                    Boolean((order as any).delivered_date || logistics.delivered_date || (logistics as any).deliveredDate);
+
+                  const isDeleted = !isCancelled && !hasTerminalDelivery && (
+                    isDeletedOrder(order) || 
+                    (order.fulfillment_status || '').toLowerCase() === 'deleted' || 
+                    (order.order_status || '').toLowerCase() === 'deleted' || 
+                    (logistics.status || '').toLowerCase() === 'deleted'
+                  );
                   return (
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
                       isDeleted
                         ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
                         : isCancelled
                         ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                        : (logistics.status || order.fulfillment_status || '').toLowerCase().includes('deliv')
+                        : hasTerminalDelivery || (logistics.status || order.fulfillment_status || '').toLowerCase().includes('deliv')
                         ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                         : (logistics.status || order.fulfillment_status || '').toLowerCase().includes('transit') || (logistics.status || order.fulfillment_status || '').toLowerCase().includes('dispatch')
                         ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
                         : 'bg-slate-800 text-slate-400 border border-slate-700'
                     }`}>
-                      {isDeleted ? 'DELETED' : isCancelled ? 'CANCELLED' : (logistics.status || order.fulfillment_status || 'Unfulfilled')}
+                      {isDeleted ? 'DELETED' : isCancelled ? 'CANCELLED' : hasTerminalDelivery ? 'DELIVERED' : (logistics.status || order.fulfillment_status || 'Unfulfilled')}
                     </span>
                   );
                 })()}
@@ -420,10 +433,12 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
                       <span className="font-mono text-cyan-300">{formatSalesDateDisplay(logistics.manifested_date)}</span>
                     </div>
                   )}
-                  {logistics.delivered_date && (
+                  {(logistics.delivered_date || (order as any).delivered_date || (order as any).fulfilled_date) && (
                     <div className="flex justify-between text-slate-400">
                       <span>Delivered Date:</span>
-                      <span className="font-mono text-emerald-400">{formatSalesDateDisplay(logistics.delivered_date)}</span>
+                      <span className="font-mono text-emerald-400">
+                        {formatSalesDateDisplay(logistics.delivered_date || (order as any).delivered_date || (order as any).fulfilled_date)}
+                      </span>
                     </div>
                   )}
                 </div>

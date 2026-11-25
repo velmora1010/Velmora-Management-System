@@ -23,6 +23,6 @@ export const EXTENSION_RELEASE_METADATA: ExtensionReleaseMetadata = {
   setupGuidePdfUrl: '/downloads/SETUP-GUIDE.pdf',
   packageRootFolder: "Velmora-Instagram-Companion",
   extensionSubfolder: 'extension',
-  sizeBytes: 59154,
-  sha256: "a539d47385a1e31a0e2426842b7ca39e1690b5847ea78f76d1ccdf8337662163",
+  sizeBytes: 59155,
+  sha256: "c24027b4a097c9341dd8a589ffb4e0f678a64e74578d37571939ace7b6ab4a07",
 };
