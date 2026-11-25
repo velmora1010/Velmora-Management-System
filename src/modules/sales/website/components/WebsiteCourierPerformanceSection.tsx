@@ -18,11 +18,13 @@ import {
   Package,
   Layers,
   FileQuestion,
-  Ban
+  Ban,
+  Trash2
 } from 'lucide-react';
 import type { WebsiteConsolidatedOrder } from '../types';
 import type { CourierPerformanceSummary } from '../../../Logistics/utils/logisticsAnalyticsUtils';
-import { formatINR, getCanonicalStatus } from '../../../Logistics/utils/logisticsAnalyticsUtils';
+import { formatINR, getCanonicalStatus, isDeletedOrder } from '../../../Logistics/utils/logisticsAnalyticsUtils';
+import { formatSalesDateShort } from '../websiteSalesUtils';
 import { isCourierActive } from '../../../../config/courierConfig';
 
 export interface DiagnosticCategorySummary {
@@ -36,18 +38,20 @@ export interface DiagnosticCategorySummary {
 interface WebsiteCourierPerformanceSectionProps {
   courierPerformance: CourierPerformanceSummary[];
   allOrders?: WebsiteConsolidatedOrder[];
+  isLoading?: boolean;
   onViewCourierOrders: (
     courierName: string, 
     orders: WebsiteConsolidatedOrder[], 
-    filterStatus?: 'ALL' | 'DELIVERED' | 'RTO' | 'IN_TRANSIT' | 'OTHER' | 'CANCELLED'
+    filterStatus?: 'ALL' | 'DELIVERED' | 'RTO' | 'IN_TRANSIT' | 'OTHER' | 'CANCELLED' | 'DELETED'
   ) => void;
 }
 
-type OutcomeFilter = 'ALL' | 'DELIVERED' | 'RTO' | 'IN_TRANSIT' | 'OTHER' | 'CANCELLED';
+type OutcomeFilter = 'ALL' | 'DELIVERED' | 'RTO' | 'IN_TRANSIT' | 'OTHER' | 'CANCELLED' | 'DELETED';
 
 export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanceSectionProps> = ({
   courierPerformance,
   allOrders = [],
+  isLoading = false,
   onViewCourierOrders
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -66,6 +70,7 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
     let totalInTransit = 0;
     let totalOther = 0;
     let totalCancelled = 0;
+    let totalDeleted = 0;
 
     courierPerformance.forEach(c => {
       totalShipments += c.total;
@@ -74,9 +79,10 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
       totalInTransit += c.inTransit;
       totalOther += c.otherStatuses || 0;
       totalCancelled += c.cancelled || 0;
+      totalDeleted += (c as any).deleted || 0;
     });
 
-    const activeShipments = totalShipments - totalCancelled;
+    const activeShipments = Math.max(0, totalShipments - totalCancelled - totalDeleted);
     const concluded = totalDelivered + totalRto;
     const overallDeliveryRate = concluded > 0 
       ? `${((totalDelivered / concluded) * 100).toFixed(1)}%` 
@@ -93,6 +99,7 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
       totalInTransit,
       totalOther,
       totalCancelled,
+      totalDeleted,
       overallDeliveryRate,
       overallRtoRate
     };
@@ -134,16 +141,32 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
         label: 'Cancelled Orders (Pre-Fulfillment)',
         description: 'Orders cancelled prior to manifest or shipment dispatch.',
         orders: []
+      },
+      DELETED_ORDERS: {
+        label: 'Deleted Orders',
+        description: 'Orders deleted from Sales or Logistics; excluded from dispatch and carrier manifests.',
+        orders: []
       }
     };
 
     list.forEach(o => {
       const canonical = getCanonicalStatus(o);
+      const isCancelled =
+        canonical === 'Cancelled' ||
+        o.order_status === 'CANCELLED' ||
+        Boolean(o.cancellation && (o.cancellation.status === 'CANCELLED' || String(o.cancellation.status).toLowerCase() === 'cancelled')) ||
+        Boolean((o as any).extra_data?.cancellation && ((o as any).extra_data.cancellation.status === 'CANCELLED' || String((o as any).extra_data.cancellation.status).toLowerCase() === 'cancelled'));
+      const isDeleted = !isCancelled && (canonical === 'Deleted' || isDeletedOrder(o));
       const awb = (o.awb_number || (o as any).extra_data?.awb_number || '').trim();
       const courier = (o.courier || (o as any).extra_data?.courier || '').trim();
 
-      if (canonical === 'Cancelled' || o.order_status === 'CANCELLED') {
+      if (isCancelled) {
         categories.CANCELLED_PRIOR_DISPATCH.orders.push(o);
+        return;
+      }
+
+      if (isDeleted) {
+        categories.DELETED_ORDERS.orders.push(o);
         return;
       }
 
@@ -175,11 +198,18 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                     categories.AWB_NO_COURIER.orders.length,
       missingAwbCount: categories.MISSING_SHIPMENT_REPORT.orders.length + 
                        categories.MISSING_AWB_WITH_COURIER.orders.length,
+      deletedCount: categories.DELETED_ORDERS.orders.length,
       allDiagnosticOrders: list.filter(o => {
         const canonical = getCanonicalStatus(o);
+        const isCancelled =
+          canonical === 'Cancelled' ||
+          o.order_status === 'CANCELLED' ||
+          Boolean(o.cancellation && (o.cancellation.status === 'CANCELLED' || String(o.cancellation.status).toLowerCase() === 'cancelled')) ||
+          Boolean((o as any).extra_data?.cancellation && ((o as any).extra_data.cancellation.status === 'CANCELLED' || String((o as any).extra_data.cancellation.status).toLowerCase() === 'cancelled'));
+        const isDeleted = !isCancelled && (canonical === 'Deleted' || isDeletedOrder(o));
         const awb = (o.awb_number || (o as any).extra_data?.awb_number || '').trim();
         const courier = (o.courier || (o as any).extra_data?.courier || '').trim();
-        return !awb || !courier || canonical === 'Cancelled';
+        return isDeleted || isCancelled || !awb || !courier;
       })
     };
   }, [allOrders, courierPerformance]);
@@ -192,6 +222,7 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
       if (outcomeFilter === 'IN_TRANSIT' && c.inTransit === 0) return false;
       if (outcomeFilter === 'OTHER' && (c.otherStatuses || 0) === 0) return false;
       if (outcomeFilter === 'CANCELLED' && (c.cancelled || 0) === 0) return false;
+      if (outcomeFilter === 'DELETED' && (c.deleted || 0) === 0) return false;
 
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
@@ -237,8 +268,37 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
   // Helper to get diagnostic reason text for an order
   const getDiagnosticReason = (order: WebsiteConsolidatedOrder): string => {
     const canonical = getCanonicalStatus(order);
-    if (canonical === 'Cancelled' || order.order_status === 'CANCELLED') {
-      return 'Order cancelled pre-fulfillment; excluded from carrier manifest.';
+    const isCancelled =
+      canonical === 'Cancelled' ||
+      order.order_status === 'CANCELLED' ||
+      Boolean(order.cancellation && (order.cancellation.status === 'CANCELLED' || String(order.cancellation.status).toLowerCase() === 'cancelled')) ||
+      Boolean((order as any).extra_data?.cancellation && ((order as any).extra_data.cancellation.status === 'CANCELLED' || String((order as any).extra_data.cancellation.status).toLowerCase() === 'cancelled'));
+
+    if (isCancelled) {
+      const extra = order.extra_data || {};
+      const cancelInfo = order.cancellation || extra.cancellation || {};
+      const cancelDate = cancelInfo.cancelled_at || extra.cancelled_at || extra.cancellation_requested_at || order.order_date;
+      const formattedDate = cancelDate ? formatSalesDateShort(cancelDate) : '';
+
+      const finStatus = (order.financial_status || extra.financial_status || '').toLowerCase();
+      const finTag = finStatus ? ` (${finStatus.charAt(0).toUpperCase() + finStatus.slice(1)})` : '';
+
+      const reasonText = String(cancelInfo.reason || extra.cancellation_reason || '');
+      const source = reasonText.toLowerCase().includes('shopify') ? 'in Shopify ' : '';
+
+      if (formattedDate) {
+        return `Cancelled ${source}on ${formattedDate}${finTag}; excluded from carrier manifest.`;
+      }
+      return `Cancelled ${source}${finTag ? finTag + ' ' : ''}pre-fulfillment; excluded from carrier manifest.`;
+    }
+
+    if (canonical === 'Deleted' || isDeletedOrder(order)) {
+      const extra = order.extra_data || {};
+      const delDate = extra.deleted_at || (order as any).deletedAt;
+      const delReason = extra.deletion_reason || (order as any).trashReason || (order as any).remarks;
+      const datePart = delDate ? `Deleted on ${formatSalesDateShort(delDate)}` : 'Order marked as DELETED';
+      const reasonPart = delReason ? `: ${delReason}` : '; excluded from logistics manifests and dispatch.';
+      return `${datePart}${reasonPart}`;
     }
     const awb = (order.awb_number || (order as any).extra_data?.awb_number || '').trim();
     const courier = (order.courier || (order as any).extra_data?.courier || '').trim();
@@ -333,79 +393,103 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 p-3 bg-slate-950/70 border border-slate-800/90 rounded-xl text-xs">
         <div className="flex flex-col">
           <span className="text-[10px] font-bold uppercase text-slate-500">Total Period Orders</span>
-          <span className="text-base font-bold text-white font-mono mt-0.5">
-            {totals.totalOrders.toLocaleString('en-IN')}
-          </span>
+          {isLoading ? (
+            <div className="h-5 w-16 bg-slate-800 rounded animate-pulse mt-1 mb-0.5" />
+          ) : (
+            <span className="text-base font-bold text-white font-mono mt-0.5">
+              {totals.totalOrders.toLocaleString('en-IN')}
+            </span>
+          )}
           <span className="text-[10px] text-slate-500">Sales records in scope</span>
         </div>
 
         <div className="flex flex-col">
           <span className="text-[10px] font-bold uppercase text-slate-500">Active Shipments</span>
-          <span className="text-base font-bold text-indigo-300 font-mono mt-0.5">
-            {totals.activeShipments.toLocaleString('en-IN')}
-          </span>
+          {isLoading ? (
+            <div className="h-5 w-16 bg-slate-800 rounded animate-pulse mt-1 mb-0.5" />
+          ) : (
+            <span className="text-base font-bold text-indigo-300 font-mono mt-0.5">
+              {totals.activeShipments.toLocaleString('en-IN')}
+            </span>
+          )}
           <span className="text-[10px] text-slate-500">Dispatchable orders</span>
         </div>
 
         <div className="flex flex-col">
           <span className="text-[10px] font-bold uppercase text-slate-500">Cancelled Pre-Dispatch</span>
-          <button
-            type="button"
-            onClick={() => {
-              const cancOrders = courierPerformance.flatMap(c => c.cancelledOrders || []);
-              onViewCourierOrders('All Couriers', cancOrders, 'CANCELLED');
-            }}
-            className="text-left text-base font-bold text-slate-400 hover:text-rose-300 font-mono mt-0.5 cursor-pointer"
-            title="Click to view 5 cancelled orders"
-          >
-            {totals.totalCancelled.toLocaleString('en-IN')}
-            <span className="text-[10px] font-sans font-normal text-purple-400 hover:underline ml-1.5">View →</span>
-          </button>
+          {isLoading ? (
+            <div className="h-5 w-16 bg-slate-800 rounded animate-pulse mt-1 mb-0.5" />
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                const cancOrders = courierPerformance.flatMap(c => c.cancelledOrders || []);
+                onViewCourierOrders('All Couriers', cancOrders, 'CANCELLED');
+              }}
+              className="text-left text-base font-bold text-slate-400 hover:text-rose-300 font-mono mt-0.5 cursor-pointer"
+              title="Click to view 5 cancelled orders"
+            >
+              {totals.totalCancelled.toLocaleString('en-IN')}
+              <span className="text-[10px] font-sans font-normal text-purple-400 hover:underline ml-1.5">View →</span>
+            </button>
+          )}
           <span className="text-[10px] text-slate-500">Excluded from delivery SLA</span>
         </div>
 
         <div className="flex flex-col">
           <span className="text-[10px] font-bold uppercase text-slate-500">Delivered Outcomes</span>
-          <button
-            type="button"
-            onClick={() => {
-              const delOrders = courierPerformance.flatMap(c => c.deliveredOrders || []);
-              onViewCourierOrders('All Couriers', delOrders, 'DELIVERED');
-            }}
-            className="text-left text-base font-bold text-emerald-400 hover:text-emerald-300 font-mono mt-0.5 cursor-pointer"
-          >
-            {totals.totalDelivered.toLocaleString('en-IN')}
-            <span className="text-[10px] font-sans font-normal text-purple-400 hover:underline ml-1.5">View →</span>
-          </button>
+          {isLoading ? (
+            <div className="h-5 w-16 bg-slate-800 rounded animate-pulse mt-1 mb-0.5" />
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                const delOrders = courierPerformance.flatMap(c => c.deliveredOrders || []);
+                onViewCourierOrders('All Couriers', delOrders, 'DELIVERED');
+              }}
+              className="text-left text-base font-bold text-emerald-400 hover:text-emerald-300 font-mono mt-0.5 cursor-pointer"
+            >
+              {totals.totalDelivered.toLocaleString('en-IN')}
+              <span className="text-[10px] font-sans font-normal text-purple-400 hover:underline ml-1.5">View →</span>
+            </button>
+          )}
           <span className="text-[10px] text-emerald-400/80">{totals.overallDeliveryRate} delivery rate</span>
         </div>
 
         <div className="flex flex-col">
           <span className="text-[10px] font-bold uppercase text-slate-500">Total RTO Returns</span>
-          <button
-            type="button"
-            onClick={() => {
-              const rtoOrders = courierPerformance.flatMap(c => c.rtoOrders || []);
-              onViewCourierOrders('All Couriers', rtoOrders, 'RTO');
-            }}
-            className="text-left text-base font-bold text-rose-400 hover:text-rose-300 font-mono mt-0.5 cursor-pointer"
-          >
-            {totals.totalRto.toLocaleString('en-IN')}
-            <span className="text-[10px] font-sans font-normal text-purple-400 hover:underline ml-1.5">View →</span>
-          </button>
+          {isLoading ? (
+            <div className="h-5 w-16 bg-slate-800 rounded animate-pulse mt-1 mb-0.5" />
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                const rtoOrders = courierPerformance.flatMap(c => c.rtoOrders || []);
+                onViewCourierOrders('All Couriers', rtoOrders, 'RTO');
+              }}
+              className="text-left text-base font-bold text-rose-400 hover:text-rose-300 font-mono mt-0.5 cursor-pointer"
+            >
+              {totals.totalRto.toLocaleString('en-IN')}
+              <span className="text-[10px] font-sans font-normal text-purple-400 hover:underline ml-1.5">View →</span>
+            </button>
+          )}
           <span className="text-[10px] text-rose-400/80">{totals.overallRtoRate} return rate</span>
         </div>
 
         <div className="flex flex-col">
           <span className="text-[10px] font-bold uppercase text-slate-500">Missing Tracking Report</span>
-          <button
-            type="button"
-            onClick={() => setIsDiagnosticModalOpen(true)}
-            className="text-left text-base font-bold text-amber-300 hover:text-amber-200 font-mono mt-0.5 cursor-pointer"
-          >
-            {diagnosticAnalysis.totalUnknown.toLocaleString('en-IN')}
-            <span className="text-[10px] font-sans font-normal text-purple-400 hover:underline ml-1.5">Inspect →</span>
-          </button>
+          {isLoading ? (
+            <div className="h-5 w-16 bg-slate-800 rounded animate-pulse mt-1 mb-0.5" />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsDiagnosticModalOpen(true)}
+              className="text-left text-base font-bold text-amber-300 hover:text-amber-200 font-mono mt-0.5 cursor-pointer"
+            >
+              {diagnosticAnalysis.totalUnknown.toLocaleString('en-IN')}
+              <span className="text-[10px] font-sans font-normal text-purple-400 hover:underline ml-1.5">Inspect →</span>
+            </button>
+          )}
           <span className="text-[10px] text-slate-500">No courier file uploaded</span>
         </div>
       </div>
@@ -484,6 +568,20 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
             <Ban size={12} />
             <span>Cancelled ({totals.totalCancelled})</span>
           </button>
+          {totals.totalDeleted > 0 && (
+            <button
+              type="button"
+              onClick={() => setOutcomeFilter('DELETED')}
+              className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                outcomeFilter === 'DELETED'
+                  ? 'bg-rose-700 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-rose-300'
+              }`}
+            >
+              <Trash2 size={12} />
+              <span>Deleted ({totals.totalDeleted})</span>
+            </button>
+          )}
         </div>
 
         {/* Search Bar */}
@@ -580,7 +678,21 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/60 font-mono">
-            {filteredRows.length > 0 ? (
+            {isLoading ? (
+              [...Array(5)].map((_, i) => (
+                <tr key={i} className="animate-pulse">
+                  <td className="py-3 px-4"><div className="h-4 w-32 bg-slate-800 rounded" /></td>
+                  <td className="py-3 px-3 text-right"><div className="h-4 w-12 bg-slate-800 rounded ml-auto" /></td>
+                  <td className="py-3 px-3 text-right"><div className="h-4 w-12 bg-slate-800 rounded ml-auto" /></td>
+                  <td className="py-3 px-3 text-right"><div className="h-4 w-12 bg-slate-800 rounded ml-auto" /></td>
+                  <td className="py-3 px-3 text-right"><div className="h-4 w-12 bg-slate-800 rounded ml-auto" /></td>
+                  <td className="py-3 px-3 text-right"><div className="h-4 w-12 bg-slate-800 rounded ml-auto" /></td>
+                  <td className="py-3 px-3 text-right"><div className="h-4 w-14 bg-slate-800 rounded ml-auto" /></td>
+                  <td className="py-3 px-3 text-right"><div className="h-4 w-14 bg-slate-800 rounded ml-auto" /></td>
+                  <td className="py-3 px-4 text-center"><div className="h-6 w-14 bg-slate-800 rounded mx-auto" /></td>
+                </tr>
+              ))
+            ) : filteredRows.length > 0 ? (
               filteredRows.map((row) => {
                 const isDelhivery = row.courier.toLowerCase().includes('delhivery');
                 const isIndiaPost = row.courier.toLowerCase().includes('india post');
@@ -696,7 +808,7 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                           e.stopPropagation();
                           const list = row.otherOrders || row.orders.filter(o => {
                             const s = getCanonicalStatus(o);
-                            return s !== 'Delivered' && !s.includes('RTO') && s !== 'In Transit' && s !== 'Out for Delivery' && s !== 'Cancelled';
+                            return s !== 'Delivered' && !s.includes('RTO') && s !== 'In Transit' && s !== 'Out for Delivery' && s !== 'Cancelled' && s !== 'Deleted' && !isDeletedOrder(o);
                           });
                           onViewCourierOrders(row.courier, list, 'OTHER');
                         }}
@@ -835,9 +947,11 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
             </div>
 
             {/* Diagnostic Categories Grid */}
-            <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 bg-slate-950/40 border-b border-slate-800">
+            <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 bg-slate-950/40 border-b border-slate-800">
               {diagnosticAnalysis.categoryList.map(cat => {
                 const isSelected = selectedDiagnosticKey === cat.key;
+                const isDeletedCat = cat.key === 'DELETED_ORDERS';
+                const isCancelledCat = cat.key === 'CANCELLED_PRIOR_DISPATCH';
                 return (
                   <button
                     key={cat.key}
@@ -845,14 +959,24 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                     onClick={() => setSelectedDiagnosticKey(isSelected ? 'ALL' : cat.key)}
                     className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
                       isSelected
-                        ? 'bg-purple-600/20 border-purple-500/50 shadow-sm'
+                        ? isDeletedCat 
+                          ? 'bg-rose-950/40 border-rose-500/50 shadow-sm'
+                          : 'bg-purple-600/20 border-purple-500/50 shadow-sm'
+                        : isDeletedCat && cat.count > 0
+                        ? 'bg-slate-900/90 border-rose-900/40 hover:border-rose-700/60'
                         : 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
                     }`}
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] font-bold text-slate-300 line-clamp-1">{cat.label}</span>
                       <span className={`px-2 py-0.5 rounded-md font-mono font-bold text-xs ${
-                        cat.count > 0 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-slate-800 text-slate-500'
+                        cat.count > 0 
+                          ? isDeletedCat
+                            ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                            : isCancelledCat
+                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                            : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                          : 'bg-slate-800 text-slate-500'
                       }`}>
                         {cat.count}
                       </span>
@@ -941,7 +1065,8 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                       <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
                         {displayedOrders.slice(0, 300).map(o => {
                           const canonical = getCanonicalStatus(o);
-                          const isCancelled = canonical === 'Cancelled';
+                          const isCancelled = canonical === 'Cancelled' || o.order_status === 'CANCELLED' || Boolean(o.cancellation && (o.cancellation.status === 'CANCELLED' || String(o.cancellation.status).toLowerCase() === 'cancelled'));
+                          const isDeleted = !isCancelled && (canonical === 'Deleted' || isDeletedOrder(o));
                           const awb = o.awb_number || (o as any).extra_data?.awb_number || '';
                           const courier = o.courier || (o as any).extra_data?.courier || '';
                           const reason = getDiagnosticReason(o);
@@ -962,20 +1087,24 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                               </td>
                               <td className="py-2.5 px-3 font-sans">
                                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  isCancelled
-                                    ? 'bg-rose-500/20 text-rose-300'
+                                  isDeleted
+                                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                                    : isCancelled
+                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
                                     : canonical === 'Delivered'
                                     ? 'bg-emerald-500/20 text-emerald-300'
                                     : 'bg-blue-500/20 text-blue-300'
                                 }`}>
-                                  {canonical}
+                                  {isDeleted ? 'DELETED' : isCancelled ? 'CANCELLED' : canonical}
                                 </span>
                               </td>
                               <td className="py-2.5 px-3 font-sans">
                                 <div className="text-slate-300 font-semibold">{courier || 'Unassigned'}</div>
                                 <div className="text-[10px] text-slate-500 font-mono">{awb || 'No AWB'}</div>
                               </td>
-                              <td className="py-2.5 px-3 font-sans text-amber-300/90 text-[11px]">
+                              <td className={`py-2.5 px-3 font-sans text-[11px] ${
+                                isDeleted ? 'text-rose-300/90' : 'text-amber-300/90'
+                              }`}>
                                 {reason}
                               </td>
                             </tr>

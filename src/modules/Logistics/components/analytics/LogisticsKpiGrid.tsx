@@ -22,6 +22,7 @@ import {
 import type { UnifiedLogisticsOrder } from '../../../../types/unifiedLogistics';
 import { 
   getCanonicalStatus, 
+  isDeletedOrder,
   checkDeliverySla, 
   formatINR, 
   isCodOrder, 
@@ -72,6 +73,7 @@ export const LogisticsKpiGrid: React.FC<LogisticsKpiGridProps> = ({
     let deliveredWithinSla = 0;
 
     orders.forEach(o => {
+      if (isDeletedOrder(o)) return;
       const amt = parseOrderAmount(o.amount ?? o.totalAmount) || 0;
       totalVal += amt;
 

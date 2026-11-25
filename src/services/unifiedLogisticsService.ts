@@ -1767,6 +1767,19 @@ export const deleteLogisticsOrderByOrderId = async (
         remarks: `Order deleted from Sales (${new Date().toLocaleDateString('en-IN')})`
       });
     }
+
+    if (matches.length === 0) {
+      await db.logistics_orders.add({
+        orderId: cleanId,
+        customerName: 'Deleted Order',
+        stage: 'trash',
+        status: 'Deleted',
+        deletedAt: new Date().toISOString(),
+        trashReason: reason,
+        remarks: `Order deleted from Sales (${new Date().toLocaleDateString('en-IN')})`
+      } as any);
+      count = 1;
+    }
   });
 
   // Synchronize to Supabase customer_tracking_shipments across all variants

@@ -54,6 +54,7 @@ import { BulkAwbSearchInput } from '../../Logistics/components/filters/BulkAwbSe
 import { LogisticsDateDropdown } from '../../Logistics/components/filters/LogisticsDateDropdown';
 import { WebsiteFulfillmentDropdown } from './components/WebsiteFulfillmentDropdown';
 import { WebsitePaymentDropdown } from './components/WebsitePaymentDropdown';
+import { isDeletedOrder } from '../../Logistics/utils/logisticsAnalyticsUtils';
 
 export const WebsiteOrders: React.FC = () => {
   // Data State
@@ -729,19 +730,23 @@ export const WebsiteOrders: React.FC = () => {
                 {orders.map((o) => {
                   const displayPhone = formatPhoneNumber(o.phone);
                   const isMulti = o.items && o.items.length > 1;
-                  const isCancelledOrder = o.order_status === 'CANCELLED' || o.cancellation?.status === 'CANCELLED' || (o.fulfillment_status || '').toLowerCase().trim() === 'cancelled';
+                  const isCancelledOrder = (o.order_status || '').toUpperCase() === 'CANCELLED' || 
+                    o.cancellation?.status === 'CANCELLED' || 
+                    (o.fulfillment_status || '').toLowerCase().trim() === 'cancelled' ||
+                    Boolean((o as any).extra_data?.cancellation && ((o as any).extra_data.cancellation.status === 'CANCELLED' || String((o as any).extra_data.cancellation.status).toLowerCase() === 'cancelled'));
+                  const isDeleted = !isCancelledOrder && (isDeletedOrder(o) || o.order_status === 'DELETED' || (o.fulfillment_status || '').toLowerCase().trim() === 'deleted');
                   const rawFulfillment = (o.fulfillment_status || '').toLowerCase().trim();
                   const rawDispatch = (o.dispatch_status || '').toUpperCase().trim();
-                  const isFulfilled = !isCancelledOrder && (
+                  const isFulfilled = !isDeleted && !isCancelledOrder && (
                     rawFulfillment === 'fulfilled' || 
                     rawFulfillment === 'shipped' || 
                     o.order_status === 'FULFILLED' ||
                     rawDispatch === 'DELIVERED'
                   );
-                  const isPartiallyFulfilled = !isCancelledOrder && !isFulfilled && (
+                  const isPartiallyFulfilled = !isDeleted && !isCancelledOrder && !isFulfilled && (
                     rawFulfillment.includes('partial')
                   );
-                  const isUnfulfilled = !isCancelledOrder && !isFulfilled && !isPartiallyFulfilled;
+                  const isUnfulfilled = !isDeleted && !isCancelledOrder && !isFulfilled && !isPartiallyFulfilled;
 
                   return (
                     <tr 
@@ -835,7 +840,9 @@ export const WebsiteOrders: React.FC = () => {
                       <td className="py-3.5 px-4 space-y-1">
                         <div className="flex items-center gap-1.5">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                            isCancelledOrder
+                            isDeleted
+                              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                              : isCancelledOrder
                               ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
                               : isFulfilled
                               ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
@@ -843,7 +850,9 @@ export const WebsiteOrders: React.FC = () => {
                               ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
                               : 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
                           }`}>
-                            {isCancelledOrder 
+                            {isDeleted
+                              ? 'DELETED'
+                              : isCancelledOrder 
                               ? 'Cancelled' 
                               : (isFulfilled 
                                   ? 'Fulfilled' 

@@ -349,9 +349,42 @@ export function getOrderShipmentStatus(order: UnifiedLogisticsOrder): string {
   const st = (order.status || '').trim();
   const lower = st.toLowerCase();
   const stage = (order.workflowStage || order.stage || '').toLowerCase();
+  const ordSt = ((order as any).order_status || (order as any).orderStatus || '').toLowerCase();
+  const extra = (order as any).extra_data || {};
 
-  if (lower === 'cancelled' || stage === 'trash' || (order.cancellationStatus && order.cancellationStatus.toLowerCase() === 'completed')) {
+  // Terminal delivery protection: Delivered orders must never be marked deleted or cancelled
+  if (lower.includes('delivered') || !!order.deliveredDate || (order as any).dispatch_status === 'DELIVERED') {
+    return 'Delivered';
+  }
+
+  // Cancelled protection: Source cancellation takes precedence over batch deletion or staging trash
+  const isCancelled =
+    lower === 'cancelled' ||
+    lower === 'canceled' ||
+    ordSt === 'cancelled' ||
+    ordSt === 'canceled' ||
+    (order.cancellationStatus && order.cancellationStatus.toLowerCase() === 'completed') ||
+    Boolean((order as any).isCancelled) ||
+    Boolean((order as any).cancellation && ((order as any).cancellation.status === 'CANCELLED' || String((order as any).cancellation.status).toLowerCase() === 'cancelled')) ||
+    Boolean(extra.cancellation && (extra.cancellation.status === 'CANCELLED' || String(extra.cancellation.status).toLowerCase() === 'cancelled')) ||
+    Boolean(extra.cancellation_requested_at || extra.cancelled_at);
+
+  if (isCancelled) {
     return 'Cancelled';
+  }
+
+  const isExplicitTombstone =
+    lower === 'deleted' || 
+    lower === 'order deleted' || 
+    ordSt === 'deleted' ||
+    Boolean((order as any).isDeleted || (order as any).is_deleted || extra.is_deleted || extra.tombstone);
+
+  if (isExplicitTombstone) {
+    return 'Deleted';
+  }
+
+  if (stage === 'trash' && (lower === 'deleted' || (order as any).trashReason?.toLowerCase().includes('delete'))) {
+    return 'Deleted';
   }
   if (lower.includes('returned') || lower.includes('rto delivered') || lower === 'rto - delivered' || lower === 'returned to origin') {
     return 'Returned to Origin';
@@ -403,7 +436,7 @@ export function getOrderShipmentStatus(order: UnifiedLogisticsOrder): string {
 export function isOrderPendingAwb(order: UnifiedLogisticsOrder): boolean {
   const stage = (order.workflowStage || order.stage || '').toLowerCase();
   const st = (order.status || '').toLowerCase();
-  if (stage === 'trash' || st === 'cancelled' || st.includes('delivered') || !!order.deliveredDate) return false;
+  if (stage === 'trash' || st === 'cancelled' || st === 'deleted' || st === 'order deleted' || Boolean((order as any).isDeleted || (order as any).is_deleted) || st.includes('delivered') || !!order.deliveredDate) return false;
   if (isDispatchedOrder(order)) return false;
   const hasAwb = !!(order.awbNumber && order.awbNumber.trim().length > 0);
   if (hasAwb) return false;
@@ -425,7 +458,7 @@ export function isOrderPendingAwb(order: UnifiedLogisticsOrder): boolean {
 export function isOrderReadyToShip(order: UnifiedLogisticsOrder): boolean {
   const stage = (order.workflowStage || order.stage || '').toLowerCase();
   const st = (order.status || '').toLowerCase();
-  if (stage === 'trash' || st === 'cancelled' || st.includes('delivered') || !!order.deliveredDate) return false;
+  if (stage === 'trash' || st === 'cancelled' || st === 'deleted' || st === 'order deleted' || Boolean((order as any).isDeleted || (order as any).is_deleted) || st.includes('delivered') || !!order.deliveredDate) return false;
   if (st.includes('in transit') || st.includes('in-transit') || st.includes('out for delivery') || st.includes('rto')) return false;
   return stage === 'prepare_dispatch' || st === 'ready to ship';
 }
@@ -438,7 +471,7 @@ export function isOrderReadyForPickup(order: UnifiedLogisticsOrder): boolean {
   const st = (order.status || '').toLowerCase();
   const rem = (order.remarks || order.lastEvent || '').toLowerCase();
   const stage = (order.workflowStage || order.stage || '').toLowerCase();
-  if (stage === 'trash' || st === 'cancelled' || st.includes('delivered') || !!order.deliveredDate) return false;
+  if (stage === 'trash' || st === 'cancelled' || st === 'deleted' || st === 'order deleted' || Boolean((order as any).isDeleted || (order as any).is_deleted) || st.includes('delivered') || !!order.deliveredDate) return false;
   if (st.includes('rto') || st.includes('out for delivery') || st.includes('in transit') || rem.includes('vehicle departed')) return false;
   return (
     st.includes('ready for pickup') || 
@@ -457,7 +490,7 @@ export function isOrderInTransit(order: UnifiedLogisticsOrder): boolean {
   const st = (order.status || '').toLowerCase();
   const rem = (order.remarks || order.lastEvent || '').toLowerCase();
   const stage = (order.workflowStage || order.stage || '').toLowerCase();
-  if (stage === 'trash' || st === 'cancelled' || st.includes('delivered') || !!order.deliveredDate) return false;
+  if (stage === 'trash' || st === 'cancelled' || st === 'deleted' || st === 'order deleted' || Boolean((order as any).isDeleted || (order as any).is_deleted) || st.includes('delivered') || !!order.deliveredDate) return false;
   if (st.includes('rto') || st.includes('return') || st.includes('exception')) return false;
   return (
     st.includes('in transit') || 
@@ -474,13 +507,61 @@ export function isOrderInTransit(order: UnifiedLogisticsOrder): boolean {
 }
 
 /**
+ * Helper to identify deleted/trashed logistics orders
+ */
+export function isDeletedLogisticsOrder(order: UnifiedLogisticsOrder): boolean {
+  if (!order) return false;
+  const st = (order.status || '').toLowerCase();
+  const rawStatus = (order.rawStatus || '').toLowerCase();
+  const ordSt = ((order as any).order_status || (order as any).orderStatus || '').toLowerCase();
+  const fst = (order.fulfillmentStatus || order.sourceFulfillmentStatus || (order as any).fulfillment_status || '').toLowerCase();
+  const extra = (order as any).extra_data || {};
+
+  // Protection: Verified delivery must never be marked deleted
+  if (st.includes('delivered') || !!order.deliveredDate || (order as any).dispatch_status === 'DELIVERED') {
+    return false;
+  }
+
+  // Protection: Cancelled orders must never be marked deleted
+  const isCancelled =
+    st === 'cancelled' ||
+    st === 'canceled' ||
+    ordSt === 'cancelled' ||
+    ordSt === 'canceled' ||
+    rawStatus.includes('cancel') ||
+    fst === 'cancelled' ||
+    fst === 'canceled' ||
+    Boolean((order as any).isCancelled) ||
+    Boolean((order as any).cancellation && ((order as any).cancellation.status === 'CANCELLED' || String((order as any).cancellation.status).toLowerCase() === 'cancelled')) ||
+    Boolean(extra.cancellation && (extra.cancellation.status === 'CANCELLED' || String(extra.cancellation.status).toLowerCase() === 'cancelled')) ||
+    Boolean(extra.cancellation_requested_at || extra.cancelled_at) ||
+    (order.cancellationStatus && order.cancellationStatus.toLowerCase() === 'completed');
+
+  if (isCancelled) {
+    return false;
+  }
+
+  const isExplicitTombstone =
+    st === 'deleted' ||
+    st === 'order deleted' ||
+    ordSt === 'deleted' ||
+    rawStatus === 'deleted' ||
+    fst === 'deleted' ||
+    Boolean((order as any).isDeleted || (order as any).is_deleted || extra.is_deleted || extra.tombstone);
+
+  if (isExplicitTombstone) return true;
+
+  const stage = (order.workflowStage || order.stage || '').toLowerCase();
+  return stage === 'trash' && (st === 'deleted' || (order as any).trashReason?.toLowerCase().includes('delete'));
+}
+
+/**
  * 5. RTO - In Transit:
  * Returning to origin shipments.
  */
 export function isOrderRto(order: UnifiedLogisticsOrder): boolean {
+  if (isDeletedLogisticsOrder(order)) return false;
   const st = (order.status || '').toLowerCase();
-  const stage = (order.workflowStage || order.stage || '').toLowerCase();
-  if (stage === 'trash') return false;
   return (
     st.includes('rto') || 
     st.includes('return') || 
@@ -494,9 +575,8 @@ export function isOrderRto(order: UnifiedLogisticsOrder): boolean {
  * Orders successfully delivered.
  */
 export function isOrderDelivered(order: UnifiedLogisticsOrder): boolean {
+  if (isDeletedLogisticsOrder(order)) return false;
   const st = (order.status || '').toLowerCase();
-  const stage = (order.workflowStage || order.stage || '').toLowerCase();
-  if (stage === 'trash') return false;
   return st.includes('delivered') || !!order.deliveredDate;
 }
 
@@ -505,6 +585,7 @@ export function isOrderDelivered(order: UnifiedLogisticsOrder): boolean {
  * External / non-integrated courier shipments.
  */
 export function isOrderThirdParty(order: UnifiedLogisticsOrder): boolean {
+  if (isDeletedLogisticsOrder(order)) return false;
   const courier = (order.courier || '').toLowerCase();
   if (!courier || courier === 'unassigned') return false;
   return !['delhivery', 'st courier', 'stcourier'].includes(courier) || (order as any).isThirdParty === true;
@@ -518,8 +599,18 @@ export function isOrderThirdParty(order: UnifiedLogisticsOrder): boolean {
  * Confirmed cancelled orders.
  */
 export function isOrderCancelled(order: UnifiedLogisticsOrder): boolean {
-  const stage = (order.workflowStage || order.stage || '').toLowerCase();
-  if (stage === 'trash') return false;
+  const ordSt = ((order as any).order_status || (order as any).orderStatus || '').toLowerCase();
+  const extra = (order as any).extra_data || {};
+  const isExplicitCancelled =
+    ordSt === 'cancelled' ||
+    ordSt === 'canceled' ||
+    Boolean((order as any).isCancelled) ||
+    Boolean((order as any).cancellation && ((order as any).cancellation.status === 'CANCELLED' || String((order as any).cancellation.status).toLowerCase() === 'cancelled')) ||
+    Boolean(extra.cancellation && (extra.cancellation.status === 'CANCELLED' || String(extra.cancellation.status).toLowerCase() === 'cancelled')) ||
+    Boolean(extra.cancellation_requested_at || extra.cancelled_at);
+
+  if (isExplicitCancelled) return true;
+  if (isDeletedLogisticsOrder(order)) return false;
   const st = (order.status || '').toLowerCase();
   const fst = (order.fulfillmentStatus || order.sourceFulfillmentStatus || '').toLowerCase();
   const cst = (order.cancellationStatus || '').toLowerCase();
@@ -539,7 +630,7 @@ export function isOrderCancelled(order: UnifiedLogisticsOrder): boolean {
 }
 
 export function isOrderMatchingSection(order: UnifiedLogisticsOrder, section: LogisticsSection): boolean {
-  if (order.stage === 'trash' || order.workflowStage === 'trash') return false;
+  if (isDeletedLogisticsOrder(order)) return false;
   if (section === 'cancelled_orders') return isOrderCancelled(order);
   if (isOrderCancelled(order)) return false; // Confirmed cancelled orders must never leak into active queues
   if (section === 'all_shipments') return true;
@@ -570,7 +661,7 @@ export function calculateSectionCounts(orders: UnifiedLogisticsOrder[]): Record<
   };
 
   orders.forEach(order => {
-    if (order.stage === 'trash' || order.workflowStage === 'trash') return;
+    if (isDeletedLogisticsOrder(order)) return;
 
     if (isOrderCancelled(order)) {
       counts.cancelled_orders++;

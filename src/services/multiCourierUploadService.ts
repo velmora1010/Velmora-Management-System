@@ -153,9 +153,9 @@ function findColumnIndex(headers: string[], candidates: string[]): number {
     if (idx !== -1) return idx;
   }
 
-  // Substring matches: header must contain candidate
+  // Substring matches: header must contain candidate or candidate contains header
   for (const cand of normCandidates) {
-    const idx = normHeaders.findIndex(h => cand.length >= 4 && h.includes(cand));
+    const idx = normHeaders.findIndex(h => cand.length >= 4 && (h.includes(cand) || cand.includes(h)));
     if (idx !== -1) return idx;
   }
 
@@ -196,7 +196,7 @@ export async function parseAndValidateCourierFile(
     };
   }
 
-  const rawHeaders = rawRows[0].map(h => String(h || '').trim());
+  const rawHeaders = rawRows[0].map(h => String(h || '').replace(/^\ufeff/, '').trim());
   const dataRows = rawRows.slice(1);
 
   // Load existing orders from Dexie & Supabase for authoritative reconciliation
@@ -234,24 +234,26 @@ export async function parseAndValidateCourierFile(
     if (clean) salesByCleanId.set(clean, so);
   });
 
-  // Detect Column Indices
+  // Detect Column Indices - supporting ST Courier, Delhivery, Amazon Shipping, India Post, Ekart
   const orderIdIdx = findColumnIndex(rawHeaders, [
-    'orderreference', 'order_reference', 'ordernumber', 'order_number', 'orderid', 'order_id', 'orderno', 'order_no',
+    'order', 'order#', 'orderid', 'order_id', 'ordernumber', 'order_number', 'orderno', 'order_no',
+    'name', // Shopify standard header
+    'orderreference', 'order_reference',
     'referenceno', 'referencenumber', 'reference_no', 'reference', 'refno', 'ref_no',
     'invoiceno', 'customerno'
   ]);
 
   const awbIdx = findColumnIndex(rawHeaders, [
+    'trackingnumber', 'tracking_number', 'trackingno', 'tracking_no',
     'awbno', 'awb_no', 'awbnumber', 'awb_number', 'awb',
     'waybill', 'waybillno', 'waybillnumber',
     'consignmentno', 'consignmentnumber', 'consignment_no',
-    'trackingno', 'trackingnumber', 'tracking_no', 'docketno', 'podno',
-    'articleno', 'articlenumber'
+    'docketno', 'podno', 'articleno', 'articlenumber'
   ]);
 
   const courierCompanyIdx = findColumnIndex(rawHeaders, [
-    'couriercompany', 'courier_company', 'couriername', 'courier_name', 'courier', 'carrier',
-    'serviceprovider', 'shippingcompany'
+    'carrier', 'couriercompany', 'courier_company', 'couriername', 'courier_name', 'courier',
+    'lastmilecarrier', 'serviceprovider', 'shippingcompany'
   ]);
 
   const orderStatusIdx = findColumnIndex(rawHeaders, [
@@ -260,7 +262,7 @@ export async function parseAndValidateCourierFile(
   ]);
 
   const statusTypeIdx = findColumnIndex(rawHeaders, [
-    'statustype', 'status_type', 'type_status'
+    'statustype', 'status_type', 'type_status', 'substatus', 'sub_status'
   ]);
 
   const dispatchStatusIdx = findColumnIndex(rawHeaders, [
@@ -268,8 +270,9 @@ export async function parseAndValidateCourierFile(
   ]);
 
   const remarksIdx = findColumnIndex(rawHeaders, [
-    'remarks', 'latestevent', 'lastscan', 'instructions', 'scandetails',
-    'rtoreason', 'rto_reason', 'ndrremarks', 'exceptionreason', 'reason'
+    'lastevent', 'last_event', 'latestevent', 'latest_event',
+    'remarks', 'lastscan', 'instructions', 'scandetails',
+    'rtoreason', 'rto_reason', 'ndrremarks', 'exceptionreason', 'reason', 'event'
   ]);
 
   const customerNameIdx = findColumnIndex(rawHeaders, [
@@ -313,7 +316,8 @@ export async function parseAndValidateCourierFile(
   ]);
 
   const deliveredDateIdx = findColumnIndex(rawHeaders, [
-    'orderdelivereddate', 'order_delivered_date', 'delivereddate', 'delivered_date', 'actualdeliverydate', 'deliverydate'
+    'orderdelivereddate', 'order_delivered_date', 'delivereddate', 'delivered_date', 'actualdeliverydate', 'deliverydate',
+    'deliveredon', 'delivered_on'
   ]);
 
   const rtoInitiatedIdx = findColumnIndex(rawHeaders, [
@@ -662,8 +666,8 @@ export async function parseAndValidateCourierFile(
         remarks: grp.remarks || grp.rtoReason,
         normalizedStatus: finalNormalizedStatus,
         orderDate: grp.orderDate || matchedDexie?.orderDate || matchedSales?.order_date,
-        dispatchDate: grp.pickupDate || matchedDexie?.dispatchDate,
-        deliveredDate: grp.deliveredDate || matchedDexie?.deliveredDate,
+        dispatchDate: grp.pickupDate || matchedDexie?.dispatchDate || matchedSales?.dispatch_date,
+        deliveredDate: grp.deliveredDate || matchedDexie?.deliveredDate || (finalNormalizedStatus === 'Delivered' ? (matchedSales?.extra_data?.delivered_date || grp.orderDate || matchedSales?.dispatch_date) : undefined),
         estimatedDeliveryDate: grp.edd || matchedDexie?.estimatedDeliveryDate,
         rtoInitiatedDate: grp.rtoInitiatedDate,
         rtoDeliveredDate: grp.rtoDeliveredDate,
@@ -809,7 +813,8 @@ export async function commitMultiCourierImport(
               courier: item.courier,
               status: finalStatus,
               rawStatus: item.rawStatus || item.normalizedStatus,
-              stage: isDelivered ? 'fulfilled' : 'tracking',
+              stage: isDelivered ? 'fulfilled' : (existing.stage === 'trash' ? 'tracking' : (existing.stage || 'tracking')),
+              trashReason: undefined,
               syncedAt: nowLocale
             };
 
@@ -948,10 +953,8 @@ export async function commitMultiCourierImport(
               updated_at: nowIso
             };
 
-            if (item.deliveredDate && nextDispatchStatus === 'DELIVERED') {
-              updatePayload.dispatch_date = item.deliveredDate;
-            } else if (item.dispatchDate && !salesOrder.dispatch_date) {
-              updatePayload.dispatch_date = item.dispatchDate;
+            if (!salesOrder.dispatch_date && (item.dispatchDate || item.deliveredDate)) {
+              updatePayload.dispatch_date = item.dispatchDate || item.deliveredDate;
             }
 
             const { error: soErr } = await supabase
