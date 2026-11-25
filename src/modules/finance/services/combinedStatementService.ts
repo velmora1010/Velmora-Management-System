@@ -23,6 +23,8 @@ export interface CombinedSaveSummary {
   skippedDuplicates: number;
   reviewRequired: number;
   ruleConflictCount?: number;
+  pathSyncFailures?: number;
+  uncertainInsertCount?: number;
   failedCount: number;
   expenseBatchId?: string | null;
   creditBatchId?: string | null;
@@ -54,7 +56,17 @@ export type UploadExpenseBatchFn = (
   imported_by: string | null,
   expensesData: FinanceExpense[],
   document_type?: string
-) => Promise<{ success: boolean; batch_id?: string; error?: string }>;
+) => Promise<{
+  success: boolean;
+  batch_id?: string;
+  insertedCount?: number;
+  insertFailures?: Array<{ sequence?: number; notes?: string | null; amount?: number | null; error: string }>;
+  uncertainInserts?: Array<{ sequence?: number; notes?: string | null; amount?: number | null; reason: string }>;
+  pathSyncFailures?: Array<{ expenseId: string; error: string }>;
+  partialInsertFailure?: boolean;
+  hasUncertainInserts?: boolean;
+  error?: string;
+}>;
 
 export type UploadCreditBatchFn = (
   file_name: string,
@@ -441,6 +453,7 @@ export function mapDebitRowsToExpenses(
       purchased_by: ruled.purchased_by || null,
       approved_by: ruled.approved_by || null,
       manually_edited: false,
+      matched_rule_id: !ruled.ruleConflict && ruled.matchedRuleId ? ruled.matchedRuleId : null,
       categorization_source: ruled.ruleConflict
         ? ('conflict' as const)
         : ruled.main_category && ruled.main_category !== 'Uncategorized'
@@ -546,6 +559,8 @@ export async function saveCombinedStatementTransactions(params: {
   let nextDebitState: RowSaveState | null = null;
   let nextCreditState: RowSaveState | null = null;
   let ruleConflictCount = previousSummary?.ruleConflictCount || 0;
+  let pathSyncFailures = previousSummary?.pathSyncFailures || 0;
+  let uncertainInsertCount = previousSummary?.uncertainInsertCount || 0;
 
   if (readyDebits.length > 0 && !expenseSavedDone) {
     try {
@@ -561,11 +576,31 @@ export async function saveCombinedStatementTransactions(params: {
         mappedExpenses,
         'COMBINED_DR_CR_STATEMENT'
       );
-      if (expRes.success) {
-        expensesSaved += mappedExpenses.length;
+      pathSyncFailures += expRes.pathSyncFailures?.length || 0;
+      uncertainInsertCount += expRes.uncertainInserts?.length || 0;
+
+      if (expRes.success && !expRes.partialInsertFailure && !expRes.hasUncertainInserts) {
+        expensesSaved += expRes.insertedCount ?? mappedExpenses.length;
         expenseBatchId = expRes.batch_id || null;
         expenseSavedDone = true;
         nextDebitState = 'saved';
+      } else if (expRes.success) {
+        expensesSaved += expRes.insertedCount ?? 0;
+        const unresolvedDebits =
+          (expRes.insertFailures?.length || 0) + (expRes.uncertainInserts?.length || 0);
+        failedCount += unresolvedDebits;
+        expenseBatchId = expRes.batch_id || null;
+        nextDebitState = 'failed';
+        if ((expRes.insertFailures?.length || 0) > 0) {
+          errors.push(
+            `Expense partial save: ${expRes.insertFailures!.length} failed (${expRes.insertFailures![0].error})`
+          );
+        }
+        if ((expRes.uncertainInserts?.length || 0) > 0) {
+          errors.push(
+            `${expRes.uncertainInserts!.length} debit row(s) had uncertain network outcome; refresh expenses before retrying.`
+          );
+        }
       } else {
         failedCount += mappedExpenses.length;
         nextDebitState = 'failed';
@@ -632,6 +667,8 @@ export async function saveCombinedStatementTransactions(params: {
     skippedDuplicates,
     reviewRequired,
     ruleConflictCount,
+    pathSyncFailures,
+    uncertainInsertCount,
     failedCount,
     expenseBatchId,
     creditBatchId,

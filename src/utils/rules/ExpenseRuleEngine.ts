@@ -149,6 +149,7 @@ export class ExpenseRuleEngine {
       result.sub_category3 = result.sub_category3 || undefined;
       result.sub_category3_values = result.sub_category3_values || [];
       result.vendor = result.vendor || 'ICICI Bank Transaction';
+      result.matchedRuleId = null;
       return result;
     }
 
@@ -190,6 +191,7 @@ export class ExpenseRuleEngine {
         matchedKeywords: topTier.map(item => item.rule.keyword),
         reason: `Conflicting automation rules matched (${topTier.map(item => item.rule.keyword).join(' vs ')})`
       };
+      result.matchedRuleId = null;
       return result;
     }
 
@@ -213,6 +215,7 @@ export class ExpenseRuleEngine {
 
     // Never overwrite the actual parsed transaction notes, only populate if empty
     result.notes = result.notes || matchedRule.notes || undefined;
+    result.matchedRuleId = matchedRule.id;
 
     return result;
   }

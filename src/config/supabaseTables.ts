@@ -8,6 +8,7 @@ export const SUPABASE_TABLES = {
   creditRules: "credit_rules",
   creditsRow: "credits_row",
   expenses: "expenses_row",
+  expenseCategoryPaths: "expense_category_paths",
   financeBills: "finance_bills_rows",
   financeCategories: "finance_categories_rows",
   influencerBargainHistory: "influencer_bargain_history_rows",

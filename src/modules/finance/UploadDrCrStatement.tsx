@@ -451,6 +451,18 @@ export const UploadDrCrStatement = ({ onClose }: UploadDrCrStatementProps) => {
           { icon: '⚠️' }
         );
       }
+      if ((saveSummary.uncertainInsertCount || 0) > 0) {
+        toast(
+          `${saveSummary.uncertainInsertCount} debit transaction(s) had an interrupted network response. Refresh Expenses before retrying to avoid duplicates.`,
+          { icon: '⚠️' }
+        );
+      }
+      if ((saveSummary.pathSyncFailures || 0) > 0) {
+        toast(
+          `Debit rows saved, but ${saveSummary.pathSyncFailures} auto-categorized row(s) failed category-path sync and remain in Legacy/Unsynced fallback.`,
+          { icon: '⚠️' }
+        );
+      }
     } catch (err: any) {
       toast.error(err?.message || 'Failed to replace combined statement.');
     } finally {
@@ -523,6 +535,18 @@ export const UploadDrCrStatement = ({ onClose }: UploadDrCrStatementProps) => {
       if ((saveSummary.ruleConflictCount || 0) > 0) {
         toast(
           `${saveSummary.ruleConflictCount} debit transaction(s) matched conflicting automation rules and were marked Uncategorized for manual review.`,
+          { icon: '⚠️' }
+        );
+      }
+      if ((saveSummary.uncertainInsertCount || 0) > 0) {
+        toast(
+          `${saveSummary.uncertainInsertCount} debit transaction(s) had an interrupted network response. Refresh Expenses before retrying to avoid duplicates.`,
+          { icon: '⚠️' }
+        );
+      }
+      if ((saveSummary.pathSyncFailures || 0) > 0) {
+        toast(
+          `Debit rows saved, but ${saveSummary.pathSyncFailures} auto-categorized row(s) failed category-path sync and remain in Legacy/Unsynced fallback.`,
           { icon: '⚠️' }
         );
       }

@@ -3,6 +3,11 @@ import { SUPABASE_TABLES } from '../../../config/supabaseTables';
 import { logActivity } from '../../../services/activityService';
 import { ExpenseRuleEngine, type ExpenseRule } from '../../../utils/rules/ExpenseRuleEngine';
 import type { NormalizedTransaction } from '../../../utils/documentPipeline/types';
+import {
+  isStaleRowVersionError,
+  isValidRowVersion,
+  sanitizeCategoryPathForRpc
+} from './expenseCategoryPathUtils';
 
 export type RowReevaluationOutcome = 'updated' | 'unmatched' | 'conflict' | 'skipped' | 'failed';
 
@@ -21,9 +26,14 @@ export interface EligibleExpenseRow {
   notes: string | null;
   amount: number | null;
   main_category: string | null;
+  sub_category1?: string | null;
+  sub_category2?: string | null;
+  sub_category3?: string | null;
+  sub_category3_values?: string[] | null;
   import_batch_id: string | null;
   manually_edited: boolean;
   categorization_source?: string | null;
+  row_version?: number | null;
 }
 
 export interface ReevaluationOptions {
@@ -40,42 +50,53 @@ const DEFAULT_STALE_AFTER_SECONDS = 180;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
 
 /**
- * Conditionally updates an eligible historical expense row with an optimistic
- * manual-edit and Uncategorized guard. Returns 'skipped' if 0 rows matched.
+ * Strict six-condition consistency check before allowing a no-op on an existing
+ * 'unassigned' or 'conflict' row during historical re-evaluation.
  */
-async function conditionalUpdateExpense(
-  rowId: string,
-  payload: Record<string, unknown>
-): Promise<'ok' | 'skipped' | 'failed'> {
-  const { data: updatedRows, error } = await supabase
-    .from(SUPABASE_TABLES.expenses)
-    .update(payload)
-    .eq('id', rowId)
-    .eq('status', 'active')
-    .eq('manually_edited', false)
-    .or('main_category.eq.Uncategorized,main_category.is.null')
-    .select('id');
+export function isHistoricalNoOpConsistent(
+  row: EligibleExpenseRow,
+  desiredSource: 'unassigned' | 'conflict',
+  hasExistingCategoryPaths: boolean
+): boolean {
+  const hasEmptyLevel5 = Array.isArray(row.sub_category3_values)
+    ? row.sub_category3_values.length === 0
+    : row.sub_category3_values == null;
 
-  if (error) {
-    console.error(`[expenseReevaluationService] Failed to update row ${rowId}:`, error);
-    return 'failed';
-  }
-
-  if (!updatedRows || updatedRows.length === 0) {
-    return 'skipped';
-  }
-
-  return 'ok';
+  return (
+    row.categorization_source === desiredSource &&
+    !hasExistingCategoryPaths &&
+    row.main_category === 'Uncategorized' &&
+    row.sub_category1 == null &&
+    row.sub_category2 == null &&
+    row.sub_category3 == null &&
+    hasEmptyLevel5 &&
+    row.manually_edited === false
+  );
 }
 
 /**
  * Evaluates a single eligible historical expense row against active rules and
- * updates only category fields + categorization_source with eligibility predicates.
+ * synchronizes category paths via sync_automated_expense_category_path().
  */
-async function evaluateAndUpdateRow(
+export async function evaluateAndUpdateRow(
   row: EligibleExpenseRow,
-  activeRules: ExpenseRule[]
+  activeRules: ExpenseRule[],
+  hasExistingCategoryPaths: boolean = false
 ): Promise<RowReevaluationOutcome> {
+  // Explicitly skip NULL, 'manual', 'auto_rule', or unexpected sources without calling RPC
+  if (row.categorization_source !== 'unassigned' && row.categorization_source !== 'conflict') {
+    return 'skipped';
+  }
+
+  if (row.manually_edited) {
+    return 'skipped';
+  }
+
+  if (!isValidRowVersion(row.row_version)) {
+    console.error(`[expenseReevaluationService] Invalid row_version on expense ${row.id}:`, row.row_version);
+    return 'failed';
+  }
+
   const baseTx: NormalizedTransaction = {
     sequence: 0,
     amount: Number(row.amount || 0),
@@ -85,42 +106,77 @@ async function evaluateAndUpdateRow(
   const ruled = ExpenseRuleEngine.applyExpenseRules(baseTx, activeRules);
 
   if (ruled.ruleConflict) {
-    const res = await conditionalUpdateExpense(row.id, {
-      main_category: 'Uncategorized',
-      sub_category1: null,
-      sub_category2: null,
-      sub_category3: null,
-      sub_category3_values: [],
-      categorization_source: 'conflict'
+    if (isHistoricalNoOpConsistent(row, 'conflict', hasExistingCategoryPaths)) {
+      return 'conflict';
+    }
+
+    const { error } = await supabase.rpc('sync_automated_expense_category_path', {
+      p_expense_id: Number(row.id),
+      p_expected_row_version: row.row_version,
+      p_mode: 'historical_reevaluation',
+      p_categorization_source: 'conflict',
+      p_category_path: null,
+      p_matched_rule_id: null
     });
-    if (res === 'failed') return 'failed';
-    if (res === 'skipped') return 'skipped';
+
+    if (error) {
+      if (isStaleRowVersionError(error)) return 'skipped';
+      console.error(`[expenseReevaluationService] Conflict sync failed for ${row.id}:`, error);
+      return 'failed';
+    }
     return 'conflict';
   }
 
   if (!ruled.main_category || ruled.main_category === 'Uncategorized') {
-    if (row.categorization_source === 'conflict') {
-      const res = await conditionalUpdateExpense(row.id, {
-        main_category: 'Uncategorized',
-        categorization_source: 'unassigned'
-      });
-      if (res === 'failed') return 'failed';
-      if (res === 'skipped') return 'skipped';
+    if (isHistoricalNoOpConsistent(row, 'unassigned', hasExistingCategoryPaths)) {
+      return 'unmatched';
+    }
+
+    const { error } = await supabase.rpc('sync_automated_expense_category_path', {
+      p_expense_id: Number(row.id),
+      p_expected_row_version: row.row_version,
+      p_mode: 'historical_reevaluation',
+      p_categorization_source: 'unassigned',
+      p_category_path: null,
+      p_matched_rule_id: null
+    });
+
+    if (error) {
+      if (isStaleRowVersionError(error)) return 'skipped';
+      console.error(`[expenseReevaluationService] Unassigned sync failed for ${row.id}:`, error);
+      return 'failed';
     }
     return 'unmatched';
   }
 
-  const res = await conditionalUpdateExpense(row.id, {
-    main_category: ruled.main_category,
-    sub_category1: ruled.sub_category1 || null,
-    sub_category2: ruled.sub_category2 || null,
-    sub_category3: ruled.sub_category3 || null,
-    sub_category3_values: ruled.sub_category3_values || [],
-    categorization_source: 'auto_rule'
+  let sanitizedPath;
+  try {
+    sanitizedPath = sanitizeCategoryPathForRpc({
+      main_category: ruled.main_category,
+      sub_category1: ruled.sub_category1 || '',
+      sub_category2: ruled.sub_category2 || null,
+      sub_category3: ruled.sub_category3 || null,
+      sub_category3_values: ruled.sub_category3_values || []
+    });
+  } catch (err) {
+    console.error(`[expenseReevaluationService] Invalid rule hierarchy for row ${row.id}:`, err);
+    return 'failed';
+  }
+
+  const { error } = await supabase.rpc('sync_automated_expense_category_path', {
+    p_expense_id: Number(row.id),
+    p_expected_row_version: row.row_version,
+    p_mode: 'historical_reevaluation',
+    p_categorization_source: 'auto_rule',
+    p_category_path: sanitizedPath,
+    p_matched_rule_id: ruled.matchedRuleId || null
   });
 
-  if (res === 'failed') return 'failed';
-  if (res === 'skipped') return 'skipped';
+  if (error) {
+    if (isStaleRowVersionError(error)) return 'skipped';
+    console.error(`[expenseReevaluationService] Auto-rule sync failed for ${row.id}:`, error);
+    return 'failed';
+  }
   return 'updated';
 }
 
@@ -231,7 +287,9 @@ export async function reevaluateHistoricalExpenses(
       while (!lostLock) {
         let query = supabase
           .from(SUPABASE_TABLES.expenses)
-          .select('id, notes, amount, main_category, import_batch_id, manually_edited, categorization_source')
+          .select(
+            'id, notes, amount, main_category, sub_category1, sub_category2, sub_category3, sub_category3_values, import_batch_id, manually_edited, categorization_source, row_version'
+          )
           .eq('status', 'active')
           .not('import_batch_id', 'is', null)
           .eq('manually_edited', false)
@@ -264,12 +322,32 @@ export async function reevaluateHistoricalExpenses(
           candidates.push(row);
         }
 
+        const rowsWithPaths = new Set<string>();
+        if (candidates.length > 0) {
+          const { data: existingPathRows, error: pathLookupError } = await supabase
+            .from(SUPABASE_TABLES.expenseCategoryPaths)
+            .select('expense_id')
+            .in(
+              'expense_id',
+              candidates.map(c => c.id)
+            );
+          if (pathLookupError) {
+            console.error('[expenseReevaluationService] Failed to verify expense_category_paths:', pathLookupError);
+            throw pathLookupError;
+          }
+          for (const p of existingPathRows || []) {
+            if (p && (p as { expense_id?: unknown }).expense_id != null) {
+              rowsWithPaths.add(String((p as { expense_id: unknown }).expense_id));
+            }
+          }
+        }
+
         for (let i = 0; i < candidates.length; i += concurrency) {
           if (lostLock) break;
 
           const chunk = candidates.slice(i, i + concurrency);
           const outcomes = await Promise.allSettled(
-            chunk.map(row => evaluateAndUpdateRow(row, activeRules))
+            chunk.map(row => evaluateAndUpdateRow(row, activeRules, rowsWithPaths.has(String(row.id))))
           );
 
           for (let j = 0; j < chunk.length; j += 1) {
