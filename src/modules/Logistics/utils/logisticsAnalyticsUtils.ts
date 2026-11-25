@@ -239,23 +239,49 @@ export function getCanonicalStatus(order: any): CanonicalLogisticsStatus {
   const finStr = (order.financialStatus || order.financial_status || extra.financial_status || '').toLowerCase().trim();
   const todayStr = formatLocalYMD(new Date());
 
-  // 0. Delivered (Terminal delivery protection: physical delivery takes precedence)
-  const isDelivered = 
-    statusStr === 'delivered' || 
-    rawStatusStr === 'delivered' || 
-    String(order.dispatch_status || '').toLowerCase().trim() === 'delivered' ||
-    Boolean(order.delivered_date || order.deliveredDate) ||
-    (eventStr.includes('delivered') && !eventStr.includes('undelivered') && !eventStr.includes('attempt'));
-
-  if (isDelivered) {
-    return 'Delivered';
-  }
+  // 0. Explicit RTO Detection (Carrier return confirmation takes absolute precedence over stale dispatch flags)
+  const isExplicitRto =
+    statusStr.includes('rto') ||
+    statusStr.includes('return to origin') ||
+    statusStr.includes('return to orgin') ||
+    statusStr.includes('returntoorigin') ||
+    statusStr.includes('returntoorgin') ||
+    statusStr.includes('delivered to seller') ||
+    statusStr.includes('delivered to sender') ||
+    statusStr.includes('returned to origin') ||
+    statusStr.includes('returned to seller') ||
+    rawStatusStr.includes('rto') ||
+    rawStatusStr.includes('return to origin') ||
+    rawStatusStr.includes('return to orgin') ||
+    rawStatusStr.includes('returntoorigin') ||
+    rawStatusStr.includes('returntoorgin') ||
+    rawStatusStr.includes('delivered_seller') ||
+    rawStatusStr.includes('delivered to seller') ||
+    rawStatusStr.includes('delivered to sender') ||
+    rawStatusStr.includes('returned_to_origin') ||
+    rawStatusStr.includes('returned to origin') ||
+    rawStatusStr.includes('returned to seller') ||
+    rawStatusStr.includes('returning to origin') ||
+    rawStatusStr.includes('returning_to_origin') ||
+    eventStr.includes('rto') ||
+    eventStr.includes('return to origin') ||
+    eventStr.includes('return to orgin') ||
+    eventStr.includes('returntoorigin') ||
+    eventStr.includes('returntoorgin') ||
+    eventStr.includes('delivered to seller') ||
+    remarksStr.includes('rto') ||
+    remarksStr.includes('return to origin') ||
+    remarksStr.includes('return to orgin') ||
+    remarksStr.includes('returntoorigin') ||
+    remarksStr.includes('returntoorgin') ||
+    remarksStr.includes('delivered to seller');
 
   // 1. Cancelled (Commercial source cancellation takes precedence over batch removal/soft delete)
   const isCancelled =
     order.order_status === 'CANCELLED' ||
     (order.order_status || '').toLowerCase() === 'cancelled' ||
     statusStr === 'cancelled' || 
+    statusStr === 'canceled' ||
     finStr === 'voided' || 
     rawStatusStr.includes('cancel') ||
     Boolean(order.cancellation && (order.cancellation.status === 'CANCELLED' || String(order.cancellation.status).toLowerCase() === 'cancelled')) ||
@@ -264,30 +290,12 @@ export function getCanonicalStatus(order: any): CanonicalLogisticsStatus {
     Boolean(order.isCancelled) ||
     Boolean(extra.cancellation_requested_at || extra.cancelled_at);
 
-  if (isCancelled) {
+  if (isCancelled && !isExplicitRto) {
     return 'Cancelled';
   }
 
-  // 2. Deleted (Genuinely deleted orders with no terminal delivery or valid cancellation)
-  if (isDeletedOrder(order)) {
-    return 'Deleted';
-  }
-
   // 2. RTO (Return to Origin) categories
-  const isRto = 
-    statusStr.includes('rto') || 
-    statusStr.includes('return') || 
-    statusStr.includes('delivered to seller') ||
-    rawStatusStr.includes('rto') || 
-    rawStatusStr.includes('return') ||
-    rawStatusStr.includes('delivered_seller') ||
-    rawStatusStr.includes('delivered to seller') ||
-    eventStr.includes('rto') ||
-    eventStr.includes('return to origin') ||
-    remarksStr.includes('rto') ||
-    remarksStr.includes('return to origin');
-
-  if (isRto) {
+  if (isExplicitRto) {
     if (
       statusStr.includes('delivered to seller') || 
       statusStr.includes('delivered to sender') || 
@@ -308,6 +316,10 @@ export function getCanonicalStatus(order: any): CanonicalLogisticsStatus {
       rawStatusStr.includes('transit') || 
       rawStatusStr.includes('returning_to_origin') ||
       rawStatusStr.includes('returning to origin') ||
+      rawStatusStr.includes('return to origin') ||
+      rawStatusStr.includes('return to orgin') ||
+      statusStr.includes('return to origin') ||
+      statusStr.includes('return to orgin') ||
       eventStr.includes('in transit') ||
       eventStr.includes('dispatched') ||
       remarksStr.includes('transit')
@@ -315,6 +327,23 @@ export function getCanonicalStatus(order: any): CanonicalLogisticsStatus {
       return 'RTO In Transit';
     }
     return 'RTO Initiated';
+  }
+
+  // 3. Deleted (Genuinely deleted orders with no terminal delivery or valid cancellation)
+  if (isDeletedOrder(order)) {
+    return 'Deleted';
+  }
+
+  // 4. Delivered (Terminal delivery protection: physical delivery takes precedence when not RTO)
+  const isDelivered = 
+    statusStr === 'delivered' || 
+    rawStatusStr === 'delivered' || 
+    String(order.dispatch_status || '').toLowerCase().trim() === 'delivered' ||
+    Boolean(order.delivered_date || order.deliveredDate) ||
+    (eventStr.includes('delivered') && !eventStr.includes('undelivered') && !eventStr.includes('attempt'));
+
+  if (isDelivered) {
+    return 'Delivered';
   }
 
   // 3. Delivered (Do not infer delivered merely because AWB exists)

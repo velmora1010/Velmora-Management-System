@@ -1189,11 +1189,11 @@ export async function commitMultiCourierImport(
               nextDispatchStatus = 'DISPATCHED';
             }
 
-            // Protect existing DELIVERED orders from downgrade
-            if (salesOrder.dispatch_status === 'DELIVERED' && nextDispatchStatus !== 'DELIVERED') {
+            // Protect existing DELIVERED orders from downgrade unless carrier explicitly confirms RTO
+            if (salesOrder.dispatch_status === 'DELIVERED' && nextDispatchStatus !== 'DELIVERED' && !item.normalizedStatus.includes('RTO')) {
               nextDispatchStatus = 'DELIVERED';
             }
-            // Protect existing CANCELLED orders from downgrade unless delivered
+            // Protect existing CANCELLED orders from downgrade unless delivered or RTO
             if (salesOrder.dispatch_status === 'CANCELLED' && nextDispatchStatus === 'DISPATCHED') {
               nextDispatchStatus = 'CANCELLED';
             }

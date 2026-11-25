@@ -68,7 +68,8 @@ export const normalizeState = (stateStr: string, lastEventStr?: string): string 
 
 /**
  * Checks if status belongs to RTO categories.
- * Substrings: RTO, Return To Origin, Returned, Return Initiated, Undelivered
+ * Substrings: RTO, Return To Origin, Return To Orgin, Returned, Return Initiated.
+ * NOTE: Generic "undelivered" is NOT RTO.
  */
 export const isRTOStatus = (statusStr: string): boolean => {
   if (!statusStr) return false;
@@ -76,9 +77,13 @@ export const isRTOStatus = (statusStr: string): boolean => {
   return (
     s.includes('rto') ||
     s.includes('return to origin') ||
-    s.includes('returned') ||
-    s.includes('return initiated') ||
-    s.includes('undelivered')
+    s.includes('return to orgin') ||
+    s.includes('returntoorigin') ||
+    s.includes('returntoorgin') ||
+    s.includes('returned to origin') ||
+    s.includes('returned to seller') ||
+    s.includes('delivered to seller') ||
+    s.includes('return initiated')
   );
 };
 
