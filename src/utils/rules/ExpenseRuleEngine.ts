@@ -101,7 +101,10 @@ export class ExpenseRuleEngine {
       .join('\\s*');
 
     // Ensure the keyword matches as a distinct boundary, not inside another word.
-    const regex = new RegExp(`(^|\\W)${pattern}((?=\\W)|$)`, 'i');
+    // Allow digit boundaries adjacent to alphabetic starts/ends (e.g. sles3aos2capb1l, sodiumbenzo ate2).
+    const leadingBoundary = /^[a-z]/i.test(compact) ? '(^|\\W|\\d)' : '(^|\\W)';
+    const trailingBoundary = /[a-z]$/i.test(compact) ? '((?=\\W|\\d)|$)' : '((?=\\W)|$)';
+    const regex = new RegExp(`${leadingBoundary}${pattern}${trailingBoundary}`, 'i');
 
     return regex.test(description.toLowerCase());
   }
