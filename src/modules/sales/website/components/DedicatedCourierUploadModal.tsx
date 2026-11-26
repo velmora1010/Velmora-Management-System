@@ -40,6 +40,17 @@ interface DedicatedCourierUploadModalProps {
 
 type ModalStep = 'select' | 'preview' | 'importing' | 'completed';
 
+type FilterType = 
+  | 'ALL' 
+  | 'MATCHED' 
+  | 'DELIVERED' 
+  | 'RTO' 
+  | 'UN_DELIVERED' 
+  | 'CANCELLED' 
+  | 'NEEDS_REVIEW' 
+  | 'DUPLICATE_AWB' 
+  | 'UNMATCHED';
+
 export const DedicatedCourierUploadModal: React.FC<DedicatedCourierUploadModalProps> = ({
   isOpen,
   courierType,
@@ -59,7 +70,7 @@ export const DedicatedCourierUploadModal: React.FC<DedicatedCourierUploadModalPr
 
   // Search & Filter in Preview
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [filterType, setFilterType] = useState<'ALL' | 'MATCHED' | 'UNMATCHED'>('ALL');
+  const [filterType, setFilterType] = useState<FilterType>('ALL');
 
   // Progress state during commit
   const [progress, setProgress] = useState<{ current: number; total: number; phase: string }>({
@@ -74,6 +85,12 @@ export const DedicatedCourierUploadModal: React.FC<DedicatedCourierUploadModalPr
     return analysisResult.previewItems.filter(item => {
       if (filterType === 'MATCHED' && !item.isMatched) return false;
       if (filterType === 'UNMATCHED' && item.isMatched) return false;
+      if (filterType === 'DELIVERED' && item.normalizedStatus !== 'Delivered') return false;
+      if (filterType === 'RTO' && !item.normalizedStatus.includes('RTO')) return false;
+      if (filterType === 'UN_DELIVERED' && item.normalizedStatus !== 'Un Delivered') return false;
+      if (filterType === 'CANCELLED' && item.normalizedStatus !== 'Cancelled') return false;
+      if (filterType === 'NEEDS_REVIEW' && !item.isNeedsReview && !item.isConflict) return false;
+      if (filterType === 'DUPLICATE_AWB' && !item.isDuplicateAwb) return false;
 
       if (searchTerm.trim()) {
         const q = searchTerm.toLowerCase().trim();
@@ -82,7 +99,8 @@ export const DedicatedCourierUploadModal: React.FC<DedicatedCourierUploadModalPr
         const mCust = (item.customerName || '').toLowerCase().includes(q);
         const mCity = (item.city || '').toLowerCase().includes(q);
         const mCourier = (item.courier || '').toLowerCase().includes(q);
-        return mOid || mAwb || mCust || mCity || mCourier;
+        const mStatus = (item.normalizedStatus || '').toLowerCase().includes(q);
+        return mOid || mAwb || mCust || mCity || mCourier || mStatus;
       }
 
       return true;
@@ -314,38 +332,69 @@ export const DedicatedCourierUploadModal: React.FC<DedicatedCourierUploadModalPr
           {step === 'preview' && analysisResult && (
             <div className="space-y-5">
               {/* Stat Cards Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800">
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">
+                <div className="p-3 rounded-2xl bg-slate-950/70 border border-slate-800">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Rows</span>
                   <div className="text-lg font-bold text-white mt-0.5">{analysisResult.totalRows.toLocaleString('en-IN')}</div>
-                  <span className="text-[11px] text-slate-500">{analysisResult.uniqueOrdersCount} unique orders</span>
+                  <span className="text-[10px] text-slate-500">{analysisResult.uniqueOrdersCount} unique</span>
                 </div>
 
-                <div className="p-3.5 rounded-2xl bg-emerald-950/30 border border-emerald-800/50">
-                  <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Matched Orders</span>
+                <div className="p-3 rounded-2xl bg-emerald-950/30 border border-emerald-800/50">
+                  <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Matched</span>
                   <div className="text-lg font-bold text-emerald-300 mt-0.5">{analysisResult.matchedCount.toLocaleString('en-IN')}</div>
-                  <span className="text-[11px] text-emerald-400/80">Ready to enrich</span>
+                  <span className="text-[10px] text-emerald-400/80">Ready to enrich</span>
                 </div>
 
-                <div className={`p-3.5 rounded-2xl ${analysisResult.unmatchedCount > 0 ? 'bg-amber-950/30 border border-amber-800/50' : 'bg-slate-950/70 border border-slate-800'}`}>
+                <div className="p-3 rounded-2xl bg-emerald-950/20 border border-emerald-700/40">
+                  <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Delivered</span>
+                  <div className="text-lg font-bold text-emerald-300 mt-0.5">{analysisResult.deliveredCount.toLocaleString('en-IN')}</div>
+                  <span className="text-[10px] text-emerald-500/80">Verified</span>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-rose-950/30 border border-rose-800/50">
+                  <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider">Total RTO</span>
+                  <div className="text-lg font-bold text-rose-300 mt-0.5">{analysisResult.rtoCount.toLocaleString('en-IN')}</div>
+                  <span className="text-[10px] text-rose-400/80">Returns</span>
+                </div>
+
+                {analysisResult.unDeliveredCount > 0 && (
+                  <div className="p-3 rounded-2xl bg-cyan-950/30 border border-cyan-800/50">
+                    <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider">Un Delivered</span>
+                    <div className="text-lg font-bold text-cyan-300 mt-0.5">{analysisResult.unDeliveredCount.toLocaleString('en-IN')}</div>
+                    <span className="text-[10px] text-cyan-400/80">In Transit</span>
+                  </div>
+                )}
+
+                <div className="p-3 rounded-2xl bg-amber-950/30 border border-amber-800/50">
+                  <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Cancelled</span>
+                  <div className="text-lg font-bold text-amber-300 mt-0.5">{analysisResult.cancelledCount.toLocaleString('en-IN')}</div>
+                  <span className="text-[10px] text-amber-400/80">Pre-fulfillment</span>
+                </div>
+
+                {analysisResult.needsReviewCount > 0 && (
+                  <div className="p-3 rounded-2xl bg-purple-950/40 border border-purple-500/50">
+                    <span className="text-[10px] font-bold text-purple-400 uppercase tracking-wider">Needs Review</span>
+                    <div className="text-lg font-bold text-purple-300 mt-0.5">{analysisResult.needsReviewCount.toLocaleString('en-IN')}</div>
+                    <span className="text-[10px] text-purple-400/80">Discrepancy</span>
+                  </div>
+                )}
+
+                {analysisResult.duplicateAwbCount > 0 && (
+                  <div className="p-3 rounded-2xl bg-amber-950/30 border border-amber-600/50">
+                    <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Duplicate AWB</span>
+                    <div className="text-lg font-bold text-amber-300 mt-0.5">{analysisResult.duplicateAwbCount.toLocaleString('en-IN')}</div>
+                    <span className="text-[10px] text-amber-400/80">Repeated</span>
+                  </div>
+                )}
+
+                <div className={`p-3 rounded-2xl ${analysisResult.unmatchedCount > 0 ? 'bg-amber-950/30 border border-amber-800/50' : 'bg-slate-950/70 border border-slate-800'}`}>
                   <span className={`text-[10px] font-bold uppercase tracking-wider ${analysisResult.unmatchedCount > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
-                    Unmatched Records
+                    Unmatched
                   </span>
                   <div className={`text-lg font-bold mt-0.5 ${analysisResult.unmatchedCount > 0 ? 'text-amber-300' : 'text-slate-300'}`}>
                     {analysisResult.unmatchedCount.toLocaleString('en-IN')}
                   </div>
-                  <span className="text-[11px] text-slate-500">Not in Sales orders</span>
-                </div>
-
-                <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Carrier Split</span>
-                  <div className="text-xs font-semibold text-slate-300 mt-1 flex flex-wrap gap-1">
-                    {Object.entries(analysisResult.carrierBreakdown).map(([c, count]) => (
-                      <span key={c} className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-[10px]">
-                        {c}: {count}
-                      </span>
-                    ))}
-                  </div>
+                  <span className="text-[10px] text-slate-500">Not in Sales</span>
                 </div>
               </div>
 
@@ -374,7 +423,7 @@ export const DedicatedCourierUploadModal: React.FC<DedicatedCourierUploadModalPr
 
               {/* Search & Filter Toolbar */}
               <div className="flex flex-wrap items-center justify-between gap-3 pb-1">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <div className="relative">
                     <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                     <input
@@ -382,15 +431,15 @@ export const DedicatedCourierUploadModal: React.FC<DedicatedCourierUploadModalPr
                       placeholder="Search order, AWB, customer, city..."
                       value={searchTerm}
                       onChange={e => setSearchTerm(e.target.value)}
-                      className="h-9 pl-9 pr-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500 w-52 sm:w-64"
+                      className="h-9 pl-9 pr-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500 w-48 sm:w-56"
                     />
                   </div>
 
-                  <div className="flex items-center rounded-xl bg-slate-950/80 border border-slate-800 p-0.5 text-xs">
+                  <div className="flex items-center rounded-xl bg-slate-950/80 border border-slate-800 p-0.5 text-xs flex-wrap gap-1">
                     <button
                       type="button"
                       onClick={() => setFilterType('ALL')}
-                      className={`px-3 py-1 rounded-lg font-medium transition-all cursor-pointer ${
+                      className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer text-xs ${
                         filterType === 'ALL' ? 'bg-purple-600 text-white font-bold' : 'text-slate-400 hover:text-white'
                       }`}
                     >
@@ -399,7 +448,7 @@ export const DedicatedCourierUploadModal: React.FC<DedicatedCourierUploadModalPr
                     <button
                       type="button"
                       onClick={() => setFilterType('MATCHED')}
-                      className={`px-3 py-1 rounded-lg font-medium transition-all cursor-pointer ${
+                      className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer text-xs ${
                         filterType === 'MATCHED' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400 hover:text-white'
                       }`}
                     >
@@ -407,8 +456,68 @@ export const DedicatedCourierUploadModal: React.FC<DedicatedCourierUploadModalPr
                     </button>
                     <button
                       type="button"
+                      onClick={() => setFilterType('DELIVERED')}
+                      className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer text-xs ${
+                        filterType === 'DELIVERED' ? 'bg-emerald-700 text-white font-bold' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Delivered ({analysisResult.deliveredCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFilterType('RTO')}
+                      className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer text-xs ${
+                        filterType === 'RTO' ? 'bg-rose-600 text-white font-bold' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      RTO ({analysisResult.rtoCount})
+                    </button>
+                    {analysisResult.unDeliveredCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setFilterType('UN_DELIVERED')}
+                        className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer text-xs ${
+                          filterType === 'UN_DELIVERED' ? 'bg-cyan-600 text-white font-bold' : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        Un Delivered ({analysisResult.unDeliveredCount})
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setFilterType('CANCELLED')}
+                      className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer text-xs ${
+                        filterType === 'CANCELLED' ? 'bg-amber-600 text-white font-bold' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Cancelled ({analysisResult.cancelledCount})
+                    </button>
+                    {analysisResult.needsReviewCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setFilterType('NEEDS_REVIEW')}
+                        className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer text-xs ${
+                          filterType === 'NEEDS_REVIEW' ? 'bg-purple-700 text-white font-bold' : 'text-purple-400 hover:text-white'
+                        }`}
+                      >
+                        Needs Review ({analysisResult.needsReviewCount})
+                      </button>
+                    )}
+                    {analysisResult.duplicateAwbCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setFilterType('DUPLICATE_AWB')}
+                        className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer text-xs ${
+                          filterType === 'DUPLICATE_AWB' ? 'bg-amber-700 text-white font-bold' : 'text-amber-400 hover:text-white'
+                        }`}
+                      >
+                        Duplicate AWB ({analysisResult.duplicateAwbCount})
+                      </button>
+                    )}
+                    <button
+                      type="button"
                       onClick={() => setFilterType('UNMATCHED')}
-                      className={`px-3 py-1 rounded-lg font-medium transition-all cursor-pointer ${
+                      className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer text-xs ${
                         filterType === 'UNMATCHED' ? 'bg-amber-600 text-white font-bold' : 'text-slate-400 hover:text-white'
                       }`}
                     >
@@ -448,7 +557,14 @@ export const DedicatedCourierUploadModal: React.FC<DedicatedCourierUploadModalPr
                               {it.orderId}
                             </td>
                             <td className="py-2.5 px-3 font-mono text-[11px] text-cyan-300">
-                              {it.awbNumber || <span className="text-slate-600">—</span>}
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span>{it.awbNumber || <span className="text-slate-600">—</span>}</span>
+                                {it.isDuplicateAwb && (
+                                  <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[9px] font-semibold" title="Duplicate AWB in upload file">
+                                    Duplicate AWB
+                                  </span>
+                                )}
+                              </div>
                             </td>
                             <td className="py-2.5 px-3">
                               <span className="px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-slate-300 font-medium text-[11px]">
@@ -464,6 +580,12 @@ export const DedicatedCourierUploadModal: React.FC<DedicatedCourierUploadModalPr
                                   ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                                   : it.normalizedStatus.includes('RTO')
                                   ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                  : it.normalizedStatus === 'Cancelled'
+                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                  : it.normalizedStatus === 'Un Delivered'
+                                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                                  : it.isNeedsReview || it.isConflict
+                                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
                                   : 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
                               }`}>
                                 {it.normalizedStatus}
@@ -473,11 +595,20 @@ export const DedicatedCourierUploadModal: React.FC<DedicatedCourierUploadModalPr
                               {it.deliveredDate || <span className="text-slate-600">—</span>}
                             </td>
                             <td className="py-2.5 px-3">
-                              {isMatched ? (
+                              {it.isConflict || it.isNeedsReview ? (
+                                <div className="flex items-center gap-1.5 text-purple-400 text-[11px]" title={it.conflictReason || it.matchReason}>
+                                  <AlertTriangle size={13} className="shrink-0 text-purple-400" />
+                                  <span className="truncate max-w-[200px] font-medium text-purple-300">
+                                    {it.conflictReason || 'Needs Review'}
+                                  </span>
+                                </div>
+                              ) : isMatched ? (
                                 <div className="flex items-center gap-1.5 text-emerald-400 text-[11px]">
                                   <CheckCircle2 size={13} className="shrink-0" />
                                   <span className="truncate max-w-[200px]" title={it.matchReason}>
-                                    {it.classification === 'MATCHED_NEW_AWB' ? 'New AWB Linked' : 'Enriched'}
+                                    {it.classification === 'MATCHED_NEW_AWB' 
+                                      ? 'New AWB Linked' 
+                                      : (it.normalizedStatus === 'Cancelled' ? 'Cancelled Match' : 'Enriched')}
                                   </span>
                                 </div>
                               ) : (

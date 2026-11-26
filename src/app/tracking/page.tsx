@@ -10,10 +10,11 @@ import styles from './sync.module.css';
 const normalizeStatus = (rawStatus: string) => {
   if (!rawStatus) return 'Unknown';
   const s = rawStatus.toLowerCase();
+  if (s.includes('delivered to seller') || s.includes('delivered to sender') || s.includes('rto') || s.includes('return to origin') || s.includes('return to orgin') || s.includes('returned to origin')) return 'RTO';
+  if (s.includes('cancel')) return 'Cancelled';
   if (s.includes('delivered')) return 'Delivered';
   if (s.includes('out for delivery')) return 'Out for Delivery';
-  if (s.includes('rto') || s.includes('return') || s.includes('undelivered') || s.includes('refused') || s.includes('door locked') || s.includes('consignee not available')) return 'RTO';
-  if (s.includes('transit') || s.includes('processed') || s.includes('forwarded') || s.includes('booked') || s.includes('shipped')) return 'In Transit';
+  if (s.includes('transit') || s.includes('processed') || s.includes('forwarded') || s.includes('booked') || s.includes('shipped') || s.includes('undelivered') || s.includes('attempt') || s.includes('refused') || s.includes('door locked') || s.includes('consignee not available')) return 'In Transit';
   if (s.includes('tracking not found')) return 'Tracking Not Found';
   if (s.includes('parser failed')) return 'Parser Failed';
   if (s.includes('sync failed')) return 'Sync Failed';

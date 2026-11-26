@@ -149,6 +149,17 @@ export const normalizeTrackingStatus = (
   const st = (rawStatusType || '').toLowerCase().trim();
   const combined = `${cs} ${rem} ${st}`.trim();
 
+  // 0. Cancelled
+  if (
+    cs.includes('cancel') ||
+    st.includes('cancel') ||
+    rem.includes('cancelled by customer') ||
+    rem.includes('shipment cancelled') ||
+    rem.includes('order cancelled')
+  ) {
+    return 'Cancelled';
+  }
+
   // 1. Delivered
   if (
     rem.includes('delivered to consignee') ||
@@ -156,8 +167,8 @@ export const normalizeTrackingStatus = (
     rem.includes('delivery complete') ||
     cs === 'delivered' ||
     cs.includes('delivered to consignee') ||
-    (st === 'delivered' && !rem.includes('rto') && !rem.includes('return') && !rem.includes('failed')) ||
-    (rem.includes('delivered') && !rem.includes('rto') && !rem.includes('origin') && !rem.includes('seller') && !rem.includes('return') && !rem.includes('failed'))
+    (st === 'delivered' && !combined.includes('rto') && !combined.includes('return') && !combined.includes('failed') && !combined.includes('cancel')) ||
+    (rem.includes('delivered') && !combined.includes('rto') && !combined.includes('origin') && !combined.includes('seller') && !combined.includes('return') && !combined.includes('failed') && !combined.includes('cancel'))
   ) {
     return 'Delivered';
   }
@@ -180,16 +191,26 @@ export const normalizeTrackingStatus = (
     rem.includes('rto in transit') ||
     rem.includes('returning to origin') ||
     rem.includes('return to origin') ||
+    rem.includes('return to orgin') ||
+    rem.includes('returntoorigin') ||
+    rem.includes('returntoorgin') ||
     rem.includes('rto created') ||
     rem.includes('rto booked') ||
     rem.includes('return in transit') ||
     cs.includes('returning_to_origin') ||
     cs.includes('returned_to_origin') ||
+    cs.includes('return to origin') ||
+    cs.includes('return to orgin') ||
     (cs.includes('rto') && !cs.includes('delivered')) ||
     (rem.includes('rto') && !rem.includes('delivered')) ||
     ((st === 'rto' || st === 'returned') && !combined.includes('delivered'))
   ) {
     return 'RTO - In Transit';
+  }
+
+  // 3b. Un Delivered / Undelivered
+  if (st === 'undelivered' || cs === 'undelivered' || st === 'un delivered' || cs === 'un delivered') {
+    return 'Un Delivered';
   }
 
   // 4. Out for Delivery
@@ -340,7 +361,7 @@ export const detectTrackingColumns = (headers: string[]) => {
     // 2. Substring match pass
     const allCandidates = [...normExact, ...fallbackCandidates.map(normalizeKey)];
     for (const cand of allCandidates) {
-      const idx = normHeaders.findIndex(h => cand.length >= 4 && (h.includes(cand) || cand.includes(h)));
+      const idx = normHeaders.findIndex(h => cand.length >= 4 && h.includes(cand));
       if (idx !== -1) return idx;
     }
     return -1;

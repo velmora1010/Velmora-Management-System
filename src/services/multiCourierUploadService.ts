@@ -16,6 +16,7 @@ export type MatchClassification =
   | 'UNMATCHED_ORDER'
   | 'DUPLICATE_IN_FILE'
   | 'CANCELLED_PRE_FULFILLMENT'
+  | 'NEEDS_REVIEW'
   | 'INVALID_ROW';
 
 export interface MultiCourierPreviewItem {
@@ -47,6 +48,10 @@ export interface MultiCourierPreviewItem {
   classification: MatchClassification;
   isMatched: boolean;
   matchReason: string;
+  isDuplicateAwb?: boolean;
+  isConflict?: boolean;
+  conflictReason?: string;
+  isNeedsReview?: boolean;
   existingOrder?: {
     id?: number;
     orderId: string;
@@ -73,6 +78,8 @@ export interface MultiCourierAnalysisResult {
   deliveredCount: number;
   rtoCount: number;
   inTransitCount: number;
+  unDeliveredCount: number;
+  needsReviewCount: number;
   detectedHeaders: string[];
   carrierBreakdown: Record<string, number>;
   previewItems: MultiCourierPreviewItem[];
@@ -153,13 +160,133 @@ function findColumnIndex(headers: string[], candidates: string[]): number {
     if (idx !== -1) return idx;
   }
 
-  // Substring matches: header must contain candidate or candidate contains header
+  // Substring matches: header must contain candidate
   for (const cand of normCandidates) {
-    const idx = normHeaders.findIndex(h => cand.length >= 4 && (h.includes(cand) || cand.includes(h)));
+    const idx = normHeaders.findIndex(h => cand.length >= 4 && h.includes(cand));
     if (idx !== -1) return idx;
   }
 
   return -1;
+}
+
+export interface StCourierStatusResult {
+  status: string;
+  isConflict: boolean;
+  conflictReason?: string;
+  isNeedsReview: boolean;
+}
+
+/**
+ * Explicit ST Courier status normalization handling exact variations:
+ * Delivered -> Delivered
+ * Un Delivered -> Un Delivered
+ * Return to Origin / Return To Orgin -> RTO
+ * Cancelled / Canceled -> Cancelled
+ */
+export function normalizeStCourierStatus(
+  statusType?: string | null,
+  currentStatus?: string | null,
+  deliveredDate?: string | null,
+  rtoDeliveredDate?: string | null,
+  remarks?: string | null
+): StCourierStatusResult {
+  const st = (statusType || '').trim();
+  const cs = (currentStatus || '').trim();
+  const rem = (remarks || '').trim();
+
+  const normSt = st.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const normCs = cs.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const normRem = rem.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  const isStCancelled = normSt === 'cancelled' || normSt === 'canceled';
+  const isCsCancelled = normCs === 'cancelled' || normCs === 'canceled';
+
+  // 1. Cancellation check (if either Status Type or Current Status indicates cancelled)
+  if (isStCancelled || isCsCancelled) {
+    return {
+      status: 'Cancelled',
+      isConflict: false,
+      isNeedsReview: false
+    };
+  }
+
+  // 2. RTO check (Return to Origin, Return To Orgin, etc.)
+  const isCsRto = normCs.includes('returntoorigin') || normCs.includes('returntoorgin') || normCs.includes('rto');
+  const isStRto = normSt.includes('returntoorigin') || normSt.includes('returntoorgin') || normSt.includes('rto');
+  const isRemRto = normRem.includes('returntoorigin') || normRem.includes('returntoorgin') || normRem.includes('rto');
+
+  if (isCsRto || isStRto || isRemRto) {
+    if (rtoDeliveredDate && rtoDeliveredDate !== 'N/A') {
+      return {
+        status: 'RTO Delivered to Seller',
+        isConflict: false,
+        isNeedsReview: false
+      };
+    }
+    return {
+      status: 'RTO - In Transit',
+      isConflict: false,
+      isNeedsReview: false
+    };
+  }
+
+  // 3. Delivered check
+  const isStDelivered = normSt === 'delivered';
+  const isCsDelivered = normCs === 'delivered';
+  const hasDeliveredDate = Boolean(deliveredDate && deliveredDate !== 'N/A' && deliveredDate !== '-');
+
+  if (isStDelivered && isCsDelivered) {
+    return {
+      status: 'Delivered',
+      isConflict: false,
+      isNeedsReview: false
+    };
+  }
+
+  // Conflict case: Status Type is Un Delivered, but Current Status is Delivered
+  if (normSt === 'undelivered' && isCsDelivered) {
+    return {
+      status: 'Delivered',
+      isConflict: true,
+      conflictReason: `Status Type is 'Un Delivered' but Current Status is 'Delivered'${hasDeliveredDate ? ` (Delivered Date: ${deliveredDate})` : ''}`,
+      isNeedsReview: true
+    };
+  }
+
+  // Conflict case: Status Type is Delivered, but Current Status is Un Delivered
+  if (isStDelivered && normCs === 'undelivered') {
+    return {
+      status: hasDeliveredDate ? 'Delivered' : 'Un Delivered',
+      isConflict: true,
+      conflictReason: `Status Type is 'Delivered' but Current Status is 'Un Delivered'`,
+      isNeedsReview: true
+    };
+  }
+
+  // 4. Undelivered / In transit
+  if (normSt === 'undelivered' || normCs === 'undelivered') {
+    return {
+      status: 'Un Delivered',
+      isConflict: false,
+      isNeedsReview: false
+    };
+  }
+
+  if (isCsDelivered || (isStDelivered && hasDeliveredDate)) {
+    return {
+      status: 'Delivered',
+      isConflict: false,
+      isNeedsReview: false
+    };
+  }
+
+  // Fallback: Needs Review if unrecognized
+  return {
+    status: cs || st || 'Needs Review',
+    isConflict: true,
+    conflictReason: `Unrecognized status combination: Status Type='${st}', Current Status='${cs}'`,
+    isNeedsReview: true
+  };
 }
 
 /**
@@ -476,6 +603,15 @@ export async function parseAndValidateCourierFile(
   const unmatchedItems: MultiCourierPreviewItem[] = [];
   const seenAwbsInFile = new Set<string>();
 
+  // Track AWB frequencies across file to identify duplicate AWBs
+  const awbFrequencyMap = new Map<string, number>();
+  for (const grp of orderGroups) {
+    if (grp.rawAwb) {
+      const norm = grp.rawAwb.toLowerCase();
+      awbFrequencyMap.set(norm, (awbFrequencyMap.get(norm) || 0) + 1);
+    }
+  }
+
   let matchedCount = 0;
   let unmatchedCount = 0;
   let duplicateAwbCount = 0;
@@ -485,12 +621,15 @@ export async function parseAndValidateCourierFile(
   let deliveredCount = 0;
   let rtoCount = 0;
   let inTransitCount = 0;
+  let unDeliveredCount = 0;
+  let needsReviewCount = 0;
 
   const carrierBreakdown: Record<string, number> = {};
 
   for (const grp of orderGroups) {
     const rawAwb = grp.rawAwb;
     const cleanOid = grp.cleanOid;
+    const isDuplicateAwb = Boolean(rawAwb && (awbFrequencyMap.get(rawAwb.toLowerCase()) || 0) > 1);
 
     // Check duplicate AWB in this file
     if (rawAwb) {
@@ -521,31 +660,68 @@ export async function parseAndValidateCourierFile(
 
     carrierBreakdown[resolvedCourier] = (carrierBreakdown[resolvedCourier] || 0) + 1;
 
-    // Status Determination
+    // Status Determination with explicit ST Courier precedence rules
     let finalNormalizedStatus = 'In Transit';
-    const isRtoValid = (grp.rtoInitiatedDate && grp.rtoInitiatedDate !== 'N/A') || 
-                       (grp.rtoReason && grp.rtoReason !== 'N/A') ||
-                       grp.rawStatus.toLowerCase().includes('rto');
-    const isDeliveredValid = (grp.deliveredDate && grp.deliveredDate !== 'N/A') || 
-                             grp.rawStatus.toLowerCase() === 'delivered';
+    let isConflict = false;
+    let conflictReason: string | undefined;
+    let isNeedsReview = false;
 
-    if (grp.rtoDeliveredDate && grp.rtoDeliveredDate !== 'N/A') {
-      finalNormalizedStatus = 'RTO Delivered to Seller';
-      rtoCount++;
-    } else if (isRtoValid) {
-      finalNormalizedStatus = 'RTO - In Transit';
-      rtoCount++;
-    } else if (isDeliveredValid) {
-      finalNormalizedStatus = 'Delivered';
-      deliveredCount++;
-    } else {
-      finalNormalizedStatus = normalizeTrackingStatus(grp.rawStatus, grp.remarks, grp.statusType);
+    if (courierType === 'st_courier') {
+      const stRes = normalizeStCourierStatus(
+        grp.statusType,
+        grp.rawStatus,
+        grp.deliveredDate,
+        grp.rtoDeliveredDate,
+        grp.remarks
+      );
+      finalNormalizedStatus = stRes.status;
+      isConflict = stRes.isConflict;
+      conflictReason = stRes.conflictReason;
+      isNeedsReview = stRes.isNeedsReview;
+
       if (finalNormalizedStatus === 'Delivered') {
         deliveredCount++;
       } else if (finalNormalizedStatus.includes('RTO')) {
         rtoCount++;
+      } else if (finalNormalizedStatus === 'Cancelled') {
+        cancelledCount++;
+      } else if (finalNormalizedStatus === 'Un Delivered') {
+        unDeliveredCount++;
       } else {
         inTransitCount++;
+      }
+      if (isNeedsReview) {
+        needsReviewCount++;
+      }
+    } else {
+      const isRtoValid = (grp.rtoInitiatedDate && grp.rtoInitiatedDate !== 'N/A') || 
+                         (grp.rtoReason && grp.rtoReason !== 'N/A') ||
+                         grp.rawStatus.toLowerCase().includes('rto');
+      const isDeliveredValid = (grp.deliveredDate && grp.deliveredDate !== 'N/A') || 
+                               grp.rawStatus.toLowerCase() === 'delivered';
+
+      if (grp.rtoDeliveredDate && grp.rtoDeliveredDate !== 'N/A') {
+        finalNormalizedStatus = 'RTO Delivered to Seller';
+        rtoCount++;
+      } else if (isRtoValid) {
+        finalNormalizedStatus = 'RTO - In Transit';
+        rtoCount++;
+      } else if (isDeliveredValid) {
+        finalNormalizedStatus = 'Delivered';
+        deliveredCount++;
+      } else {
+        finalNormalizedStatus = normalizeTrackingStatus(grp.rawStatus, grp.remarks, grp.statusType);
+        if (finalNormalizedStatus === 'Delivered') {
+          deliveredCount++;
+        } else if (finalNormalizedStatus.includes('RTO')) {
+          rtoCount++;
+        } else if (finalNormalizedStatus === 'Cancelled') {
+          cancelledCount++;
+        } else if (finalNormalizedStatus === 'Un Delivered') {
+          unDeliveredCount++;
+        } else {
+          inTransitCount++;
+        }
       }
     }
 
@@ -574,6 +750,8 @@ export async function parseAndValidateCourierFile(
       matchedSales = salesByCleanId.get(trOid);
     }
 
+    const isMatched = Boolean(matchedDexie || matchedSales || matchedTracking);
+
     const isCancelledInSystem = matchedSales?.order_status === 'CANCELLED' || 
                                 matchedSales?.dispatch_status === 'CANCELLED' ||
                                 Boolean(matchedSales?.extra_data?.cancellation);
@@ -583,47 +761,109 @@ export async function parseAndValidateCourierFile(
       : '';
     const totalQty = grp.products.reduce((acc, p) => acc + p.qty, 0) || 1;
 
-    if (isCancelledInSystem) {
+    // Harmonize cancellation: if system is cancelled or courier report is cancelled
+    if (isCancelledInSystem && finalNormalizedStatus !== 'Cancelled') {
+      if (finalNormalizedStatus === 'Delivered') deliveredCount = Math.max(0, deliveredCount - 1);
+      else if (finalNormalizedStatus.includes('RTO')) rtoCount = Math.max(0, rtoCount - 1);
+      else if (finalNormalizedStatus === 'Un Delivered') unDeliveredCount = Math.max(0, unDeliveredCount - 1);
+      else inTransitCount = Math.max(0, inTransitCount - 1);
+
+      finalNormalizedStatus = 'Cancelled';
       cancelledCount++;
-      previewItems.push({
-        rowNumber: grp.mainRowIndex,
-        orderId: grp.rawOrderId || (cleanOid ? `#${cleanOid}` : 'N/A'),
-        cleanOrderId: cleanOid,
-        awbNumber: rawAwb,
-        courier: resolvedCourier,
-        originalCourierCompany: grp.courierCompany,
-        customerName: grp.customerName || matchedSales?.customer_name,
-        phone: grp.phone,
-        city: grp.city,
-        state: grp.state,
-        paymentMode: grp.paymentMode,
-        orderTotal: grp.orderTotal || matchedSales?.order_total,
-        products: productsSummary,
-        totalQuantity: totalQty,
-        rawStatus: grp.rawStatus,
-        statusType: grp.statusType,
-        remarks: grp.remarks,
-        normalizedStatus: 'Cancelled',
-        orderDate: grp.orderDate,
-        dispatchDate: grp.pickupDate,
-        deliveredDate: grp.deliveredDate,
-        estimatedDeliveryDate: grp.edd,
-        classification: 'CANCELLED_PRE_FULFILLMENT',
-        isMatched: true,
-        matchReason: `Order #${cleanOid} was cancelled pre-fulfillment. Status preserved as Cancelled.`,
-        existingOrder: {
-          id: matchedDexie?.id,
-          orderId: cleanOid,
-          existingAwb: matchedDexie?.awbNumber,
-          existingCourier: matchedDexie?.courier,
-          existingStatus: 'Cancelled',
-          isCancelled: true
-        }
-      });
+    }
+
+    if (finalNormalizedStatus === 'Cancelled') {
+      if (isMatched) {
+        matchedCount++;
+        const existingAwb = normalizeAwb(matchedDexie?.awbNumber || matchedSales?.extra_data?.awb_number || matchedTracking?.awb_number || '');
+        const existingCourier = normalizeCourier(matchedDexie?.courier || matchedSales?.extra_data?.courier || matchedTracking?.courier) || '';
+
+        previewItems.push({
+          rowNumber: grp.mainRowIndex,
+          orderId: grp.rawOrderId || (cleanOid ? `#${cleanOid}` : 'N/A'),
+          cleanOrderId: cleanOid,
+          awbNumber: rawAwb || existingAwb,
+          courier: resolvedCourier,
+          originalCourierCompany: grp.courierCompany,
+          customerName: grp.customerName || matchedSales?.customer_name,
+          phone: grp.phone || matchedSales?.phone,
+          city: grp.city || matchedSales?.city,
+          state: grp.state || matchedSales?.state,
+          paymentMode: grp.paymentMode || matchedSales?.payment_mode,
+          orderTotal: grp.orderTotal || matchedSales?.order_total,
+          products: productsSummary,
+          totalQuantity: totalQty,
+          rawStatus: grp.rawStatus,
+          statusType: grp.statusType,
+          remarks: grp.remarks,
+          normalizedStatus: 'Cancelled',
+          orderDate: grp.orderDate || matchedSales?.order_date,
+          dispatchDate: grp.pickupDate || matchedSales?.dispatch_date,
+          deliveredDate: grp.deliveredDate,
+          estimatedDeliveryDate: grp.edd,
+          classification: 'CANCELLED_PRE_FULFILLMENT',
+          isMatched: true,
+          matchReason: isCancelledInSystem 
+            ? `Order #${cleanOid} was cancelled pre-fulfillment. Status preserved as Cancelled.`
+            : `Order #${cleanOid} cancelled in courier manifest.`,
+          isDuplicateAwb,
+          isConflict,
+          conflictReason,
+          isNeedsReview,
+          existingOrder: {
+            id: matchedDexie?.id,
+            orderId: cleanOid,
+            existingAwb,
+            existingCourier,
+            existingStatus: 'Cancelled',
+            isCancelled: true
+          }
+        });
+      } else {
+        unmatchedCount++;
+        const reason = cleanOid 
+          ? `Cancelled Order #${cleanOid} does not exist in Shopify/Sales orders.` 
+          : `Cancelled row without matching order ID.`;
+
+        const unItem: MultiCourierPreviewItem = {
+          rowNumber: grp.mainRowIndex,
+          orderId: grp.rawOrderId || (cleanOid ? `#${cleanOid}` : 'N/A'),
+          cleanOrderId: cleanOid,
+          awbNumber: rawAwb,
+          courier: resolvedCourier,
+          originalCourierCompany: grp.courierCompany,
+          customerName: grp.customerName,
+          phone: grp.phone,
+          city: grp.city,
+          state: grp.state,
+          paymentMode: grp.paymentMode,
+          orderTotal: grp.orderTotal,
+          products: productsSummary,
+          totalQuantity: totalQty,
+          rawStatus: grp.rawStatus,
+          statusType: grp.statusType,
+          remarks: grp.remarks || grp.rtoReason,
+          normalizedStatus: 'Cancelled',
+          orderDate: grp.orderDate,
+          dispatchDate: grp.pickupDate,
+          deliveredDate: grp.deliveredDate,
+          estimatedDeliveryDate: grp.edd,
+          classification: 'UNMATCHED_ORDER',
+          isMatched: false,
+          matchReason: reason,
+          isDuplicateAwb,
+          isConflict,
+          conflictReason,
+          isNeedsReview
+        };
+
+        previewItems.push(unItem);
+        unmatchedItems.push(unItem);
+      }
       continue;
     }
 
-    if (matchedDexie || matchedSales || matchedTracking) {
+    if (isMatched) {
       matchedCount++;
       const existingAwb = normalizeAwb(matchedDexie?.awbNumber || matchedSales?.extra_data?.awb_number || matchedTracking?.awb_number || '');
       const existingCourier = normalizeCourier(matchedDexie?.courier || matchedSales?.extra_data?.courier || matchedTracking?.courier) || '';
@@ -632,7 +872,10 @@ export async function parseAndValidateCourierFile(
       let classification: MatchClassification = 'MATCHED_EXISTING';
       let matchReason = '';
 
-      if (!existingAwb && rawAwb) {
+      if (isNeedsReview || isConflict) {
+        classification = 'NEEDS_REVIEW';
+        matchReason = conflictReason || `Status discrepancy flagged for review: ${finalNormalizedStatus}`;
+      } else if (!existingAwb && rawAwb) {
         classification = 'MATCHED_NEW_AWB';
         matchReason = `Assigned verified AWB ${rawAwb} (${resolvedCourier}) to Order #${cleanOid}.`;
         newAwbAssignmentsCount++;
@@ -675,6 +918,10 @@ export async function parseAndValidateCourierFile(
         classification,
         isMatched: true,
         matchReason,
+        isDuplicateAwb,
+        isConflict,
+        conflictReason,
+        isNeedsReview,
         existingOrder: {
           id: matchedDexie?.id,
           orderId: cleanOid || matchedDexie?.orderId || '',
@@ -715,7 +962,11 @@ export async function parseAndValidateCourierFile(
         estimatedDeliveryDate: grp.edd,
         classification: 'UNMATCHED_ORDER',
         isMatched: false,
-        matchReason: reason
+        matchReason: reason,
+        isDuplicateAwb,
+        isConflict,
+        conflictReason,
+        isNeedsReview
       };
 
       previewItems.push(unItem);
@@ -739,6 +990,8 @@ export async function parseAndValidateCourierFile(
     deliveredCount,
     rtoCount,
     inTransitCount,
+    unDeliveredCount,
+    needsReviewCount,
     detectedHeaders: rawHeaders,
     carrierBreakdown,
     previewItems,
@@ -758,7 +1011,7 @@ export async function commitMultiCourierImport(
   courierType: CourierUploadType,
   onProgress?: (progress: { current: number; total: number; phase: string }) => void
 ): Promise<MultiCourierImportResult> {
-  const matched = previewItems.filter(it => it.isMatched && it.classification !== 'CANCELLED_PRE_FULFILLMENT');
+  const matched = previewItems.filter(it => it.isMatched);
   const errors: string[] = [];
   let updatedShipmentsCount = 0;
   let salesOrdersUpdatedCount = 0;
@@ -801,19 +1054,20 @@ export async function commitMultiCourierImport(
 
           // Status Protection: Never downgrade Delivered or RTO Delivered
           if ((currentStatus === 'Delivered' || currentStatus === 'RTO Delivered to Seller') && 
-              finalStatus !== currentStatus && !finalStatus.includes('RTO')) {
+              finalStatus !== currentStatus && !finalStatus.includes('RTO') && finalStatus !== 'Delivered') {
             finalStatus = currentStatus;
           }
 
           const isDelivered = finalStatus === 'Delivered';
+          const isCancelled = finalStatus === 'Cancelled';
 
           if (existing && existing.id) {
             const payload: Partial<LogisticsOrder> = {
               awbNumber: item.awbNumber || existing.awbNumber,
-              courier: item.courier,
+              courier: item.courier || existing.courier || 'ST Courier',
               status: finalStatus,
               rawStatus: item.rawStatus || item.normalizedStatus,
-              stage: isDelivered ? 'fulfilled' : (existing.stage === 'trash' ? 'tracking' : (existing.stage || 'tracking')),
+              stage: isDelivered ? 'fulfilled' : (isCancelled ? 'cancelled' : (existing.stage === 'trash' ? 'tracking' : (existing.stage || 'tracking'))),
               trashReason: undefined,
               syncedAt: nowLocale
             };
@@ -837,14 +1091,16 @@ export async function commitMultiCourierImport(
           }
 
           // Add audit log entry
-          await db.tracking_logs.add({
-            awb: item.awbNumber,
-            courier: item.courier,
-            startedAt: nowIso,
-            finishedAt: nowIso,
-            duration: 0,
-            success: true
-          });
+          if (item.awbNumber) {
+            await db.tracking_logs.add({
+              awb: item.awbNumber,
+              courier: item.courier || 'ST Courier',
+              startedAt: nowIso,
+              finishedAt: nowIso,
+              duration: 0,
+              success: true
+            });
+          }
         }
       });
     }
@@ -864,15 +1120,14 @@ export async function commitMultiCourierImport(
       const rowsToUpsert = slice
         .filter(item => item.awbNumber)
         .map(item => {
-          const isDelivered = item.normalizedStatus === 'Delivered';
           return {
             order_id: item.cleanOrderId || item.awbNumber,
             display_order_id: item.orderId || `#${item.cleanOrderId}`,
             awb_number: item.awbNumber,
-            courier: item.courier,
+            courier: item.courier || 'ST Courier',
             status: item.normalizedStatus,
             raw_status: item.rawStatus || item.normalizedStatus,
-            status_source: `COURIER_REPORT_${item.courier.toUpperCase().replace(/\s+/g, '_')}`,
+            status_source: `COURIER_REPORT_${(item.courier || 'ST_COURIER').toUpperCase().replace(/\s+/g, '_')}`,
             source_type: 'COURIER_EXPORT',
             dispatch_date: item.dispatchDate || nowIso.slice(0, 10),
             estimated_delivery_date: item.estimatedDeliveryDate || null,
@@ -923,28 +1178,41 @@ export async function commitMultiCourierImport(
 
             if (!salesOrder) return;
 
-            let nextDispatchStatus = item.normalizedStatus === 'Delivered' 
-              ? 'DELIVERED' 
-              : (item.normalizedStatus.includes('RTO') ? 'RTO' : 'DISPATCHED');
-
-            // Protect existing DELIVERED orders from downgrade
-            if (salesOrder.dispatch_status === 'DELIVERED' && nextDispatchStatus !== 'DELIVERED') {
+            let nextDispatchStatus = 'DISPATCHED';
+            if (item.normalizedStatus === 'Delivered') {
               nextDispatchStatus = 'DELIVERED';
+            } else if (item.normalizedStatus.includes('RTO')) {
+              nextDispatchStatus = 'RTO';
+            } else if (item.normalizedStatus === 'Cancelled') {
+              nextDispatchStatus = 'CANCELLED';
+            } else if (item.normalizedStatus === 'Un Delivered') {
+              nextDispatchStatus = 'DISPATCHED';
+            }
+
+            // Protect existing DELIVERED orders from downgrade unless carrier explicitly confirms RTO
+            if (salesOrder.dispatch_status === 'DELIVERED' && nextDispatchStatus !== 'DELIVERED' && !item.normalizedStatus.includes('RTO')) {
+              nextDispatchStatus = 'DELIVERED';
+            }
+            // Protect existing CANCELLED orders from downgrade unless delivered or RTO
+            if (salesOrder.dispatch_status === 'CANCELLED' && nextDispatchStatus === 'DISPATCHED') {
+              nextDispatchStatus = 'CANCELLED';
             }
 
             const existingExtra = salesOrder.extra_data || {};
             const nextExtra = {
               ...existingExtra,
-              awb_number: item.awbNumber,
-              courier: item.courier,
-              raw_status: item.rawStatus,
-              status_type: item.statusType,
-              remarks: item.remarks,
-              delivered_date: item.deliveredDate,
-              estimated_delivery_date: item.estimatedDeliveryDate,
+              awb_number: item.awbNumber || existingExtra.awb_number,
+              courier: item.courier || existingExtra.courier || 'ST Courier',
+              raw_status: item.rawStatus || existingExtra.raw_status,
+              status_type: item.statusType || existingExtra.status_type,
+              remarks: item.remarks || existingExtra.remarks,
+              delivered_date: item.deliveredDate || existingExtra.delivered_date,
+              estimated_delivery_date: item.estimatedDeliveryDate || existingExtra.estimated_delivery_date,
               last_tracking_sync: nowIso,
               last_reconciled_at: nowIso,
-              fulfillment_status: nextDispatchStatus === 'DELIVERED' ? 'fulfilled' : (existingExtra.fulfillment_status || 'unfulfilled')
+              fulfillment_status: nextDispatchStatus === 'DELIVERED' 
+                ? 'fulfilled' 
+                : (nextDispatchStatus === 'CANCELLED' ? 'cancelled' : (existingExtra.fulfillment_status || 'unfulfilled'))
             };
 
             const updatePayload: Record<string, any> = {

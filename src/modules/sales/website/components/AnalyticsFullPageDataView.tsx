@@ -72,6 +72,8 @@ interface AnalyticsFullPageDataViewProps {
   orders?: WebsiteConsolidatedOrder[];
   customers?: CustomerPurchaseProfile[];
   operations?: OperationalOrderRecord[];
+  initialOutcomeFilter?: 'ALL' | 'DELIVERED' | 'RTO' | 'CANCELLED' | 'IN_TRANSIT' | 'OTHER';
+  initialPaymentFilter?: 'ALL' | 'PREPAID' | 'COD' | 'PARTIAL COD';
   onBack: () => void;
   onOrderDeleted?: (orderId: string) => void;
 }
@@ -83,6 +85,8 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
   orders = [],
   customers = [],
   operations = [],
+  initialOutcomeFilter = 'ALL',
+  initialPaymentFilter = 'ALL',
   onBack,
   onOrderDeleted
 }) => {
@@ -95,11 +99,23 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
   const [locallyDeletedIds, setLocallyDeletedIds] = useState<Set<string>>(new Set());
 
   // Filter-specific dropdowns
-  const [filterPaymentMode, setFilterPaymentMode] = useState<string>('ALL');
-  const [filterShipmentOutcome, setFilterShipmentOutcome] = useState<'ALL' | 'DELIVERED' | 'RTO'>('ALL');
+  const [filterPaymentMode, setFilterPaymentMode] = useState<string>(initialPaymentFilter || 'ALL');
+  const [filterShipmentOutcome, setFilterShipmentOutcome] = useState<'ALL' | 'DELIVERED' | 'RTO' | 'CANCELLED' | 'IN_TRANSIT' | 'OTHER'>(initialOutcomeFilter || 'ALL');
   const [filterFrequencyGroup, setFilterFrequencyGroup] = useState<string>('ALL');
   const [filterCourier, setFilterCourier] = useState<string>('ALL');
   const [filterShipmentStatus, setFilterShipmentStatus] = useState<string>('ALL');
+
+  useEffect(() => {
+    if (initialOutcomeFilter) {
+      setFilterShipmentOutcome(initialOutcomeFilter);
+    }
+  }, [initialOutcomeFilter]);
+
+  useEffect(() => {
+    if (initialPaymentFilter) {
+      setFilterPaymentMode(initialPaymentFilter);
+    }
+  }, [initialPaymentFilter]);
 
   const isCancelledView = useMemo(() => title.toLowerCase().includes('cancel'), [title]);
   const isDeletedView = useMemo(() => title.toLowerCase().includes('delete'), [title]);
@@ -147,6 +163,18 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
         list = list.filter(o => getCanonicalStatus(o) === 'Delivered');
       } else if (filterShipmentOutcome === 'RTO') {
         list = list.filter(o => getCanonicalStatus(o).includes('RTO'));
+      } else if (filterShipmentOutcome === 'CANCELLED') {
+        list = list.filter(o => getCanonicalStatus(o) === 'Cancelled');
+      } else if (filterShipmentOutcome === 'IN_TRANSIT') {
+        list = list.filter(o => {
+          const s = getCanonicalStatus(o);
+          return s === 'In Transit' || s === 'Out for Delivery';
+        });
+      } else if (filterShipmentOutcome === 'OTHER') {
+        list = list.filter(o => {
+          const s = getCanonicalStatus(o);
+          return s !== 'Delivered' && !s.includes('RTO') && s !== 'Cancelled' && s !== 'In Transit' && s !== 'Out for Delivery' && s !== 'Deleted' && !isDeletedOrder(o);
+        });
       }
     }
 
@@ -154,6 +182,8 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
       const q = searchQuery.toLowerCase().trim();
       list = list.filter(o => {
         const cancelReason = (o.cancellation?.reason || o.extra_data?.cancellation?.reason || o.extra_data?.cancellation_reason || '').toLowerCase();
+        const awb = (o.awb_number || o.extra_data?.awb_number || '').toLowerCase();
+        const courier = (o.courier || o.extra_data?.courier || '').toLowerCase();
         return (
           o.order_id.toLowerCase().includes(q) ||
           (o.customer_name && o.customer_name.toLowerCase().includes(q)) ||
@@ -163,6 +193,8 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
           (o.pincode && o.pincode.includes(q)) ||
           (o.product_name && o.product_name.toLowerCase().includes(q)) ||
           (o.order_formatted && o.order_formatted.toLowerCase().includes(q)) ||
+          awb.includes(q) ||
+          courier.includes(q) ||
           cancelReason.includes(q)
         );
       });
@@ -182,6 +214,18 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
         } else if (sortField === 'dispatch_status') {
           valA = a.dispatch_status || a.extra_data?.dispatch_status || '';
           valB = b.dispatch_status || b.extra_data?.dispatch_status || '';
+        } else if (sortField === 'awb_number') {
+          valA = a.awb_number || a.extra_data?.awb_number || '';
+          valB = b.awb_number || b.extra_data?.awb_number || '';
+        } else if (sortField === 'courier') {
+          valA = a.courier || a.extra_data?.courier || '';
+          valB = b.courier || b.extra_data?.courier || '';
+        } else if (sortField === 'shipment_outcome') {
+          valA = getCanonicalStatus(a);
+          valB = getCanonicalStatus(b);
+        } else if (sortField === 'delivered_date') {
+          valA = a.delivered_date || a.extra_data?.delivered_date || '';
+          valB = b.delivered_date || b.extra_data?.delivered_date || '';
         }
         if (typeof valA === 'number' && typeof valB === 'number') {
           return sortOrder === 'asc' ? valA - valB : valB - valA;
@@ -399,21 +443,50 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
         });
         csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
       } else {
-        const headers = ['Order ID', 'Order Date', 'Customer Name', 'Phone', 'State', 'City', 'Pincode', 'Payment Mode', 'Order Value', 'Remaining COD', 'Quantity', 'Products'];
-        const rows = filteredOrders.map(o => [
-          `"${o.order_id}"`,
-          `"${o.order_date || ''}"`,
-          `"${(o.customer_name || '').replace(/"/g, '""')}"`,
-          `"${o.phone || ''}"`,
-          `"${(o.canonicalState || o.state || '').replace(/"/g, '""')}"`,
-          `"${(o.canonicalCity || o.city || '').replace(/"/g, '""')}"`,
-          `"${o.pincode || ''}"`,
-          `"${o.payment_mode}"`,
-          o.price,
-          o.remaining_payable || 0,
-          o.total_quantity || 1,
-          `"${(o.order_formatted || o.product_name || '').replace(/"/g, '""')}"`
-        ]);
+        const headers = [
+          'Order ID',
+          'Order Date',
+          'Customer Name',
+          'Phone',
+          'State',
+          'City',
+          'Order Value',
+          'Payment Mode',
+          'AWB Number',
+          'Courier Name',
+          'Shipment Outcome',
+          'Delivered Date',
+          'Product / Items',
+          'Quantity',
+          'Remaining COD'
+        ];
+        const rows = filteredOrders.map(o => {
+          const canonical = getCanonicalStatus(o);
+          const isDelivered = canonical === 'Delivered';
+          const delDateRaw = o.delivered_date || (o as any).deliveredDate || o.extra_data?.delivered_date;
+          const delDateStr = isDelivered && delDateRaw ? formatExcelDate(delDateRaw) : '-';
+          const awb = o.awb_number || o.extra_data?.awb_number || '-';
+          const courier = o.courier || o.extra_data?.courier || '-';
+          const remCod = o.remaining_payable != null ? Number(o.remaining_payable) : (o.payment_mode === 'COD' ? Number(o.price || 0) : 0);
+
+          return [
+            `"${o.order_id}"`,
+            `"${o.order_date || ''}"`,
+            `"${(o.customer_name || '').replace(/"/g, '""')}"`,
+            `"${o.phone || ''}"`,
+            `"${(o.canonicalState || o.state || '').replace(/"/g, '""')}"`,
+            `"${(o.canonicalCity || o.city || '').replace(/"/g, '""')}"`,
+            o.price,
+            `"${o.payment_mode || ''}"`,
+            `"${awb}"`,
+            `"${courier}"`,
+            `"${canonical}"`,
+            `"${delDateStr}"`,
+            `"${(o.order_formatted || o.product_name || '').replace(/"/g, '""')}"`,
+            o.total_quantity || 1,
+            remCod
+          ];
+        });
         csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
       }
     } else if (viewType === 'customers') {
@@ -479,12 +552,53 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
   const metrics = useMemo(() => {
     if (viewType === 'orders') {
       const totalOrdersCount = filteredOrders.length;
-      const totalRev = filteredOrders.reduce((sum, o) => sum + (o.price || 0), 0);
-      const totalUnits = filteredOrders.reduce((sum, o) => sum + (o.total_quantity || 1), 0);
-      const aov = totalOrdersCount > 0 ? Math.round(totalRev / totalOrdersCount) : 0;
-      const prepaidCount = filteredOrders.filter(o => o.payment_mode === 'PREPAID').length;
-      const codRem = filteredOrders.reduce((sum, o) => sum + (o.remaining_payable || 0), 0);
-      return { totalOrdersCount, totalRev, totalUnits, aov, prepaidCount, codRem };
+      const grossVal = filteredOrders.reduce((sum, o) => sum + (Number(o.price) || 0), 0);
+      const totalUnits = filteredOrders.reduce((sum, o) => sum + (Number(o.total_quantity) || 1), 0);
+      const aov = totalOrdersCount > 0 ? Math.round(grossVal / totalOrdersCount) : 0;
+      
+      let deliveredCount = 0;
+      let rtoCount = 0;
+      let cancelledCount = 0;
+      let prepaidCount = 0;
+      let codCount = 0;
+      let partialCodCount = 0;
+      let codRem = 0;
+      let prepaidRev = 0;
+
+      filteredOrders.forEach(o => {
+        const canonical = getCanonicalStatus(o);
+        if (canonical === 'Delivered') deliveredCount++;
+        else if (canonical.includes('RTO')) rtoCount++;
+        else if (canonical === 'Cancelled') cancelledCount++;
+
+        if (o.payment_mode === 'PREPAID') {
+          prepaidCount++;
+          prepaidRev += (Number(o.price) || 0);
+        } else if (o.payment_mode === 'COD') {
+          codCount++;
+        } else if (o.payment_mode === 'PARTIAL COD') {
+          partialCodCount++;
+        }
+
+        const rem = o.remaining_payable != null ? Number(o.remaining_payable) : (o.payment_mode === 'COD' ? Number(o.price || 0) : 0);
+        codRem += rem;
+      });
+
+      return {
+        totalOrdersCount,
+        grossVal,
+        totalRev: grossVal,
+        totalUnits,
+        aov,
+        deliveredCount,
+        rtoCount,
+        cancelledCount,
+        prepaidCount,
+        codCount,
+        partialCodCount,
+        codRem,
+        prepaidRev
+      };
     } else if (viewType === 'customers') {
       const totalCust = filteredCustomers.length;
       const repeatCust = filteredCustomers.filter(c => c.totalOrders > 1).length;
@@ -552,10 +666,10 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
       </div>
 
       {/* 2. KPI SUMMARY METRIC CHIPS */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="w-full">
         {viewType === 'orders' && metrics && (
           isDeletedView ? (
-            <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
               <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
                 <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Deleted</span>
                 <span className="text-base font-mono font-extrabold text-rose-400">{metrics.totalOrdersCount?.toLocaleString()}</span>
@@ -580,9 +694,9 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
                 <span className="text-[10px] uppercase font-bold text-slate-400 block">Status</span>
                 <span className="text-base font-mono font-extrabold text-rose-400">DELETED</span>
               </div>
-            </>
+            </div>
           ) : isCancelledView ? (
-            <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
               <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
                 <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Cancelled</span>
                 <span className="text-base font-mono font-extrabold text-red-400">{metrics.totalOrdersCount?.toLocaleString()}</span>
@@ -607,39 +721,55 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
                 <span className="text-[10px] uppercase font-bold text-slate-400 block">Fulfillment Stage</span>
                 <span className="text-base font-mono font-extrabold text-amber-300">Pre-Dispatch</span>
               </div>
-            </>
+            </div>
           ) : (
-            <>
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">
               <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Filtered</span>
-                <span className="text-base font-mono font-extrabold text-white">{metrics.totalOrdersCount?.toLocaleString()}</span>
+                <span className="text-[10px] uppercase font-bold text-slate-400 block truncate">Total Filtered</span>
+                <span className="text-base font-mono font-extrabold text-white mt-0.5 block">{metrics.totalOrdersCount?.toLocaleString()}</span>
+                <span className="text-[10px] text-slate-500 block truncate">Filtered orders</span>
               </div>
               <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Revenue</span>
-                <span className="text-base font-mono font-extrabold text-emerald-400">₹{Math.round(metrics.totalRev || 0).toLocaleString('en-IN')}</span>
+                <span className="text-[10px] uppercase font-bold text-slate-400 block truncate">Gross Order Value</span>
+                <span className="text-base font-mono font-extrabold text-emerald-400 mt-0.5 block">₹{Math.round(metrics.grossVal || 0).toLocaleString('en-IN')}</span>
+                <span className="text-[10px] text-slate-500 block truncate">Total placed value</span>
               </div>
               <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Units</span>
-                <span className="text-base font-mono font-extrabold text-cyan-300">{metrics.totalUnits?.toLocaleString()}</span>
+                <span className="text-[10px] uppercase font-bold text-slate-400 block truncate">Delivered Orders</span>
+                <span className="text-base font-mono font-extrabold text-emerald-400 mt-0.5 block">{metrics.deliveredCount?.toLocaleString()}</span>
+                <span className="text-[10px] text-slate-500 block truncate">Delivered outcomes</span>
               </div>
               <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">Avg Order Value</span>
-                <span className="text-base font-mono font-extrabold text-purple-300">₹{metrics.aov?.toLocaleString('en-IN')}</span>
+                <span className="text-[10px] uppercase font-bold text-slate-400 block truncate">RTO Orders</span>
+                <span className="text-base font-mono font-extrabold text-rose-400 mt-0.5 block">{metrics.rtoCount?.toLocaleString()}</span>
+                <span className="text-[10px] text-slate-500 block truncate">Returned to seller</span>
               </div>
               <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">Prepaid Orders</span>
-                <span className="text-base font-mono font-extrabold text-emerald-300">{metrics.prepaidCount?.toLocaleString()}</span>
+                <span className="text-[10px] uppercase font-bold text-slate-400 block truncate">Cancelled Orders</span>
+                <span className="text-base font-mono font-extrabold text-red-400 mt-0.5 block">{metrics.cancelledCount?.toLocaleString()}</span>
+                <span className="text-[10px] text-slate-500 block truncate">Pre-dispatch cancelled</span>
               </div>
               <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">COD Receivable</span>
-                <span className="text-base font-mono font-extrabold text-amber-300">₹{Math.round(metrics.codRem || 0).toLocaleString('en-IN')}</span>
+                <span className="text-[10px] uppercase font-bold text-slate-400 block truncate">Prepaid Orders</span>
+                <span className="text-base font-mono font-extrabold text-emerald-300 mt-0.5 block">{metrics.prepaidCount?.toLocaleString()}</span>
+                <span className="text-[10px] text-slate-500 block truncate">100% upfront paid</span>
               </div>
-            </>
+              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block truncate">COD Orders</span>
+                <span className="text-base font-mono font-extrabold text-amber-300 mt-0.5 block">{metrics.codCount?.toLocaleString()}</span>
+                <span className="text-[10px] text-slate-500 block truncate">Cash on delivery</span>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block truncate">Partial COD Orders</span>
+                <span className="text-base font-mono font-extrabold text-purple-300 mt-0.5 block">{metrics.partialCodCount?.toLocaleString()}</span>
+                <span className="text-[10px] text-slate-500 block truncate">Advance + pending</span>
+              </div>
+            </div>
           )
         )}
 
         {viewType === 'customers' && metrics && (
-          <>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
               <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Customers</span>
               <span className="text-base font-mono font-extrabold text-white">{metrics.totalCust?.toLocaleString()}</span>
@@ -662,11 +792,11 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
               <span className="text-[10px] uppercase font-bold text-slate-400 block">Customer Lifetime Spend</span>
               <span className="text-base font-mono font-extrabold text-emerald-300">₹{Math.round(metrics.totalSpend || 0).toLocaleString('en-IN')}</span>
             </div>
-          </>
+          </div>
         )}
 
         {viewType === 'operations' && metrics && (
-          <>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
               <span className="text-[10px] uppercase font-bold text-slate-400 block">Total In Fulfilment</span>
               <span className="text-base font-mono font-extrabold text-white">{metrics.totalFulfil?.toLocaleString()}</span>
@@ -689,7 +819,7 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
                 {metrics.totalFulfil && metrics.totalFulfil > 0 ? `${((metrics.delivered / metrics.totalFulfil) * 100).toFixed(1)}%` : '0%'}
               </span>
             </div>
-          </>
+          </div>
         )}
       </div>
 
@@ -729,8 +859,11 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
                   className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 outline-none focus:border-purple-500 cursor-pointer"
                 >
                   <option value="ALL">All Outcomes</option>
-                  <option value="DELIVERED">Delivered Only</option>
-                  <option value="RTO">RTO Only</option>
+                  <option value="DELIVERED">Delivered</option>
+                  <option value="RTO">RTO</option>
+                  <option value="CANCELLED">Cancelled</option>
+                  <option value="IN_TRANSIT">In Transit</option>
+                  <option value="OTHER">Other Statuses</option>
                 </select>
               )}
 
@@ -741,8 +874,8 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
               >
                 <option value="ALL">All Payment Modes</option>
                 <option value="PREPAID">Prepaid</option>
+                <option value="COD">COD</option>
                 <option value="PARTIAL COD">Partial COD</option>
-                <option value="COD">Full COD</option>
               </select>
             </>
           )}
@@ -1045,10 +1178,10 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
                         <div className="flex items-center gap-1">Order ID <ArrowUpDown size={11} /></div>
                       </th>
                       <th onClick={() => handleSort('order_date')} className="py-3 px-3 cursor-pointer hover:text-white">
-                        <div className="flex items-center gap-1">Date <ArrowUpDown size={11} /></div>
+                        <div className="flex items-center gap-1">Order Date <ArrowUpDown size={11} /></div>
                       </th>
                       <th onClick={() => handleSort('customer_name')} className="py-3 px-3 cursor-pointer hover:text-white">
-                        <div className="flex items-center gap-1">Customer <ArrowUpDown size={11} /></div>
+                        <div className="flex items-center gap-1">Customer Name <ArrowUpDown size={11} /></div>
                       </th>
                       <th className="py-3 px-3">State</th>
                       <th className="py-3 px-3">City</th>
@@ -1057,11 +1190,20 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
                       </th>
                       <th className="py-3 px-3 text-center">Payment Mode</th>
                       <th className="py-3 px-3">Phone</th>
-                      <th className="py-3 px-3">Pincode</th>
+                      <th onClick={() => handleSort('awb_number')} className="py-3 px-3 cursor-pointer hover:text-white">
+                        <div className="flex items-center gap-1">AWB Number <ArrowUpDown size={11} /></div>
+                      </th>
+                      <th onClick={() => handleSort('courier')} className="py-3 px-3 cursor-pointer hover:text-white">
+                        <div className="flex items-center gap-1">Courier Name <ArrowUpDown size={11} /></div>
+                      </th>
+                      <th className="py-3 px-3 text-center">Shipment Outcome</th>
+                      <th onClick={() => handleSort('delivered_date')} className="py-3 px-3 cursor-pointer hover:text-white">
+                        <div className="flex items-center gap-1">Delivered Date <ArrowUpDown size={11} /></div>
+                      </th>
                       {/* WIDE COLUMN WITH FULL PRODUCT NAMES */}
-                      <th className="py-3 px-3 min-w-[240px] max-w-[380px]">Product / Items</th>
+                      <th className="py-3 px-3 min-w-[220px] max-w-[360px]">Product / Items</th>
                       <th onClick={() => handleSort('total_quantity')} className="py-3 px-3 text-center cursor-pointer hover:text-white">
-                        <div className="flex items-center justify-center gap-1">Qty <ArrowUpDown size={11} /></div>
+                        <div className="flex items-center justify-center gap-1">Quantity <ArrowUpDown size={11} /></div>
                       </th>
                       <th onClick={() => handleSort('remaining_payable')} className="py-3 px-3 text-right cursor-pointer hover:text-white">
                         <div className="flex items-center justify-end gap-1">Remaining COD <ArrowUpDown size={11} /></div>
@@ -1074,7 +1216,13 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
                       const resolvedLoc = resolveCanonicalLocation(o.state, o.city, o.pincode);
                       const canonicalState = o.canonicalState || resolvedLoc.stateName || o.state || '—';
                       const canonicalCity = o.canonicalCity || resolvedLoc.cityName || o.city || '—';
-                      const canonicalPincode = o.canonicalPincode || resolvedLoc.pincode || o.pincode || '—';
+                      const canonical = getCanonicalStatus(o);
+                      const isDelivered = canonical === 'Delivered';
+                      const delDateRaw = o.delivered_date || (o as any).deliveredDate || o.extra_data?.delivered_date;
+                      const delDateStr = isDelivered && delDateRaw ? formatExcelDate(delDateRaw) : '—';
+                      const awb = o.awb_number || o.extra_data?.awb_number || '—';
+                      const courier = o.courier || o.extra_data?.courier || '—';
+                      const remCod = o.remaining_payable != null ? Number(o.remaining_payable) : (o.payment_mode === 'COD' ? Number(o.price || 0) : 0);
 
                       return (
                         <tr key={o.order_id} className="hover:bg-slate-800/40 transition-colors text-[11px]">
@@ -1088,28 +1236,55 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
                           <td className="py-3 px-3 font-mono font-bold text-emerald-400 whitespace-nowrap">
                             ₹{(o.price ?? 0).toLocaleString('en-IN')}
                           </td>
+                          {/* Payment Badge */}
                           <td className="py-3 px-3 text-center whitespace-nowrap">
                             {o.payment_mode === 'PREPAID' ? (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
                                 PREPAID
                               </span>
                             ) : o.payment_mode === 'PARTIAL COD' ? (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/15 text-purple-300 border border-purple-500/30">
                                 PARTIAL COD
                               </span>
                             ) : o.payment_mode === 'COD' ? (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
                                 COD
                               </span>
                             ) : (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700">
                                 {o.payment_mode || 'UNKNOWN'}
                               </span>
                             )}
                           </td>
                           <td className="py-3 px-3 font-mono text-slate-300 whitespace-nowrap">{o.phone || '—'}</td>
-                          <td className="py-3 px-3 font-mono text-slate-300 whitespace-nowrap">{canonicalPincode}</td>
-                          {/* FULL PRODUCT VISIBILITY CELL */}
+                          <td className="py-3 px-3 font-mono text-slate-300 whitespace-nowrap" title={awb}>{awb}</td>
+                          <td className="py-3 px-3 font-medium text-slate-200 whitespace-nowrap">{courier}</td>
+                          {/* Outcome Badge */}
+                          <td className="py-3 px-3 text-center whitespace-nowrap">
+                            {canonical === 'Delivered' ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                                DELIVERED
+                              </span>
+                            ) : canonical.includes('RTO') ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                                RTO
+                              </span>
+                            ) : canonical === 'Cancelled' ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-500/15 text-red-300 border border-red-500/30">
+                                CANCELLED
+                              </span>
+                            ) : canonical === 'In Transit' || canonical === 'Out for Delivery' ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                                IN TRANSIT
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                                OTHER STATUS
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-3 font-mono text-emerald-400 whitespace-nowrap">{delDateStr}</td>
+                          {/* Full Product Visibility Cell */}
                           <td className="py-3 px-3">
                             <AnalyticsProductCell order={o} />
                           </td>
@@ -1118,9 +1293,9 @@ export const AnalyticsFullPageDataView: React.FC<AnalyticsFullPageDataViewProps>
                           </td>
                           <td className="py-3 px-3 text-right font-mono font-bold whitespace-nowrap">
                             {o.payment_mode === 'PARTIAL COD' ? (
-                              <span className="text-purple-300">₹{(o.remaining_payable ?? 0).toLocaleString('en-IN')}</span>
+                              <span className="text-purple-300">₹{remCod.toLocaleString('en-IN')}</span>
                             ) : o.payment_mode === 'COD' ? (
-                              <span className="text-amber-300">₹{(o.remaining_payable ?? o.price ?? 0).toLocaleString('en-IN')}</span>
+                              <span className="text-amber-300">₹{remCod.toLocaleString('en-IN')}</span>
                             ) : (
                               <span className="text-slate-500">₹0</span>
                             )}

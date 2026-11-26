@@ -262,14 +262,26 @@ export const WebsiteAnalytics: React.FC = () => {
     orders?: WebsiteConsolidatedOrder[];
     customers?: CustomerPurchaseProfile[];
     operations?: OperationalOrderRecord[];
+    initialOutcomeFilter?: 'ALL' | 'DELIVERED' | 'RTO' | 'CANCELLED' | 'IN_TRANSIT' | 'OTHER';
+    initialPaymentFilter?: 'ALL' | 'PREPAID' | 'COD' | 'PARTIAL COD';
   } | null>(null);
 
-  const handleOpenOrdersFullPage = (title: string, list: WebsiteConsolidatedOrder[]) => {
+  const handleOpenOrdersFullPage = (
+    title: string,
+    list: WebsiteConsolidatedOrder[],
+    options?: {
+      initialOutcomeFilter?: 'ALL' | 'DELIVERED' | 'RTO' | 'CANCELLED' | 'IN_TRANSIT' | 'OTHER';
+      initialPaymentFilter?: 'ALL' | 'PREPAID' | 'COD' | 'PARTIAL COD';
+      subtitle?: string;
+    }
+  ) => {
     setFullPageView({
       viewType: 'orders',
       title,
-      subtitle: `Viewing ${list.length} orders for ${title}`,
-      orders: list
+      subtitle: options?.subtitle || `Viewing ${list.length} orders for ${title}`,
+      orders: list,
+      initialOutcomeFilter: options?.initialOutcomeFilter,
+      initialPaymentFilter: options?.initialPaymentFilter,
     });
   };
 
@@ -1041,6 +1053,8 @@ export const WebsiteAnalytics: React.FC = () => {
           orders={fullPageView.orders}
           customers={fullPageView.customers}
           operations={fullPageView.operations}
+          initialOutcomeFilter={fullPageView.initialOutcomeFilter}
+          initialPaymentFilter={fullPageView.initialPaymentFilter}
           onBack={() => setFullPageView(null)}
           onOrderDeleted={loadData}
         />
@@ -1361,10 +1375,10 @@ export const WebsiteAnalytics: React.FC = () => {
             </div>
           </div>
 
-          {/* Total Revenue */}
+          {/* Gross Order Revenue */}
           <div className="p-4 bg-slate-900/80 border border-slate-800 hover:border-slate-700/80 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px]">
             <div className="flex items-center justify-between text-slate-400">
-              <span className="text-[11px] font-bold uppercase tracking-wider">Total Revenue</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider">Gross Order Revenue</span>
               <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
                 <DollarSign size={14} />
               </div>
@@ -1376,7 +1390,7 @@ export const WebsiteAnalytics: React.FC = () => {
                 ₹{Math.round(totalRevenue).toLocaleString('en-IN')}
               </div>
             )}
-            <div className="text-[10px] text-slate-500">Gross placed order value</div>
+            <div className="text-[10px] text-slate-500">Gross placed order value (all outcomes)</div>
           </div>
 
           {/* Total Units */}
@@ -1577,7 +1591,7 @@ export const WebsiteAnalytics: React.FC = () => {
                   <span>Delivery Rate: <strong className="text-emerald-300 font-mono">{rtoMetrics.deliveryRate}</strong></span>
                   <button
                     type="button"
-                    onClick={() => handleOpenOrdersFullPage('Delivered Website Orders', rtoMetrics.deliveredOrders)}
+                    onClick={() => handleOpenOrdersFullPage('Delivered Website Orders', filteredOrders, { initialOutcomeFilter: 'DELIVERED' })}
                     className="text-emerald-400 hover:text-emerald-300 font-bold hover:underline cursor-pointer"
                   >
                     View All →
@@ -1600,7 +1614,7 @@ export const WebsiteAnalytics: React.FC = () => {
                   <span>Avg: <strong className="text-emerald-300 font-mono">{formatINR(rtoMetrics.deliveredAvgValue)}</strong> / order</span>
                   <button
                     type="button"
-                    onClick={() => handleOpenOrdersFullPage('Delivered Website Orders', rtoMetrics.deliveredOrders)}
+                    onClick={() => handleOpenOrdersFullPage('Delivered Website Orders', filteredOrders, { initialOutcomeFilter: 'DELIVERED' })}
                     className="text-emerald-400 hover:text-emerald-300 font-bold hover:underline cursor-pointer"
                   >
                     View All →
@@ -1623,7 +1637,7 @@ export const WebsiteAnalytics: React.FC = () => {
                   <span><strong className="text-amber-300 font-mono">{rtoMetrics.deliveredCodOrders}</strong> Pure COD</span>
                   <button
                     type="button"
-                    onClick={() => handleOpenOrdersFullPage('Delivered COD Orders', rtoMetrics.deliveredOrders.filter(o => isCodOrder(o)))}
+                    onClick={() => handleOpenOrdersFullPage('Delivered COD Orders', filteredOrders, { initialOutcomeFilter: 'DELIVERED', initialPaymentFilter: 'COD' })}
                     className="text-amber-400 hover:text-amber-300 font-bold hover:underline cursor-pointer"
                   >
                     View All →
@@ -1646,7 +1660,7 @@ export const WebsiteAnalytics: React.FC = () => {
                   <span><strong className="text-purple-300 font-mono">{rtoMetrics.deliveredPrepaidOrders}</strong> Prepaid ({rtoMetrics.deliveredPurePrepaidOrders} Full · {rtoMetrics.deliveredPartialCodOrders} Partial)</span>
                   <button
                     type="button"
-                    onClick={() => handleOpenOrdersFullPage('Delivered Prepaid Orders', rtoMetrics.deliveredOrders.filter(o => isPrepaidOrder(o)))}
+                    onClick={() => handleOpenOrdersFullPage('Delivered Prepaid Orders', filteredOrders, { initialOutcomeFilter: 'DELIVERED', initialPaymentFilter: 'PREPAID' })}
                     className="text-purple-400 hover:text-purple-300 font-bold hover:underline cursor-pointer"
                   >
                     View All →
@@ -1671,7 +1685,7 @@ export const WebsiteAnalytics: React.FC = () => {
                   <span>RTO Rate: <strong className="text-rose-300 font-mono">{rtoMetrics.rtoRate}%</strong></span>
                   <button
                     type="button"
-                    onClick={() => handleOpenOrdersFullPage('All RTO Orders', rtoMetrics.rtoOrders)}
+                    onClick={() => handleOpenOrdersFullPage('All RTO Orders', filteredOrders, { initialOutcomeFilter: 'RTO' })}
                     className="text-rose-400 hover:text-rose-300 font-bold hover:underline cursor-pointer"
                   >
                     View All →
@@ -1694,7 +1708,7 @@ export const WebsiteAnalytics: React.FC = () => {
                   <span>Avg ticket returned</span>
                   <button
                     type="button"
-                    onClick={() => handleOpenOrdersFullPage('RTO Average Order Value (AOV)', rtoMetrics.rtoOrders)}
+                    onClick={() => handleOpenOrdersFullPage('All RTO Orders', filteredOrders, { initialOutcomeFilter: 'RTO' })}
                     className="text-amber-400 hover:text-amber-300 font-bold hover:underline cursor-pointer"
                   >
                     View All →
@@ -1717,7 +1731,7 @@ export const WebsiteAnalytics: React.FC = () => {
                   <span><strong className="text-rose-300 font-mono">{rtoMetrics.rtoCodOrders}</strong> Pure COD</span>
                   <button
                     type="button"
-                    onClick={() => handleOpenOrdersFullPage('RTO COD Orders', rtoMetrics.rtoOrders.filter(o => isCodOrder(o)))}
+                    onClick={() => handleOpenOrdersFullPage('RTO COD Orders', filteredOrders, { initialOutcomeFilter: 'RTO', initialPaymentFilter: 'COD' })}
                     className="text-rose-400 hover:text-rose-300 font-bold hover:underline cursor-pointer"
                   >
                     View All →
@@ -1740,7 +1754,7 @@ export const WebsiteAnalytics: React.FC = () => {
                   <span><strong className="text-purple-300 font-mono">{rtoMetrics.rtoPrepaidOrders}</strong> Prepaid ({rtoMetrics.rtoPurePrepaidOrders} Full · {rtoMetrics.rtoPartialCodOrders} Partial)</span>
                   <button
                     type="button"
-                    onClick={() => handleOpenOrdersFullPage('RTO Prepaid Orders', rtoMetrics.rtoOrders.filter(o => isPrepaidOrder(o)))}
+                    onClick={() => handleOpenOrdersFullPage('RTO Prepaid Orders', filteredOrders, { initialOutcomeFilter: 'RTO', initialPaymentFilter: 'PREPAID' })}
                     className="text-purple-400 hover:text-purple-300 font-bold hover:underline cursor-pointer"
                   >
                     View All →
@@ -1752,7 +1766,7 @@ export const WebsiteAnalytics: React.FC = () => {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 animate-in fade-in duration-200">
               {/* Card 1: Total Cancelled Orders */}
               <div 
-                onClick={() => handleOpenOrdersFullPage('Cancelled Orders', rtoMetrics.cancelledOrders)}
+                onClick={() => handleOpenOrdersFullPage('Cancelled Orders', filteredOrders, { initialOutcomeFilter: 'CANCELLED' })}
                 className="p-4 bg-slate-900/80 border border-slate-800 hover:border-red-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group cursor-pointer"
               >
                 <div className="flex items-center justify-between text-slate-400">
@@ -1770,7 +1784,7 @@ export const WebsiteAnalytics: React.FC = () => {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleOpenOrdersFullPage('Cancelled Orders', rtoMetrics.cancelledOrders);
+                      handleOpenOrdersFullPage('Cancelled Orders', filteredOrders, { initialOutcomeFilter: 'CANCELLED' });
                     }}
                     className="text-red-400 hover:text-red-300 font-bold hover:underline cursor-pointer"
                   >
@@ -1781,7 +1795,7 @@ export const WebsiteAnalytics: React.FC = () => {
 
               {/* Card 2: Cancelled Order Value */}
               <div 
-                onClick={() => handleOpenOrdersFullPage('Cancelled Orders', rtoMetrics.cancelledOrders)}
+                onClick={() => handleOpenOrdersFullPage('Cancelled Orders', filteredOrders, { initialOutcomeFilter: 'CANCELLED' })}
                 className="p-4 bg-slate-900/80 border border-slate-800 hover:border-red-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group cursor-pointer"
               >
                 <div className="flex items-center justify-between text-slate-400">
@@ -1799,7 +1813,7 @@ export const WebsiteAnalytics: React.FC = () => {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleOpenOrdersFullPage('Cancelled Orders', rtoMetrics.cancelledOrders);
+                      handleOpenOrdersFullPage('Cancelled Orders', filteredOrders, { initialOutcomeFilter: 'CANCELLED' });
                     }}
                     className="text-red-400 hover:text-red-300 font-bold hover:underline cursor-pointer"
                   >
@@ -1810,7 +1824,7 @@ export const WebsiteAnalytics: React.FC = () => {
 
               {/* Card 3: Cancelled Prepaid Orders */}
               <div 
-                onClick={() => handleOpenOrdersFullPage('Cancelled Orders', rtoMetrics.cancelledOrders)}
+                onClick={() => handleOpenOrdersFullPage('Cancelled Orders', filteredOrders, { initialOutcomeFilter: 'CANCELLED', initialPaymentFilter: 'PREPAID' })}
                 className="p-4 bg-slate-900/80 border border-slate-800 hover:border-red-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group cursor-pointer"
               >
                 <div className="flex items-center justify-between text-slate-400">
@@ -1828,7 +1842,7 @@ export const WebsiteAnalytics: React.FC = () => {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleOpenOrdersFullPage('Cancelled Orders', rtoMetrics.cancelledOrders);
+                      handleOpenOrdersFullPage('Cancelled Orders', filteredOrders, { initialOutcomeFilter: 'CANCELLED', initialPaymentFilter: 'PREPAID' });
                     }}
                     className="text-red-400 hover:text-red-300 font-bold hover:underline cursor-pointer"
                   >
@@ -1839,7 +1853,7 @@ export const WebsiteAnalytics: React.FC = () => {
 
               {/* Card 4: Cancelled COD Orders */}
               <div 
-                onClick={() => handleOpenOrdersFullPage('Cancelled Orders', rtoMetrics.cancelledOrders)}
+                onClick={() => handleOpenOrdersFullPage('Cancelled Orders', filteredOrders, { initialOutcomeFilter: 'CANCELLED', initialPaymentFilter: 'COD' })}
                 className="p-4 bg-slate-900/80 border border-slate-800 hover:border-red-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group cursor-pointer"
               >
                 <div className="flex items-center justify-between text-slate-400">
@@ -1857,7 +1871,7 @@ export const WebsiteAnalytics: React.FC = () => {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleOpenOrdersFullPage('Cancelled Orders', rtoMetrics.cancelledOrders);
+                      handleOpenOrdersFullPage('Cancelled Orders', filteredOrders, { initialOutcomeFilter: 'CANCELLED', initialPaymentFilter: 'COD' });
                     }}
                     className="text-red-400 hover:text-red-300 font-bold hover:underline cursor-pointer"
                   >
@@ -1870,7 +1884,7 @@ export const WebsiteAnalytics: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 animate-in fade-in duration-200">
               {/* Card 1: Delivered Shipments */}
               <div 
-                onClick={() => handleOpenOrdersFullPage('Delivered Website Orders', rtoMetrics.deliveredOrders)}
+                onClick={() => handleOpenOrdersFullPage('Delivered Website Orders', filteredOrders, { initialOutcomeFilter: 'DELIVERED' })}
                 className="p-4 bg-slate-900/80 border border-slate-800 hover:border-emerald-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group cursor-pointer hover:bg-slate-900/90"
               >
                 <div className="flex items-center justify-between text-slate-400">
@@ -1892,7 +1906,7 @@ export const WebsiteAnalytics: React.FC = () => {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleOpenOrdersFullPage('Delivered Website Orders', rtoMetrics.deliveredOrders);
+                      handleOpenOrdersFullPage('Delivered Website Orders', filteredOrders, { initialOutcomeFilter: 'DELIVERED' });
                     }}
                     className="text-emerald-400 hover:text-emerald-300 font-bold hover:underline cursor-pointer"
                   >
@@ -1903,7 +1917,7 @@ export const WebsiteAnalytics: React.FC = () => {
 
               {/* Card 2: Delivered Revenue */}
               <div 
-                onClick={() => handleOpenOrdersFullPage('Delivered Website Orders', rtoMetrics.deliveredOrders)}
+                onClick={() => handleOpenOrdersFullPage('Delivered Website Orders', filteredOrders, { initialOutcomeFilter: 'DELIVERED' })}
                 className="p-4 bg-slate-900/80 border border-slate-800 hover:border-emerald-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group cursor-pointer hover:bg-slate-900/90"
               >
                 <div className="flex items-center justify-between text-slate-400">
@@ -1925,7 +1939,7 @@ export const WebsiteAnalytics: React.FC = () => {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleOpenOrdersFullPage('Delivered Website Orders', rtoMetrics.deliveredOrders);
+                      handleOpenOrdersFullPage('Delivered Website Orders', filteredOrders, { initialOutcomeFilter: 'DELIVERED' });
                     }}
                     className="text-emerald-400 hover:text-emerald-300 font-bold hover:underline cursor-pointer"
                   >
@@ -1936,7 +1950,7 @@ export const WebsiteAnalytics: React.FC = () => {
 
               {/* Card 3: Total RTO Orders */}
               <div 
-                onClick={() => handleOpenOrdersFullPage('All RTO Orders', rtoMetrics.rtoOrders)}
+                onClick={() => handleOpenOrdersFullPage('All RTO Orders', filteredOrders, { initialOutcomeFilter: 'RTO' })}
                 className="p-4 bg-slate-900/80 border border-slate-800 hover:border-rose-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group cursor-pointer hover:bg-slate-900/90"
               >
                 <div className="flex items-center justify-between text-slate-400">
@@ -1958,7 +1972,7 @@ export const WebsiteAnalytics: React.FC = () => {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleOpenOrdersFullPage('All RTO Orders', rtoMetrics.rtoOrders);
+                      handleOpenOrdersFullPage('All RTO Orders', filteredOrders, { initialOutcomeFilter: 'RTO' });
                     }}
                     className="text-rose-400 hover:text-rose-300 font-bold hover:underline cursor-pointer"
                   >
@@ -1969,7 +1983,7 @@ export const WebsiteAnalytics: React.FC = () => {
 
               {/* Card 4: RTO Revenue Loss */}
               <div 
-                onClick={() => handleOpenOrdersFullPage('All RTO Orders', rtoMetrics.rtoOrders)}
+                onClick={() => handleOpenOrdersFullPage('All RTO Orders', filteredOrders, { initialOutcomeFilter: 'RTO' })}
                 className="p-4 bg-slate-900/80 border border-slate-800 hover:border-purple-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group cursor-pointer hover:bg-slate-900/90"
               >
                 <div className="flex items-center justify-between text-slate-400">
@@ -1991,7 +2005,7 @@ export const WebsiteAnalytics: React.FC = () => {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleOpenOrdersFullPage('All RTO Orders', rtoMetrics.rtoOrders);
+                      handleOpenOrdersFullPage('All RTO Orders', filteredOrders, { initialOutcomeFilter: 'RTO' });
                     }}
                     className="text-purple-400 hover:text-purple-300 font-bold hover:underline cursor-pointer"
                   >
@@ -2002,7 +2016,7 @@ export const WebsiteAnalytics: React.FC = () => {
 
               {/* Card 5: Cancelled Orders */}
               <div 
-                onClick={() => handleOpenOrdersFullPage('Cancelled Orders', rtoMetrics.cancelledOrders)}
+                onClick={() => handleOpenOrdersFullPage('Cancelled Orders', filteredOrders, { initialOutcomeFilter: 'CANCELLED' })}
                 className="p-4 bg-slate-900/80 border border-slate-800 hover:border-red-900/50 rounded-2xl shadow-sm transition-all flex flex-col justify-between min-h-[100px] group cursor-pointer hover:bg-slate-900/90"
               >
                 <div className="flex items-center justify-between text-slate-400">
@@ -2029,7 +2043,7 @@ export const WebsiteAnalytics: React.FC = () => {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleOpenOrdersFullPage('Cancelled Orders', rtoMetrics.cancelledOrders);
+                      handleOpenOrdersFullPage('Cancelled Orders', filteredOrders, { initialOutcomeFilter: 'CANCELLED' });
                     }}
                     className="text-red-400 hover:text-red-300 font-bold hover:underline cursor-pointer shrink-0 ml-1"
                   >
@@ -2047,37 +2061,11 @@ export const WebsiteAnalytics: React.FC = () => {
           allOrders={filteredOrders}
           isLoading={loading}
           onViewCourierOrders={(courierName, orders, filterStatus) => {
-            let list = orders;
-            if (filterStatus === 'DELIVERED') {
-              list = list.filter(o => getCanonicalStatus(o) === 'Delivered');
-            } else if (filterStatus === 'RTO') {
-              list = list.filter(o => getCanonicalStatus(o).includes('RTO'));
-            } else if (filterStatus === 'IN_TRANSIT') {
-              list = list.filter(o => {
-                const s = getCanonicalStatus(o);
-                return s === 'In Transit' || s === 'Out for Delivery';
-              });
-            } else if (filterStatus === 'OTHER') {
-              list = list.filter(o => {
-                const s = getCanonicalStatus(o);
-                return s !== 'Delivered' && !s.includes('RTO') && s !== 'In Transit' && s !== 'Out for Delivery' && s !== 'Cancelled' && s !== 'Deleted' && !isDeletedOrder(o);
-              });
-            } else if (filterStatus === 'CANCELLED') {
-              list = list.filter(o => getCanonicalStatus(o) === 'Cancelled');
-            } else if (filterStatus === 'DELETED') {
-              list = list.filter(o => getCanonicalStatus(o) === 'Deleted' || isDeletedOrder(o));
-            }
-            const statusLabel = filterStatus && filterStatus !== 'ALL'
-              ? (filterStatus === 'DELIVERED' ? 'Delivered' : filterStatus === 'RTO' ? 'RTO' : filterStatus === 'IN_TRANSIT' ? 'In Transit' : filterStatus === 'OTHER' ? 'Other Statuses' : filterStatus === 'CANCELLED' ? 'Cancelled' : 'Deleted')
-              : '';
-            const label = filterStatus === 'CANCELLED'
-              ? 'Cancelled Orders'
-              : filterStatus === 'DELETED'
-              ? 'Deleted Orders'
-              : statusLabel
-                ? `${courierName} – ${statusLabel} Records`
-                : `${courierName} Shipments`;
-            handleOpenOrdersFullPage(label, list);
+            const outcome = filterStatus === 'DELETED' ? 'ALL' : filterStatus;
+            const label = `${courierName} Shipments`;
+            handleOpenOrdersFullPage(label, orders, {
+              initialOutcomeFilter: (outcome || 'ALL') as any,
+            });
           }}
         />
       </div>

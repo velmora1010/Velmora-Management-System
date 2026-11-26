@@ -731,9 +731,17 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                           </span>
                         )}
                         {row.cancelled > 0 && (
-                          <span className="px-1.5 py-0.2 rounded text-[9px] bg-slate-800 text-slate-400 font-sans" title={`${row.cancelled} orders cancelled pre-dispatch`}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onViewCourierOrders(row.courier, row.orders, 'CANCELLED');
+                            }}
+                            className="px-1.5 py-0.2 rounded text-[9px] bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-red-300 font-sans cursor-pointer transition-colors"
+                            title={`${row.cancelled} orders cancelled pre-dispatch - click to view`}
+                          >
                             {row.cancelled} cancelled
-                          </span>
+                          </button>
                         )}
                       </div>
                     </td>
@@ -758,8 +766,7 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          const list = row.deliveredOrders || row.orders.filter(o => getCanonicalStatus(o) === 'Delivered');
-                          onViewCourierOrders(row.courier, list, 'DELIVERED');
+                          onViewCourierOrders(row.courier, row.orders, 'DELIVERED');
                         }}
                         className="hover:text-emerald-300 hover:underline cursor-pointer"
                       >
@@ -773,8 +780,7 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          const list = row.rtoOrders || row.orders.filter(o => getCanonicalStatus(o).includes('RTO'));
-                          onViewCourierOrders(row.courier, list, 'RTO');
+                          onViewCourierOrders(row.courier, row.orders, 'RTO');
                         }}
                         className="hover:text-rose-300 hover:underline cursor-pointer"
                       >
@@ -788,11 +794,7 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          const list = row.inTransitOrders || row.orders.filter(o => {
-                            const s = getCanonicalStatus(o);
-                            return s === 'In Transit' || s === 'Out for Delivery';
-                          });
-                          onViewCourierOrders(row.courier, list, 'IN_TRANSIT');
+                          onViewCourierOrders(row.courier, row.orders, 'IN_TRANSIT');
                         }}
                         className="hover:text-blue-300 hover:underline cursor-pointer"
                       >
@@ -806,11 +808,7 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          const list = row.otherOrders || row.orders.filter(o => {
-                            const s = getCanonicalStatus(o);
-                            return s !== 'Delivered' && !s.includes('RTO') && s !== 'In Transit' && s !== 'Out for Delivery' && s !== 'Cancelled' && s !== 'Deleted' && !isDeletedOrder(o);
-                          });
-                          onViewCourierOrders(row.courier, list, 'OTHER');
+                          onViewCourierOrders(row.courier, row.orders, 'OTHER');
                         }}
                         className="hover:text-indigo-200 hover:underline cursor-pointer"
                       >
