@@ -55,6 +55,7 @@ export interface NormalizedTransaction extends Partial<FinanceExpense> {
   source?: string | null; // Credit specific
   ruleConflict?: ExpenseRuleConflict;
   matchedRuleId?: string | null;
+  category_paths?: import('../../modules/finance/services/expenseCategoryPathUtils').ExpenseCategoryPath[];
 }
 
 export interface DocumentParser {

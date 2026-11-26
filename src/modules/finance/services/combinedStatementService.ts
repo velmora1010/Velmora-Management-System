@@ -454,6 +454,7 @@ export function mapDebitRowsToExpenses(
       approved_by: ruled.approved_by || null,
       manually_edited: false,
       matched_rule_id: !ruled.ruleConflict && ruled.matchedRuleId ? ruled.matchedRuleId : null,
+      category_paths: !ruled.ruleConflict && Array.isArray(ruled.category_paths) ? ruled.category_paths : [],
       categorization_source: ruled.ruleConflict
         ? ('conflict' as const)
         : ruled.main_category && ruled.main_category !== 'Uncategorized'

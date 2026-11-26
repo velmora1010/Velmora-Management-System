@@ -12,8 +12,11 @@ import {
   sanitizeCategoryPathForRpc,
   isValidRowVersion
 } from './services/expenseCategoryPathUtils';
-import { ExpenseRuleEngine } from '../../utils/rules/ExpenseRuleEngine';
-import { reevaluateHistoricalExpenses } from './services/expenseReevaluationService';
+import { ExpenseRuleEngine, type ExpenseRule } from '../../utils/rules/ExpenseRuleEngine';
+import {
+  reevaluateHistoricalExpenses,
+  resyncExpensesForRule
+} from './services/expenseReevaluationService';
 import { runHistoricalReevaluationWithToast } from './services/ruleReevaluationFlow';
 import toast from 'react-hot-toast';
 
@@ -103,7 +106,12 @@ export const ExpenseCardEditor = ({
       }
     ];
   });
-  const [rulePathIndex, setRulePathIndex] = useState<number>(0);
+  const [existingRulePrompt, setExistingRulePrompt] = useState<{
+    ruleId: string;
+    keyword: string;
+    paths: ExpenseCategoryPath[];
+  } | null>(null);
+  const [isUpdatingExistingRule, setIsUpdatingExistingRule] = useState(false);
 
   // Preload Vendors
   useEffect(() => {
@@ -158,11 +166,6 @@ export const ExpenseCardEditor = ({
   const handleRemoveCategoryPath = (index: number) => {
     if (categoryPaths.length <= 1) return;
     setCategoryPaths(prev => prev.filter((_, idx) => idx !== index));
-    setRulePathIndex(prev => {
-      if (prev === index) return 0;
-      if (prev > index) return prev - 1;
-      return prev;
-    });
   };
 
   const handleRefreshLatest = useCallback(async (syncPathsFromServer: boolean) => {
@@ -326,10 +329,10 @@ export const ExpenseCardEditor = ({
 
     setError(null);
     setStaleVersionWarning(null);
+    setExistingRulePrompt(null);
     setIsSubmitting(true);
 
     const sanitizedPaths = categoryPaths.map(sanitizeCategoryPathForRpc);
-    const activeRulePath = sanitizedPaths[rulePathIndex] || sanitizedPaths[0];
 
     try {
       const res = await saveExpenseWithCategories({
@@ -353,11 +356,10 @@ export const ExpenseCardEditor = ({
         setExpectedRowVersion(res.data.row_version);
       }
 
-      if (saveAsRule && activeRulePath) {
+      if (saveAsRule && sanitizedPaths.length > 0) {
         const tokens = ExpenseRuleEngine.parseRuleKeywords(ruleKeyword);
         const signature = ExpenseRuleEngine.getKeywordSignature(tokens);
         const canonicalKeyword = tokens.join('/');
-        const normalizedSub4 = ExpenseRuleEngine.normalizeLevel5Values(activeRulePath.sub_category3_values);
 
         const { data: existingRules, error: fetchErr } = await supabase
           .from('expense_rules')
@@ -367,14 +369,26 @@ export const ExpenseCardEditor = ({
         if (fetchErr) {
           toast.error('Expense updated, but rule creation failed (Database Error).');
         } else if (existingRules && existingRules.length > 0) {
-          const existing = existingRules[0];
-          const existingSub4 = ExpenseRuleEngine.normalizeLevel5Values(existing.sub_category3_values);
+          const existing = existingRules[0] as ExpenseRule;
+          const { data: existingPathRows, error: existingPathErr } = await supabase
+            .from('expense_rule_category_paths')
+            .select('id, main_category, sub_category1, sub_category2, sub_category3, sub_category3_values, sort_order')
+            .eq('rule_id', existing.id)
+            .order('sort_order', { ascending: true });
+
+          const existingWithPaths: ExpenseRule = {
+            ...existing,
+            category_paths: !existingPathErr && Array.isArray(existingPathRows)
+              ? (existingPathRows as ExpenseCategoryPath[])
+              : undefined,
+          };
+
+          const existingPathsSig = ExpenseRuleEngine.getRulePathsSignature(
+            ExpenseRuleEngine.getEffectiveRulePaths(existingWithPaths)
+          );
+          const newPathsSig = ExpenseRuleEngine.getRulePathsSignature(sanitizedPaths);
           const isSameMapping =
-            (existing.department || '') === (activeRulePath.main_category || '') &&
-            (existing.category || '') === (activeRulePath.sub_category1 || '') &&
-            (existing.sub_category1 || '') === (activeRulePath.sub_category2 || '') &&
-            (existing.sub_category2 || '') === (activeRulePath.sub_category3 || '') &&
-            JSON.stringify(existingSub4) === JSON.stringify(normalizedSub4) &&
+            existingPathsSig === newPathsSig &&
             (existing.vendor || '') === (formData.vendor || '');
 
           if (isSameMapping) {
@@ -386,32 +400,31 @@ export const ExpenseCardEditor = ({
               toast,
             });
           } else {
+            setExistingRulePrompt({
+              ruleId: existing.id,
+              keyword: canonicalKeyword,
+              paths: sanitizedPaths,
+            });
             toast.error('Expense updated, but automation rule was NOT created because this keyword combination already has a different mapping.');
+            return;
           }
         } else {
-          const { error: insertErr } = await supabase
-            .from('expense_rules')
-            .insert([{
-              keyword: canonicalKeyword,
-              keywords: tokens,
-              keyword_signature: signature,
-              department: activeRulePath.main_category,
-              category: activeRulePath.sub_category1,
-              sub_category1: activeRulePath.sub_category2,
-              sub_category2: activeRulePath.sub_category3,
-              sub_category3_values: normalizedSub4,
-              vendor: formData.vendor || null,
-              payment_mode: formData.payment_mode || null,
-              gst_status: formData.gst_status || null,
-              purchased_by: formData.purchased_by || null,
-              approved_by: formData.approved_by || null,
-              notes: formData.notes || null,
-              priority: 50,
-              is_active: true
-            }]);
+          const { error: rpcErr } = await supabase.rpc('save_expense_rule_with_paths', {
+            p_keyword: canonicalKeyword,
+            p_category_paths: sanitizedPaths,
+            p_vendor: formData.vendor || null,
+            p_payment_mode: formData.payment_mode || null,
+            p_gst_status: formData.gst_status || null,
+            p_purchased_by: formData.purchased_by || null,
+            p_approved_by: formData.approved_by || null,
+            p_notes: formData.notes || null,
+            p_priority: 50,
+            p_rule_id: null,
+            p_update_existing: false,
+          });
 
-          if (insertErr) {
-            toast.error(`Expense updated, but rule creation failed: ${insertErr.message}`);
+          if (rpcErr) {
+            toast.error(`Expense updated, but rule creation failed: ${rpcErr.message}`);
           } else {
             await runHistoricalReevaluationWithToast({
               source: 'new',
@@ -672,9 +685,7 @@ export const ExpenseCardEditor = ({
                 disabled={!isExactAdmin || pathLoadError || isSubmitting}
                 variant="editor"
                 isDuplicate={duplicateIndices.has(index)}
-                showRuleSelector={saveAsRule && categoryPaths.length > 1}
-                isSelectedRulePath={rulePathIndex === index}
-                onSelectRulePath={() => setRulePathIndex(index)}
+                showRuleSelector={false}
               />
             ))}
           </div>
@@ -727,7 +738,82 @@ export const ExpenseCardEditor = ({
               />
               <p className="text-[11px] text-muted leading-tight">
                 Separate multiple keywords using /. All keywords must be present in the transaction description.
+                {categoryPaths.length > 1 && ` All ${categoryPaths.length} configured category paths will be saved to this rule.`}
               </p>
+
+              {existingRulePrompt && (
+                <div className="mt-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg space-y-2">
+                  <p className="text-xs text-amber-200 font-medium">
+                    An automation rule already exists for <span className="font-mono">{existingRulePrompt.keyword}</span> with a different category mapping. Update it with all {existingRulePrompt.paths.length} path(s) and re-sync matching transactions?
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={isUpdatingExistingRule}
+                      onClick={async () => {
+                        setIsUpdatingExistingRule(true);
+                        try {
+                          const { error: updErr } = await supabase.rpc('save_expense_rule_with_paths', {
+                            p_keyword: existingRulePrompt.keyword,
+                            p_category_paths: existingRulePrompt.paths,
+                            p_vendor: formData.vendor || null,
+                            p_payment_mode: formData.payment_mode || null,
+                            p_gst_status: formData.gst_status || null,
+                            p_purchased_by: formData.purchased_by || null,
+                            p_approved_by: formData.approved_by || null,
+                            p_notes: formData.notes || null,
+                            p_rule_id: existingRulePrompt.ruleId,
+                            p_update_existing: true,
+                          });
+                          if (updErr) {
+                            toast.error(`Failed to update existing rule: ${updErr.message}`);
+                            return;
+                          }
+                          await runHistoricalReevaluationWithToast({
+                            source: 'reused',
+                            excludeExpenseId: expense.id,
+                            reevaluate: async (opts) => {
+                              const hist = await reevaluateHistoricalExpenses(opts);
+                              const resync = await resyncExpensesForRule(existingRulePrompt.ruleId, {
+                                excludeExpenseId: opts.excludeExpenseId,
+                              });
+                              return {
+                                updated: hist.updated + resync.updated,
+                                unmatched: hist.unmatched + resync.unmatched,
+                                conflicts: hist.conflicts + resync.conflicts,
+                                skipped: hist.skipped + resync.skipped,
+                                failed: hist.failed + resync.failed,
+                                queuedRerun: hist.queuedRerun,
+                                lostLock: hist.lostLock,
+                              };
+                            },
+                            onRuleSavedAndReevaluated,
+                            toast,
+                          });
+                          setExistingRulePrompt(null);
+                          onSuccess();
+                        } finally {
+                          setIsUpdatingExistingRule(false);
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 border border-amber-500/40 transition-colors disabled:opacity-50"
+                    >
+                      {isUpdatingExistingRule ? 'Updating...' : 'Update Existing Rule & Re-sync'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isUpdatingExistingRule}
+                      onClick={() => {
+                        setExistingRulePrompt(null);
+                        onSuccess();
+                      }}
+                      className="px-2.5 py-1 rounded text-xs font-medium text-slate-300 hover:text-white transition-colors"
+                    >
+                      Keep Existing Rule
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
