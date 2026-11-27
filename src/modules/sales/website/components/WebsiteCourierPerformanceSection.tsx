@@ -23,10 +23,11 @@ import {
   Activity
 } from 'lucide-react';
 import type { WebsiteConsolidatedOrder } from '../types';
-import type { CourierPerformanceSummary } from '../../../Logistics/utils/logisticsAnalyticsUtils';
-import { formatINR, getCanonicalStatus, isDeletedOrder } from '../../../Logistics/utils/logisticsAnalyticsUtils';
+import type { CourierPerformanceSummary, OtherStatusOrderDetail } from '../../../Logistics/utils/logisticsAnalyticsUtils';
+import { formatINR, getCanonicalStatus, isDeletedOrder, getOtherStatusDetail, getOrderOriginalCarrierStatus } from '../../../Logistics/utils/logisticsAnalyticsUtils';
 import { formatSalesDateShort } from '../websiteSalesUtils';
 import { isCourierActive } from '../../../../config/courierConfig';
+import { OrderDetailsModal } from './OrderDetailsModal';
 
 export interface DiagnosticCategorySummary {
   key: string;
@@ -57,7 +58,7 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [outcomeFilter, setOutcomeFilter] = useState<OutcomeFilter>('ALL');
-  const [sortField, setSortField] = useState<'courier' | 'total' | 'delivered' | 'rto' | 'inTransit' | 'otherStatuses' | 'deliveryRate' | 'rtoRate'>('total');
+  const [sortField, setSortField] = useState<'courier' | 'cancelled' | 'total' | 'delivered' | 'rto' | 'inTransit' | 'otherStatuses' | 'deliveryRate' | 'rtoRate'>('total');
   const [sortAsc, setSortAsc] = useState<boolean>(false);
   const [isDiagnosticModalOpen, setIsDiagnosticModalOpen] = useState(false);
   const [selectedDiagnosticKey, setSelectedDiagnosticKey] = useState<string>('ALL');
@@ -67,6 +68,31 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
   const [isStDiagnosticModalOpen, setIsStDiagnosticModalOpen] = useState(false);
   const [stDiagnosticOutcomeFilter, setStDiagnosticOutcomeFilter] = useState<'ALL' | 'RTO' | 'CANCELLED' | 'DELIVERED' | 'CONFLICT'>('ALL');
   const [stDiagnosticSearch, setStDiagnosticSearch] = useState('');
+
+  // Other Status Details Modal State
+  const [isOtherStatusModalOpen, setIsOtherStatusModalOpen] = useState(false);
+  const [selectedOtherCourierFilter, setSelectedOtherCourierFilter] = useState<string>('ALL');
+  const [selectedOtherStatusFilter, setSelectedOtherStatusFilter] = useState<string>('ALL');
+  const [otherStatusSearch, setOtherStatusSearch] = useState('');
+  const [inspectedOrderForModal, setInspectedOrderForModal] = useState<WebsiteConsolidatedOrder | null>(null);
+
+  // Dedicated Cancelled Orders Modal State
+  const [isCancelledOrdersModalOpen, setIsCancelledOrdersModalOpen] = useState(false);
+  const [selectedCancelledCourierFilter, setSelectedCancelledCourierFilter] = useState<string>('ALL');
+  const [cancelledSearchQuery, setCancelledSearchQuery] = useState('');
+
+  const handleOpenCancelledOrdersModal = (courierName: string) => {
+    setSelectedCancelledCourierFilter(courierName === 'All Couriers' ? 'ALL' : courierName);
+    setCancelledSearchQuery('');
+    setIsCancelledOrdersModalOpen(true);
+  };
+
+  const handleOpenOtherStatusModal = (courierName: string, statusName: string = 'ALL') => {
+    setSelectedOtherCourierFilter(courierName === 'All Couriers' ? 'ALL' : courierName);
+    setSelectedOtherStatusFilter(statusName);
+    setOtherStatusSearch('');
+    setIsOtherStatusModalOpen(true);
+  };
 
   // 1. Overall totals across all couriers
   const totals = useMemo(() => {
@@ -491,6 +517,242 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
     document.body.removeChild(link);
   };
 
+  // 4. Other Status Details Diagnostics dataset
+  const allOtherStatusDetails = useMemo<OtherStatusOrderDetail[]>(() => {
+    const list: OtherStatusOrderDetail[] = [];
+    courierPerformance.forEach(c => {
+      const orders = c.otherOrders || [];
+      orders.forEach(o => {
+        list.push(getOtherStatusDetail(o));
+      });
+    });
+    return list;
+  }, [courierPerformance]);
+
+  const couriersWithOtherStatuses = useMemo(() => {
+    const counts = new Map<string, number>();
+    allOtherStatusDetails.forEach(item => {
+      counts.set(item.courier, (counts.get(item.courier) || 0) + 1);
+    });
+    return Array.from(counts.entries()).map(([name, count]) => ({ name, count }));
+  }, [allOtherStatusDetails]);
+
+  const availableOtherStatusesForFilter = useMemo(() => {
+    let sourceList = allOtherStatusDetails;
+    if (selectedOtherCourierFilter !== 'ALL') {
+      sourceList = sourceList.filter(i => i.courier.toLowerCase() === selectedOtherCourierFilter.toLowerCase());
+    }
+    const counts = new Map<string, number>();
+    sourceList.forEach(item => {
+      counts.set(item.originalCarrierStatus, (counts.get(item.originalCarrierStatus) || 0) + 1);
+    });
+    return Array.from(counts.entries()).map(([name, count]) => ({ name, count }));
+  }, [allOtherStatusDetails, selectedOtherCourierFilter]);
+
+  const filteredOtherStatusOrders = useMemo(() => {
+    let list = allOtherStatusDetails;
+
+    // Filter by Courier
+    if (selectedOtherCourierFilter !== 'ALL') {
+      list = list.filter(i => i.courier.toLowerCase() === selectedOtherCourierFilter.toLowerCase());
+    }
+
+    // Filter by Original Carrier Status
+    if (selectedOtherStatusFilter !== 'ALL') {
+      list = list.filter(i => i.originalCarrierStatus === selectedOtherStatusFilter);
+    }
+
+    // Search query
+    if (otherStatusSearch.trim()) {
+      const q = otherStatusSearch.toLowerCase().trim();
+      list = list.filter(i =>
+        i.orderId.toLowerCase().includes(q) ||
+        i.awbNumber.toLowerCase().includes(q) ||
+        i.customerName.toLowerCase().includes(q) ||
+        (i.city && i.city.toLowerCase().includes(q)) ||
+        (i.state && i.state.toLowerCase().includes(q)) ||
+        i.originalCarrierStatus.toLowerCase().includes(q) ||
+        i.normalizedStatus.toLowerCase().includes(q) ||
+        i.classificationReason.toLowerCase().includes(q) ||
+        i.latestTrackingEvent.toLowerCase().includes(q)
+      );
+    }
+
+    return list;
+  }, [allOtherStatusDetails, selectedOtherCourierFilter, selectedOtherStatusFilter, otherStatusSearch]);
+
+  const handleExportOtherStatusCsv = () => {
+    if (filteredOtherStatusOrders.length === 0) return;
+
+    const rows = filteredOtherStatusOrders.map(item => {
+      return [
+        `"#${item.orderId}"`,
+        `"${item.awbNumber}"`,
+        `"${(item.customerName || '').replace(/"/g, '""')}"`,
+        `"${item.courier}"`,
+        `"${(item.city || '').replace(/"/g, '""')}"`,
+        `"${(item.state || '').replace(/"/g, '""')}"`,
+        `"${(item.originalCarrierStatus || '').replace(/"/g, '""')}"`,
+        `"${item.normalizedStatus}"`,
+        `"${item.orderDate}"`,
+        `"${(item.latestTrackingEvent || '').replace(/"/g, '""')}"`,
+        `"${(item.classificationReason || '').replace(/"/g, '""')}"`
+      ].join(',');
+    });
+
+    const csvContent = [
+      'Order ID,AWB Number,Customer Name,Courier Partner,City,State,Original Carrier Status,Normalized Status,Order Date,Latest Tracking Event,Classification Reason',
+      ...rows
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Other_Status_Details_${selectedOtherCourierFilter.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // 5. Cancelled Orders Details dataset
+  const allCancelledOrdersWithDetails = useMemo(() => {
+    const list: Array<{
+      orderId: string;
+      customerName: string;
+      city?: string;
+      state?: string;
+      awbNumber: string;
+      orderDate: string;
+      cancellationDate: string;
+      courier: string;
+      cancellationReason: string;
+      dispatchStatus: string;
+      orderAmount: number;
+      order: WebsiteConsolidatedOrder;
+    }> = [];
+
+    courierPerformance.forEach(c => {
+      const orders = c.cancelledOrders || [];
+      orders.forEach(o => {
+        const extra = o.extra_data || {};
+        const rawId = o.order_id || (o as any).orderId || o.id || '';
+        const orderId = String(rawId).replace(/^[#]/, '').trim();
+        const customerName = o.customer_name || (o as any).customerName || 'Customer';
+        const city = o.city || extra.city || '';
+        const state = o.state || extra.state || '';
+        const awbNumber = (o.awb_number || (o as any).awbNumber || extra.awb_number || extra.awb || '').trim() || '—';
+        const orderDate = o.order_date || (o as any).orderDate || 'N/A';
+        const courier = c.courier || (o.courier || extra.courier || 'Unknown');
+
+        // Cancellation date if available from source
+        const rawCancelDate = 
+          o.cancellation?.cancelled_at || 
+          o.cancellation?.requested_at || 
+          extra.cancellation?.cancelled_at || 
+          extra.cancellation?.requested_at || 
+          extra.cancellation_date || 
+          extra.cancellation_requested_at || 
+          extra.cancelled_at;
+        
+        const cancellationDate = rawCancelDate ? formatSalesDateShort(rawCancelDate) : '—';
+
+        // Cancellation reason if available from source (Strictly DO NOT INFER)
+        const rawReason = 
+          o.cancellation?.reason || 
+          extra.cancellation?.reason || 
+          extra.cancellation_reason || 
+          (extra.current_status && String(extra.current_status).toLowerCase().includes('cancel') ? extra.current_status : null) || 
+          (extra['Current Status'] && String(extra['Current Status']).toLowerCase().includes('cancel') ? extra['Current Status'] : null);
+        
+        const cancellationReason = (rawReason && typeof rawReason === 'string' && rawReason.trim()) ? rawReason.trim() : '—';
+        const dispatchStatus = o.dispatch_status || extra.dispatch_status || 'Pre-Dispatch Cancelled';
+        const orderAmount = Number(o.price || (o as any).amount || 0);
+
+        list.push({
+          orderId,
+          customerName,
+          city,
+          state,
+          awbNumber,
+          orderDate,
+          cancellationDate,
+          courier,
+          cancellationReason,
+          dispatchStatus,
+          orderAmount,
+          order: o
+        });
+      });
+    });
+
+    return list;
+  }, [courierPerformance]);
+
+  const couriersWithCancelledOrders = useMemo(() => {
+    const counts = new Map<string, number>();
+    allCancelledOrdersWithDetails.forEach(item => {
+      counts.set(item.courier, (counts.get(item.courier) || 0) + 1);
+    });
+    return Array.from(counts.entries()).map(([courier, count]) => ({ courier, count }));
+  }, [allCancelledOrdersWithDetails]);
+
+  const filteredCancelledOrders = useMemo(() => {
+    let list = allCancelledOrdersWithDetails;
+
+    if (selectedCancelledCourierFilter !== 'ALL') {
+      list = list.filter(i => i.courier.toLowerCase() === selectedCancelledCourierFilter.toLowerCase());
+    }
+
+    if (cancelledSearchQuery.trim()) {
+      const q = cancelledSearchQuery.toLowerCase().trim();
+      list = list.filter(i =>
+        i.orderId.toLowerCase().includes(q) ||
+        i.customerName.toLowerCase().includes(q) ||
+        i.awbNumber.toLowerCase().includes(q) ||
+        (i.city && i.city.toLowerCase().includes(q)) ||
+        (i.state && i.state.toLowerCase().includes(q)) ||
+        i.cancellationReason.toLowerCase().includes(q) ||
+        i.courier.toLowerCase().includes(q)
+      );
+    }
+
+    return list;
+  }, [allCancelledOrdersWithDetails, selectedCancelledCourierFilter, cancelledSearchQuery]);
+
+  const handleExportCancelledOrdersCsv = () => {
+    if (filteredCancelledOrders.length === 0) return;
+
+    const rows = filteredCancelledOrders.map(item => {
+      return [
+        `"#${item.orderId}"`,
+        `"${(item.customerName || '').replace(/"/g, '""')}"`,
+        `"${item.awbNumber}"`,
+        `"${item.orderDate}"`,
+        `"${item.cancellationDate}"`,
+        `"${item.courier}"`,
+        `"${(item.city || '').replace(/"/g, '""')}"`,
+        `"${(item.state || '').replace(/"/g, '""')}"`,
+        `"${(item.cancellationReason || '').replace(/"/g, '""')}"`,
+        `"${item.dispatchStatus}"`
+      ].join(',');
+    });
+
+    const csvContent = [
+      'Order ID,Customer Name,AWB Number,Order Date,Cancellation Date,Courier Partner,City,State,Cancellation Reason,Dispatch Status',
+      ...rows
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Cancelled_Orders_${selectedCancelledCourierFilter.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
       {/* 1. Header & Diagnostic Action */}
@@ -758,6 +1020,16 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                   <ArrowUpDown size={12} className={sortField === 'courier' ? 'text-purple-400' : 'text-slate-600'} />
                 </div>
               </th>
+              {/* EXACT COLUMN 2: CANCELLED ORDERS */}
+              <th
+                onClick={() => handleSort('cancelled')}
+                className="py-3 px-3 text-right cursor-pointer hover:text-rose-300 transition-colors"
+              >
+                <div className="flex items-center justify-end gap-1.5">
+                  <span>Cancelled Orders</span>
+                  <ArrowUpDown size={12} className={sortField === 'cancelled' ? 'text-rose-400' : 'text-slate-600'} />
+                </div>
+              </th>
               <th
                 onClick={() => handleSort('total')}
                 className="py-3 px-3 text-right cursor-pointer hover:text-white transition-colors"
@@ -803,6 +1075,12 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                   <ArrowUpDown size={12} className={sortField === 'otherStatuses' ? 'text-indigo-400' : 'text-slate-600'} />
                 </div>
               </th>
+              {/* EXACT COLUMN: OTHER STATUS DETAILS */}
+              <th className="py-3 px-3 text-left">
+                <span className="text-slate-400 font-bold uppercase tracking-wider text-[11px]">
+                  Other Status Details
+                </span>
+              </th>
               <th
                 onClick={() => handleSort('deliveryRate')}
                 className="py-3 px-3 text-right cursor-pointer hover:text-emerald-300 transition-colors"
@@ -834,6 +1112,8 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                   <td className="py-3 px-3 text-right"><div className="h-4 w-12 bg-slate-800 rounded ml-auto" /></td>
                   <td className="py-3 px-3 text-right"><div className="h-4 w-12 bg-slate-800 rounded ml-auto" /></td>
                   <td className="py-3 px-3 text-right"><div className="h-4 w-12 bg-slate-800 rounded ml-auto" /></td>
+                  <td className="py-3 px-3 text-right"><div className="h-4 w-12 bg-slate-800 rounded ml-auto" /></td>
+                  <td className="py-3 px-3 text-left"><div className="h-4 w-28 bg-slate-800 rounded" /></td>
                   <td className="py-3 px-3 text-right"><div className="h-4 w-14 bg-slate-800 rounded ml-auto" /></td>
                   <td className="py-3 px-3 text-right"><div className="h-4 w-14 bg-slate-800 rounded ml-auto" /></td>
                   <td className="py-3 px-4 text-center"><div className="h-6 w-14 bg-slate-800 rounded mx-auto" /></td>
@@ -877,20 +1157,26 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                             Awaiting File Import
                           </span>
                         )}
-                        {row.cancelled > 0 && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onViewCourierOrders(row.courier, row.orders, 'CANCELLED');
-                            }}
-                            className="px-1.5 py-0.2 rounded text-[9px] bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-red-300 font-sans cursor-pointer transition-colors"
-                            title={`${row.cancelled} orders cancelled pre-dispatch - click to view`}
-                          >
-                            {row.cancelled} cancelled
-                          </button>
-                        )}
                       </div>
+                    </td>
+
+                    {/* CANCELLED ORDERS */}
+                    <td className="py-3 px-3 text-right font-bold font-mono">
+                      {row.cancelled > 0 ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenCancelledOrdersModal(row.courier);
+                          }}
+                          className="text-rose-400 hover:text-rose-300 hover:underline cursor-pointer"
+                          title={`Click to inspect ${row.cancelled} cancelled orders for ${row.courier}`}
+                        >
+                          {row.cancelled.toLocaleString('en-IN')}
+                        </button>
+                      ) : (
+                        <span className="text-slate-600 font-mono text-xs">-</span>
+                      )}
                     </td>
 
                     {/* Total Shipments */}
@@ -950,17 +1236,57 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                     </td>
 
                     {/* Other Statuses */}
-                    <td className="py-3 px-3 text-right text-indigo-300">
+                    <td className="py-3 px-3 text-right text-indigo-300 font-bold">
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          onViewCourierOrders(row.courier, row.orders, 'OTHER');
+                          handleOpenOtherStatusModal(row.courier, 'ALL');
                         }}
                         className="hover:text-indigo-200 hover:underline cursor-pointer"
+                        title={`Click to inspect all ${row.otherStatuses || 0} Other Status orders for ${row.courier}`}
                       >
                         {(row.otherStatuses || 0).toLocaleString('en-IN')}
                       </button>
+                    </td>
+
+                    {/* OTHER STATUS DETAILS */}
+                    <td className="py-3 px-3 text-left">
+                      {(() => {
+                        const breakdown = row.otherStatusBreakdown || (() => {
+                          const counts: Record<string, number> = {};
+                          (row.otherOrders || []).forEach(o => {
+                            const st = getOrderOriginalCarrierStatus(o);
+                            counts[st] = (counts[st] || 0) + 1;
+                          });
+                          return counts;
+                        })();
+                        const entries = Object.entries(breakdown);
+                        if (entries.length === 0) {
+                          return <span className="text-slate-600 font-mono text-xs pl-2">-</span>;
+                        }
+                        return (
+                          <div className="flex flex-col gap-1 items-start">
+                            {entries.map(([statusName, count]) => (
+                              <button
+                                key={statusName}
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenOtherStatusModal(row.courier, statusName);
+                                }}
+                                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-indigo-950/60 hover:bg-indigo-900/90 text-indigo-300 hover:text-white border border-indigo-800/40 hover:border-indigo-600 transition-all cursor-pointer shadow-xs group/btn"
+                                title={`Click to view ${count} orders with status '${statusName}'`}
+                              >
+                                <span className="truncate max-w-[140px] text-left">{statusName}</span>
+                                <span className="font-bold font-mono px-1 py-0.2 rounded bg-indigo-900/80 group-hover/btn:bg-indigo-800 text-indigo-200 group-hover/btn:text-white text-[10px]">
+                                  {count}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </td>
 
                     {/* Delivery Rate */}
@@ -1021,7 +1347,7 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
               })
             ) : (
               <tr>
-                <td colSpan={9} className="py-8 text-center text-slate-500 font-sans">
+                <td colSpan={11} className="py-8 text-center text-slate-500 font-sans">
                   No couriers matching your search and filter criteria.
                 </td>
               </tr>
@@ -1034,6 +1360,21 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
               <tr>
                 <td className="py-3 px-4 font-sans uppercase tracking-wider text-xs text-purple-300">
                   Total Reconciled
+                </td>
+                {/* EXACT COLUMN 2: TOTAL CANCELLED ORDERS */}
+                <td className="py-3 px-3 text-right font-bold font-mono text-rose-400">
+                  {totals.totalCancelled > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenCancelledOrdersModal('All Couriers')}
+                      className="hover:text-rose-300 hover:underline cursor-pointer"
+                      title="Click to inspect all cancelled orders across couriers"
+                    >
+                      {totals.totalCancelled.toLocaleString('en-IN')}
+                    </button>
+                  ) : (
+                    <span className="text-slate-600 font-mono text-xs">-</span>
+                  )}
                 </td>
                 <td className="py-3 px-3 text-right text-white">
                   {totals.totalOrders.toLocaleString('en-IN')}
@@ -1049,6 +1390,22 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                 </td>
                 <td className="py-3 px-3 text-right text-indigo-300">
                   {totals.totalOther.toLocaleString('en-IN')}
+                </td>
+                {/* OTHER STATUS DETAILS TOTAL */}
+                <td className="py-3 px-3 text-left">
+                  {totals.totalOther > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenOtherStatusModal('All Couriers', 'ALL')}
+                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium bg-indigo-950/70 hover:bg-indigo-900 text-indigo-300 hover:text-white border border-indigo-800/50 hover:border-indigo-600 transition-all cursor-pointer font-sans"
+                      title="Inspect all Other Status records across couriers"
+                    >
+                      <Layers size={11} className="text-indigo-400" />
+                      <span>{totals.totalOther} breakdown</span>
+                    </button>
+                  ) : (
+                    <span className="text-slate-600 font-mono text-xs pl-2">-</span>
+                  )}
                 </td>
                 <td className="py-3 px-3 text-right">
                   <span className="inline-flex items-center px-2 py-0.5 rounded-md text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 text-xs">
@@ -1543,6 +1900,565 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
             </div>
           </div>
         </div>
+      )}
+
+      {/* 6. Other Status Details & Root Cause Investigation Modal */}
+      {isOtherStatusModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-6xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center shrink-0">
+                  <Layers size={18} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-white tracking-tight">
+                      Other Status Details & Root Cause Investigation
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 font-mono">
+                      {allOtherStatusDetails.length} {allOtherStatusDetails.length === 1 ? 'Order' : 'Orders'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Individual database shipment records with un-normalized carrier statuses, held shipments, or pending tracking updates
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleExportOtherStatusCsv}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Export filtered records to CSV"
+                >
+                  <Download size={13} className="text-indigo-400" />
+                  <span>Export CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsOtherStatusModalOpen(false)}
+                  className="w-8 h-8 rounded-xl bg-slate-800/60 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Controls: Filters & Search */}
+            <div className="p-4 bg-slate-900/90 border-b border-slate-800 space-y-3">
+              {/* Courier Filter Pills */}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1 flex items-center gap-1">
+                  <Truck size={12} className="text-indigo-400" />
+                  Courier:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedOtherCourierFilter('ALL');
+                    setSelectedOtherStatusFilter('ALL');
+                  }}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                    selectedOtherCourierFilter === 'ALL'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-slate-800/70 text-slate-400 hover:text-indigo-300 border border-slate-700/60'
+                  }`}
+                >
+                  <span>All Couriers ({allOtherStatusDetails.length})</span>
+                </button>
+                {couriersWithOtherStatuses.map(c => (
+                  <button
+                    key={c.name}
+                    type="button"
+                    onClick={() => {
+                      setSelectedOtherCourierFilter(c.name);
+                      setSelectedOtherStatusFilter('ALL');
+                    }}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      selectedOtherCourierFilter.toLowerCase() === c.name.toLowerCase()
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'bg-slate-800/70 text-slate-400 hover:text-indigo-300 border border-slate-700/60'
+                    }`}
+                  >
+                    <span>{c.name} ({c.count})</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Status Filter Pills & Search Bar */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-1">
+                {/* Status Pills */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1 flex items-center gap-1">
+                    <Filter size={12} className="text-indigo-400" />
+                    Status:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedOtherStatusFilter('ALL')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                      selectedOtherStatusFilter === 'ALL'
+                        ? 'bg-purple-600 text-white shadow-xs'
+                        : 'bg-slate-800/60 text-slate-400 hover:text-purple-300 border border-slate-800'
+                    }`}
+                  >
+                    All Statuses
+                  </button>
+                  {availableOtherStatusesForFilter.map(s => (
+                    <button
+                      key={s.name}
+                      type="button"
+                      onClick={() => setSelectedOtherStatusFilter(s.name)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                        selectedOtherStatusFilter === s.name
+                          ? 'bg-purple-600 text-white shadow-xs'
+                          : 'bg-slate-800/60 text-slate-400 hover:text-purple-300 border border-slate-800'
+                      }`}
+                    >
+                      <span className="truncate max-w-[160px]">{s.name}</span>
+                      <span className="font-mono text-[10px] px-1 py-0.2 rounded bg-slate-900/80 text-purple-200">
+                        {s.count}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Search Bar */}
+                <div className="relative min-w-[260px]">
+                  <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                  <input
+                    type="text"
+                    placeholder="Search Order ID, AWB, Customer, Status, Reason..."
+                    value={otherStatusSearch}
+                    onChange={e => setOtherStatusSearch(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1.5 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                  />
+                  {otherStatusSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setOtherStatusSearch('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Informative Callout Banner for ST Courier */}
+              {(selectedOtherCourierFilter === 'ST Courier' || (selectedOtherCourierFilter === 'ALL' && filteredOtherStatusOrders.some(o => o.courier === 'ST Courier'))) && (
+                <div className="bg-sky-950/30 border border-sky-800/40 rounded-xl p-3 flex items-start gap-2.5">
+                  <div className="p-1 rounded-lg bg-sky-500/10 text-sky-400 shrink-0 mt-0.5">
+                    <Info size={14} />
+                  </div>
+                  <div className="text-[11px] text-slate-300 space-y-0.5">
+                    <span className="font-bold text-sky-200 block">
+                      ST Courier Investigation — 4 Active Orders Classified as Other:
+                    </span>
+                    <span className="text-slate-400 leading-relaxed block">
+                      Orders <strong className="text-white font-mono">#11491</strong> (AWB: 1244563456), <strong className="text-white font-mono">#10918</strong> (AWB: 14534544), <strong className="text-white font-mono">#10919</strong> (AWB: 145345634), and <strong className="text-white font-mono">#10916</strong> (AWB: 15534544) were booked in dispatch with manual waybills (8 to 10 digits instead of standard 11 digits starting with 582...). Because these AWBs were never present in uploaded carrier consignment manifests and have no terminal delivery or RTO scan, they legitimately remain in <strong className="text-indigo-300">Other Statuses (Awaiting Tracking Update)</strong> and are not converted to Delivered or RTO.
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Informative Callout Banner for Delhivery */}
+              {(selectedOtherCourierFilter === 'Delhivery' || (selectedOtherCourierFilter === 'ALL' && filteredOtherStatusOrders.some(o => o.courier === 'Delhivery'))) && (
+                <div className="bg-cyan-950/30 border border-cyan-800/40 rounded-xl p-3 flex items-start gap-2.5">
+                  <div className="p-1 rounded-lg bg-cyan-500/10 text-cyan-400 shrink-0 mt-0.5">
+                    <Info size={14} />
+                  </div>
+                  <div className="text-[11px] text-slate-300 space-y-0.5">
+                    <span className="font-bold text-cyan-200 block">
+                      Delhivery Investigation — 6 Active Shipments Held in Transit:
+                    </span>
+                    <span className="text-slate-400 leading-relaxed block">
+                      3 shipments have carrier remarks <strong className="text-rose-300">"Shipment damaged"</strong> at Erode hub (#11325, #11366, #11560), 2 shipments have <strong className="text-amber-300">"Package found in Audit"</strong> (#11839, #11936), and 1 shipment has <strong className="text-blue-300">"Consignee Unavailable"</strong> (#11926). None of these orders have reached a terminal Delivered or RTO state.
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Table Content */}
+            <div className="flex-1 overflow-auto p-4 custom-scrollbar">
+              {filteredOtherStatusOrders.length > 0 ? (
+                <div className="rounded-xl border border-slate-800 overflow-hidden">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-bold tracking-wider border-b border-slate-800 sticky top-0 z-10">
+                      <tr>
+                        <th className="py-3 px-3">Order ID</th>
+                        <th className="py-3 px-3">AWB Number</th>
+                        <th className="py-3 px-3">Customer Name</th>
+                        <th className="py-3 px-3">Courier Partner</th>
+                        <th className="py-3 px-3 text-center">Original Carrier Status</th>
+                        <th className="py-3 px-3 text-center">Normalized Status</th>
+                        <th className="py-3 px-3 text-center">Order Date</th>
+                        <th className="py-3 px-3">Latest Tracking Event</th>
+                        <th className="py-3 px-4">Classification Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-mono">
+                      {filteredOtherStatusOrders.map((item) => {
+                        const isSt = item.courier === 'ST Courier';
+                        const isDeliv = item.courier === 'Delhivery';
+                        const isDamaged = item.originalCarrierStatus.toLowerCase().includes('damaged');
+                        const isAudit = item.originalCarrierStatus.toLowerCase().includes('audit');
+                        const isAwaiting = item.originalCarrierStatus.toLowerCase().includes('awaiting');
+
+                        return (
+                          <tr
+                            key={item.orderId}
+                            className="hover:bg-slate-800/40 transition-colors group"
+                          >
+                            {/* Order ID */}
+                            <td className="py-2.5 px-3 font-sans font-bold text-white">
+                              <button
+                                type="button"
+                                onClick={() => setInspectedOrderForModal(item.order)}
+                                className="text-indigo-300 hover:text-indigo-200 hover:underline cursor-pointer flex items-center gap-1 font-mono"
+                                title="Click to view full order details"
+                              >
+                                <span>#{item.orderId}</span>
+                              </button>
+                            </td>
+
+                            {/* AWB Number */}
+                            <td className="py-2.5 px-3 text-slate-300">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono text-slate-200">{item.awbNumber}</span>
+                                {isSt && item.awbNumber.replace(/[^0-9]/g, '').length !== 11 && (
+                                  <span className="px-1 py-0.2 rounded text-[9px] font-bold bg-amber-500/10 text-amber-300 border border-amber-500/20 font-sans" title="Non-standard waybill length">
+                                    {item.awbNumber.replace(/[^0-9]/g, '').length} digits
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Customer Name & Location */}
+                            <td className="py-2.5 px-3 font-sans text-slate-300">
+                              <div className="font-medium text-white">{item.customerName}</div>
+                              {(item.city || item.state) && (
+                                <div className="text-[10px] text-slate-500 truncate max-w-[160px]">
+                                  {[item.city, item.state].filter(Boolean).join(', ')}
+                                </div>
+                              )}
+                            </td>
+
+                            {/* Courier Partner */}
+                            <td className="py-2.5 px-3 font-sans">
+                              <div className="flex items-center gap-1.5">
+                                <span className={`w-2 h-2 rounded-full shrink-0 ${
+                                  isSt ? 'bg-sky-400' : (isDeliv ? 'bg-cyan-400' : 'bg-indigo-400')
+                                }`} />
+                                <span className="font-semibold text-slate-200">{item.courier}</span>
+                              </div>
+                            </td>
+
+                            {/* Original Carrier Status */}
+                            <td className="py-2.5 px-3 text-center">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                isDamaged
+                                  ? 'bg-rose-950/80 text-rose-300 border border-rose-600/50'
+                                  : (isAudit
+                                    ? 'bg-amber-950/80 text-amber-300 border border-amber-600/50'
+                                    : (isAwaiting
+                                      ? 'bg-indigo-950/80 text-indigo-300 border border-indigo-600/50'
+                                      : 'bg-slate-800 text-slate-300 border border-slate-700'))
+                              }`}>
+                                {item.originalCarrierStatus}
+                              </span>
+                            </td>
+
+                            {/* Normalized Status */}
+                            <td className="py-2.5 px-3 text-center">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-950/60 text-purple-300 border border-purple-600/40">
+                                {item.normalizedStatus}
+                              </span>
+                            </td>
+
+                            {/* Order Date */}
+                            <td className="py-2.5 px-3 text-center text-slate-400 text-[11px]">
+                              {item.orderDate}
+                            </td>
+
+                            {/* Latest Tracking Event */}
+                            <td className="py-2.5 px-3 font-sans text-[11px] text-slate-300">
+                              <span className="line-clamp-2" title={item.latestTrackingEvent}>
+                                {item.latestTrackingEvent}
+                              </span>
+                            </td>
+
+                            {/* Classification Reason */}
+                            <td className="py-2.5 px-4 font-sans text-[11px] text-slate-400">
+                              <span className="line-clamp-2" title={item.classificationReason}>
+                                {item.classificationReason}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="py-12 text-center text-slate-500 font-sans space-y-2">
+                  <Layers size={32} className="mx-auto text-slate-600 opacity-60" />
+                  <p className="text-sm">No other status records found matching your current filter.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+              <span>
+                Showing {filteredOtherStatusOrders.length} of {allOtherStatusDetails.length} total Other Status records across couriers.
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsOtherStatusModalOpen(false)}
+                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold transition-all cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 8. Dedicated Cancelled Orders Modal */}
+      {isCancelledOrdersModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center justify-center">
+                  <Ban size={16} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold text-white">Cancelled Orders Details</h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30 font-mono">
+                      {filteredCancelledOrders.length} records
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Pre-dispatch cancellations and return requests tracked across logistics courier manifests
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleExportCancelledOrdersCsv}
+                  className="px-3 py-1.5 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/40 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  title="Download Cancelled Orders as CSV"
+                >
+                  <Download size={13} />
+                  <span>Export CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsCancelledOrdersModalOpen(false)}
+                  className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl transition-colors cursor-pointer"
+                  title="Close Dialog"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Subheader: Filter Pills & Search */}
+            <div className="p-3 bg-slate-950/60 border-b border-slate-800 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                {/* Courier Pills */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mr-1">
+                    Courier:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCancelledCourierFilter('ALL')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                      selectedCancelledCourierFilter === 'ALL'
+                        ? 'bg-rose-600 text-white font-bold shadow-xs'
+                        : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800 hover:text-white'
+                    }`}
+                  >
+                    All Couriers ({allCancelledOrdersWithDetails.length})
+                  </button>
+                  {couriersWithCancelledOrders.map(({ courier, count }) => (
+                    <button
+                      key={courier}
+                      type="button"
+                      onClick={() => setSelectedCancelledCourierFilter(courier)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+                        selectedCancelledCourierFilter.toLowerCase() === courier.toLowerCase()
+                          ? 'bg-rose-600 text-white font-bold shadow-xs'
+                          : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800 hover:text-white'
+                      }`}
+                    >
+                      <span>{courier}</span>
+                      <span className="font-mono text-[10px] px-1 py-0.2 rounded bg-black/30">
+                        {count}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Search Bar */}
+                <div className="relative min-w-[240px]">
+                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search by Order ID, Customer, AWB, Reason..."
+                    value={cancelledSearchQuery}
+                    onChange={(e) => setCancelledSearchQuery(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-rose-500 transition-colors"
+                  />
+                  {cancelledSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setCancelledSearchQuery('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Table */}
+            <div className="flex-1 overflow-auto p-4">
+              {filteredCancelledOrders.length > 0 ? (
+                <div className="overflow-x-auto rounded-xl border border-slate-800">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-950 text-slate-400 font-bold border-b border-slate-800 uppercase tracking-wider text-[10px]">
+                        <th className="py-2.5 px-3">Order ID</th>
+                        <th className="py-2.5 px-3">Customer Name</th>
+                        <th className="py-2.5 px-3">AWB Number</th>
+                        <th className="py-2.5 px-3 text-center">Order Date</th>
+                        <th className="py-2.5 px-3 text-center">Cancellation Date</th>
+                        <th className="py-2.5 px-3">Courier Partner</th>
+                        <th className="py-2.5 px-3">Cancellation Reason</th>
+                        <th className="py-2.5 px-3 text-center">Dispatch Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-mono">
+                      {filteredCancelledOrders.map((item) => {
+                        const isSt = item.courier.toLowerCase().includes('st');
+                        const isDeliv = item.courier.toLowerCase().includes('delhivery');
+                        const isAmz = item.courier.toLowerCase().includes('amazon');
+
+                        return (
+                          <tr
+                            key={item.orderId}
+                            className="hover:bg-slate-800/40 transition-colors"
+                          >
+                            {/* Order ID */}
+                            <td className="py-2.5 px-3">
+                              <button
+                                type="button"
+                                onClick={() => setInspectedOrderForModal(item.order)}
+                                className="font-bold text-rose-400 hover:text-rose-300 hover:underline cursor-pointer flex items-center gap-1"
+                                title="Click to view complete order record"
+                              >
+                                #{item.orderId}
+                              </button>
+                            </td>
+
+                            {/* Customer Name & Location */}
+                            <td className="py-2.5 px-3 font-sans text-slate-300">
+                              <div className="font-medium text-white">{item.customerName}</div>
+                              {(item.city || item.state) && (
+                                <div className="text-[10px] text-slate-500 truncate max-w-[160px]">
+                                  {[item.city, item.state].filter(Boolean).join(', ')}
+                                </div>
+                              )}
+                            </td>
+
+                            {/* AWB Number */}
+                            <td className="py-2.5 px-3 text-slate-300">
+                              <span className="font-mono text-slate-200">{item.awbNumber}</span>
+                            </td>
+
+                            {/* Order Date */}
+                            <td className="py-2.5 px-3 text-center text-slate-400 text-[11px]">
+                              {item.orderDate}
+                            </td>
+
+                            {/* Cancellation Date */}
+                            <td className="py-2.5 px-3 text-center text-slate-300 text-[11px]">
+                              {item.cancellationDate}
+                            </td>
+
+                            {/* Courier Partner */}
+                            <td className="py-2.5 px-3 font-sans">
+                              <div className="flex items-center gap-1.5">
+                                <span className={`w-2 h-2 rounded-full shrink-0 ${
+                                  isSt ? 'bg-sky-400' : (isDeliv ? 'bg-cyan-400' : (isAmz ? 'bg-amber-400' : 'bg-rose-400'))
+                                }`} />
+                                <span className="font-semibold text-slate-200">{item.courier}</span>
+                              </div>
+                            </td>
+
+                            {/* Cancellation Reason */}
+                            <td className="py-2.5 px-3 font-sans text-[11px] text-slate-300">
+                              <span className="line-clamp-2" title={item.cancellationReason}>
+                                {item.cancellationReason}
+                              </span>
+                            </td>
+
+                            {/* Dispatch Status */}
+                            <td className="py-2.5 px-3 text-center">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-950/60 text-rose-300 border border-rose-600/40 font-sans">
+                                {item.dispatchStatus}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="py-12 text-center text-slate-500 font-sans space-y-2">
+                  <Ban size={32} className="mx-auto text-slate-600 opacity-60" />
+                  <p className="text-sm">No cancelled order records found matching your current filter.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400 font-sans">
+              <span>
+                Showing {filteredCancelledOrders.length} of {allCancelledOrdersWithDetails.length} total Cancelled orders across couriers.
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsCancelledOrdersModalOpen(false)}
+                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold transition-all cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 7. Nested Full Order Details Modal */}
+      {inspectedOrderForModal && (
+        <OrderDetailsModal
+          order={inspectedOrderForModal}
+          onClose={() => setInspectedOrderForModal(null)}
+        />
       )}
     </div>
   );
