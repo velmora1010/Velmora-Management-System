@@ -1,6 +1,6 @@
 import { useState, useEffect, Suspense } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Home, CheckSquare, Archive, Settings, Menu, LogOut, Activity, UserCheck } from 'lucide-react';
+import { ArrowLeft, Home, CheckSquare, Archive, Settings, Menu, LogOut, Activity, UserCheck, Eye, EyeOff } from 'lucide-react';
 import { ErrorBoundary } from '../components/system/ErrorBoundary';
 import { ThemeToggle } from '../components/ui/ThemeToggle';
 import { NotificationCenter } from '../components/notifications/NotificationCenter';
@@ -27,6 +27,7 @@ export const MainLayout = () => {
   const [isSwitchUserOpen, setIsSwitchUserOpen] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState('');
   const [switchPassword, setSwitchPassword] = useState('');
+  const [showSwitchPassword, setShowSwitchPassword] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
 
@@ -57,6 +58,7 @@ export const MainLayout = () => {
     setSwitchPassword('');
     setSelectedAccount('');
     setSwitchError(null);
+    setShowSwitchPassword(false);
   };
 
   const handleSwitchUser = async (e: React.FormEvent) => {
@@ -303,6 +305,7 @@ export const MainLayout = () => {
                             setSelectedAccount(accEmail);
                             setSwitchPassword('');
                             setSwitchError(null);
+                            setShowSwitchPassword(false);
                           }
                         }}
                         className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
@@ -333,18 +336,34 @@ export const MainLayout = () => {
                   <label htmlFor="switch-account-password" className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
                     Password for {selectedAccount}
                   </label>
-                  <input
-                    type="password"
-                    name="password"
-                    id="switch-account-password"
-                    autoComplete="current-password"
-                    required
-                    value={switchPassword}
-                    onChange={(e) => setSwitchPassword(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 text-white text-sm rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 block p-3 transition-colors"
-                    placeholder={`Enter password for ${selectedAccount}`}
-                    autoFocus
-                  />
+                  <div className="relative">
+                    <input
+                      type={showSwitchPassword ? 'text' : 'password'}
+                      name="password"
+                      id="switch-account-password"
+                      autoComplete="current-password"
+                      required
+                      value={switchPassword}
+                      onChange={(e) => setSwitchPassword(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 text-white text-sm rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 block p-3 pr-10 transition-colors"
+                      placeholder={`Enter password for ${selectedAccount}`}
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSwitchPassword((prev) => !prev)}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
+                      title={showSwitchPassword ? 'Hide password' : 'Show password'}
+                      aria-label={showSwitchPassword ? 'Hide password' : 'Show password'}
+                      tabIndex={-1}
+                    >
+                      {showSwitchPassword ? (
+                        <EyeOff size={16} />
+                      ) : (
+                        <Eye size={16} />
+                      )}
+                    </button>
+                  </div>
                 </div>
               )}
 

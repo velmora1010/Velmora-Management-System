@@ -143,14 +143,8 @@ const HRLayoutContent: React.FC = () => {
   }, [currentUser, employees, showToast]);
 
   const handleOpenMyProfileProductSelect = useCallback(() => {
-    const ownEmp = findLinkedEmployee(currentUser, employees);
-    if (!ownEmp) {
-      showToast('Your account is not linked to an employee profile. Please contact HR.', 'error');
-      return;
-    }
-    setEmployeeDetailInitialTab('product_select');
-    setSelectedEmployee(ownEmp);
-  }, [currentUser, employees, showToast]);
+    navigate('/hr/employee-welfare');
+  }, [navigate]);
 
   const handleNavigateTab = useCallback(
     (tab: NavigationTab) => {
@@ -163,7 +157,7 @@ const HRLayoutContent: React.FC = () => {
         return;
       }
       if (tab === 'product-select') {
-        handleOpenMyProfileProductSelect();
+        navigate('/hr/employee-welfare');
         return;
       }
       navigate(`/hr/${tab}`);
@@ -619,13 +613,11 @@ const HRLayoutContent: React.FC = () => {
           />
           <Route
             path="employee-welfare"
-            element={
-              canManageEmployees ? (
-                <EmployeeWelfareModule />
-              ) : (
-                <Navigate to="/hr/dashboard" replace />
-              )
-            }
+            element={<EmployeeWelfareModule />}
+          />
+          <Route
+            path="product-select"
+            element={<EmployeeWelfareModule />}
           />
           <Route
             path="payroll"

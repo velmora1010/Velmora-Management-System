@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
+  ChevronDown,
   HeartHandshake,
   Package,
   CheckCircle2,
@@ -1934,62 +1935,67 @@ export const EmployeeWelfareModule: React.FC = () => {
           {/* EMPLOYEE TAB 1: CHOOSE MY PRODUCT */}
           {employeeTab === 'choose' && (
             <div className="space-y-5">
-              {/* Section Heading */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                  <h3 className="text-base font-extrabold text-[#172B4D]">
-                    Choose Your Monthly Welfare Product
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Select any one free product for this month (
-                    {getMonthName(selectedMonth)} {selectedYear}).
-                  </p>
-                </div>
-
-                {selectedProductId &&
-                  (!myCurrentMonthSelection || isChangingSelection) && (
-                    <button
-                      type="button"
-                      onClick={handleOpenConfirmSelectionModal}
-                      className="flex items-center gap-2 px-5 py-2.5 text-xs font-bold text-white bg-[#206DA6] hover:bg-[#1A5987] rounded-xl shadow-md shadow-[#206DA6]/20 transition-all self-start sm:self-auto"
-                    >
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>Confirm Selection</span>
-                    </button>
-                  )}
+              {/* Section Heading Card */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
+                <h3 className="text-base font-extrabold text-[#172B4D]">
+                  Choose Your Monthly Welfare Product
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Select any one free product for this month ({getMonthName(selectedMonth)} {selectedYear}).
+                </p>
               </div>
 
-              {/* Banner if employee already has a selection for the month */}
+              {/* Confirmed Selection Summary (Shown if employee has already selected a product for this month) */}
               {myCurrentMonthSelection && (
-                <div className="p-4 bg-blue-50/80 border border-blue-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="flex items-start gap-3">
+                <div className="p-5 bg-blue-50/80 border border-blue-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3.5">
                     <CheckCircle2 className="w-5 h-5 text-[#206DA6] mt-0.5 flex-shrink-0" />
                     <div>
-                      <p className="text-xs font-extrabold text-[#172B4D]">
-                        Your Product for {getMonthName(selectedMonth)} {selectedYear}:{' '}
+                      <p className="text-sm font-extrabold text-[#172B4D]">
+                        Confirmed Selection:{' '}
                         <span className="text-[#206DA6]">
                           {myCurrentMonthSelection.product_name}
                         </span>
                       </p>
-                      <p className="text-xs text-slate-600 mt-0.5">
-                        You have already selected {myCurrentMonthSelection.product_name} for{' '}
-                        {getMonthName(selectedMonth)} {selectedYear}. You can select a new product
-                        next month.
+                      <p className="text-xs text-slate-600 mt-1">
+                        You have already selected <strong>{myCurrentMonthSelection.product_name}</strong> for{' '}
+                        <strong>{getMonthName(selectedMonth)} {selectedYear}</strong>. You can select a new product when the next eligible month begins.
                       </p>
-                      <p className="text-[11px] text-slate-500 mt-1">
-                        Selected on{' '}
-                        <span className="font-mono font-semibold text-slate-700">
-                          {formatKolkataDateTime(myCurrentMonthSelection.selected_at).full}
-                        </span>{' '}
-                        &bull; Status:{' '}
-                        <span className="font-bold capitalize text-[#206DA6]">
-                          {myCurrentMonthSelection.selection_status}
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-500 mt-2.5">
+                        <span>
+                          Selected Month &amp; Year:{' '}
+                          <strong className="text-slate-700">
+                            {getMonthName(myCurrentMonthSelection.welfare_month)} {myCurrentMonthSelection.welfare_year}
+                          </strong>
                         </span>
-                      </p>
+                        <span>&bull;</span>
+                        <span>
+                          Selection Date:{' '}
+                          <strong className="font-mono text-slate-700">
+                            {formatKolkataDateTime(myCurrentMonthSelection.selected_at).full}
+                          </strong>
+                        </span>
+                        <span>&bull;</span>
+                        <span>
+                          Distribution Status:{' '}
+                          <span
+                            className={`inline-flex items-center gap-1 font-bold capitalize ${
+                              getStatusBadgeConfig(myCurrentMonthSelection.selection_status).classes
+                            } px-2.5 py-0.5 rounded-full text-[11px]`}
+                          >
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${
+                                getStatusBadgeConfig(myCurrentMonthSelection.selection_status).dotColor
+                              }`}
+                            />
+                            {getStatusBadgeConfig(myCurrentMonthSelection.selection_status).label}
+                          </span>
+                        </span>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 self-start sm:self-auto">
+                  <div className="flex items-center gap-2 self-start sm:self-auto flex-shrink-0">
                     {myCurrentMonthSelection.selection_status === 'distributed' && (
                       <button
                         type="button"
@@ -2000,7 +2006,7 @@ export const EmployeeWelfareModule: React.FC = () => {
                       </button>
                     )}
 
-                    <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-[11px] font-semibold text-slate-600">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-600 shadow-2xs">
                       <Lock className="w-3.5 h-3.5 text-slate-400" />
                       Selection Confirmed
                     </span>
@@ -2008,122 +2014,61 @@ export const EmployeeWelfareModule: React.FC = () => {
                 </div>
               )}
 
-              {/* 10 Product Catalog Grid (Compact Small Cards: 5 per row desktop, 3 tablet, 2 mobile) */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                {products.map((prod) => {
-                  const isSelected = selectedProductId === prod.id;
-                  const isSavedProduct = myCurrentMonthSelection?.product_id === prod.id;
-                  const isLocked = !!myCurrentMonthSelection;
-
-                  return (
-                    <div
-                      key={prod.id}
-                      onClick={() => {
-                        if (isLocked && myCurrentMonthSelection) {
+              {/* Dropdown Selection Card */}
+              <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs space-y-5">
+                <div>
+                  <label
+                    htmlFor="welfare-product-select-dropdown"
+                    className="block text-xs font-bold text-[#172B4D] mb-2 uppercase tracking-wider"
+                  >
+                    SELECT YOUR MONTHLY WELFARE PRODUCT *
+                  </label>
+                  <div className="relative">
+                    <select
+                      id="welfare-product-select-dropdown"
+                      value={selectedProductId}
+                      disabled={!!myCurrentMonthSelection}
+                      onChange={(e) => {
+                        if (myCurrentMonthSelection) {
                           showToast(
                             `You have already selected ${myCurrentMonthSelection.product_name} for ${getMonthName(selectedMonth)} ${selectedYear}. You can select a new product next month.`,
                             'info'
                           );
                           return;
                         }
-                        setSelectedProductId(prod.id);
+                        setSelectedProductId(e.target.value);
                       }}
-                      className={`rounded-xl border p-3 transition-all flex flex-col justify-between cursor-pointer ${
-                        isSelected
-                          ? 'bg-blue-50/25 border-2 border-[#206DA6] shadow-sm ring-2 ring-[#206DA6]/10'
-                          : 'bg-white border-slate-200/80 shadow-2xs hover:border-[#206DA6]/50 hover:shadow-xs'
-                      }`}
+                      className="w-full px-4 py-3 text-sm font-semibold text-[#172B4D] bg-white border border-slate-200/90 rounded-xl shadow-xs appearance-none focus:outline-hidden focus:ring-2 focus:ring-[#206DA6] focus:border-[#206DA6] disabled:bg-slate-50 disabled:text-slate-500 disabled:cursor-not-allowed cursor-pointer pr-10"
                     >
-                      <div>
-                        {/* Compact Product Icon / Image at Top */}
-                        <div className="flex items-start justify-between gap-2">
-                          {prod.product_image_path ? (
-                            <img
-                              src={prod.product_image_path}
-                              alt={prod.product_name}
-                              className="w-10 h-10 rounded-xl object-cover border border-slate-200 flex-shrink-0"
-                            />
-                          ) : (
-                            <div
-                              className={`w-10 h-10 rounded-xl border flex items-center justify-center flex-shrink-0 transition-colors ${
-                                isSelected
-                                  ? 'bg-[#206DA6] text-white border-[#206DA6]'
-                                  : 'bg-blue-50/80 text-[#206DA6] border-blue-100'
-                              }`}
-                            >
-                              {renderProductPlaceholderIcon(
-                                prod.product_name,
-                                isSelected ? 'w-5 h-5 text-white' : 'w-5 h-5 text-[#206DA6]'
-                              )}
-                            </div>
-                          )}
+                      <option value="" disabled>
+                        -- Select a product --
+                      </option>
+                      {products.map((prod) => (
+                        <option key={prod.id} value={prod.id}>
+                          {prod.product_name}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="w-5 h-5 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
+                  <p className="text-xs text-slate-500 mt-2">
+                    {myCurrentMonthSelection
+                      ? `Selection for ${getMonthName(selectedMonth)} ${selectedYear} is locked. You can select another product when the next eligible month begins.`
+                      : `Choose any one product from the 10 monthly welfare benefits above for ${getMonthName(selectedMonth)} ${selectedYear}.`}
+                  </p>
+                </div>
 
-                          <div className="flex items-center gap-1">
-                            {isSavedProduct && (
-                              <span className="px-1.5 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 text-[9px] font-bold">
-                                Saved
-                              </span>
-                            )}
-                            {isSelected && (
-                              <div className="w-5 h-5 rounded-full bg-[#206DA6] text-white flex items-center justify-center shadow-2xs">
-                                <Check className="w-3 h-3 stroke-[3]" />
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Product Name & Short Subtitle */}
-                        <div className="mt-2.5 mb-3">
-                          <h4 className="text-xs sm:text-[13px] font-bold text-[#172B4D] leading-snug truncate">
-                            {prod.product_name}
-                          </h4>
-                          <p className="text-[10px] text-slate-500 mt-0.5 leading-tight">
-                            Monthly Free Employee Welfare Benefit
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Compact Select Product Button at Bottom */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (isLocked) {
-                            showToast(
-                              'You have already selected your welfare product for this month.',
-                              'info'
-                            );
-                            return;
-                          }
-                          setSelectedProductId(prod.id);
-                        }}
-                        className={`w-full py-1.5 px-2.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 transition-all ${
-                          isSelected
-                            ? 'bg-[#206DA6] text-white shadow-2xs'
-                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                        }`}
-                      >
-                        {isSelected ? (
-                          <>
-                            <Check className="w-3.5 h-3.5" />
-                            <span>Selected</span>
-                          </>
-                        ) : (
-                          <span>Select Product</span>
-                        )}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Bottom Confirm Bar */}
-              {(!myCurrentMonthSelection || isChangingSelection) && (
-                <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                {/* Confirm Selection Action Button */}
+                <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-t border-slate-100">
                   <div className="text-xs text-slate-600">
-                    {selectedProductId ? (
+                    {myCurrentMonthSelection ? (
+                      <span className="inline-flex items-center gap-1.5 text-emerald-700 font-medium">
+                        <Check className="w-4 h-4 text-emerald-600" />
+                        Product confirmed: <strong>{myCurrentMonthSelection.product_name}</strong>
+                      </span>
+                    ) : selectedProductId ? (
                       <span>
-                        Highlighted Product:{' '}
+                        Selected Product:{' '}
                         <strong className="text-[#172B4D]">
                           {products.find((p) => p.id === selectedProductId)?.product_name}
                         </strong>{' '}
@@ -2133,24 +2078,36 @@ export const EmployeeWelfareModule: React.FC = () => {
                         </strong>
                       </span>
                     ) : (
-                      <span>Select any one product above and click Confirm Selection.</span>
+                      <span>Please select a product from the dropdown above to enable confirmation.</span>
                     )}
                   </div>
 
-                  <button
-                    type="button"
-                    disabled={!selectedProductId}
-                    onClick={handleOpenConfirmSelectionModal}
-                    className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                      selectedProductId
-                        ? 'bg-[#206DA6] text-white hover:bg-[#1A5987] shadow-md shadow-[#206DA6]/20'
-                        : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                    }`}
-                  >
-                    Confirm Selection
-                  </button>
+                  {myCurrentMonthSelection ? (
+                    <button
+                      type="button"
+                      disabled
+                      className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed"
+                    >
+                      <Lock className="w-4 h-4" />
+                      <span>Confirmed for {getMonthName(selectedMonth)} {selectedYear}</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={!selectedProductId}
+                      onClick={handleOpenConfirmSelectionModal}
+                      className={`inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                        selectedProductId
+                          ? 'bg-[#206DA6] text-white hover:bg-[#1A5987] shadow-md shadow-[#206DA6]/20 cursor-pointer'
+                          : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                      }`}
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Confirm Selection</span>
+                    </button>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
           )}
 

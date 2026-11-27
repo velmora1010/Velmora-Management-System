@@ -166,7 +166,6 @@ interface HRMSContextType {
   ) => NotificationItem;
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: () => void;
-  resetToDefaultData: () => void;
 
   // Computed Dashboard Metrics
   dashboardMetrics: {
@@ -2156,29 +2155,6 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
     showToast('All notifications marked as read.', 'info');
   };
 
-  const resetToDefaultData = () => {
-    setEmployees(INITIAL_EMPLOYEES);
-    setDepartments(INITIAL_DEPARTMENTS);
-    setAttendanceRecords(INITIAL_TODAY_ATTENDANCE);
-    setLeaveRequests(INITIAL_LEAVE_REQUESTS);
-    setShiftTemplates(INITIAL_SHIFTS);
-    setPayrollRecords(INITIAL_PAYROLL);
-    setPayrollSchedules(INITIAL_PAYROLL_SCHEDULES);
-    setEmployeeFiles(INITIAL_EMPLOYEE_FILES);
-    setActivityLogs(INITIAL_ACTIVITY_LOGS);
-    setNotifications(INITIAL_NOTIFICATIONS);
-    setSettings(INITIAL_SETTINGS);
-    setSelectedDepartment('all');
-    setSelectedDate('2026-10-15');
-    // Clear only HRMS-specific storage keys to preserve Velmora auth session and navigation
-    Object.values(LOCAL_STORAGE_KEYS).forEach((k) => localStorage.removeItem(k));
-    localStorage.removeItem('hrms_current_user_v4');
-    localStorage.removeItem('hrms_assigned_works_v1');
-    localStorage.removeItem('hrms_welfare_products_v1');
-    localStorage.removeItem('hrms_welfare_requests_v1');
-    showToast('Database reset to fresh enterprise sample data.', 'info', 'System Reset');
-  };
-
   // COMPUTED DASHBOARD METRICS (dynamically filtered by department)
   const dashboardMetrics = useMemo(() => {
     // Filter employees by department if one is selected
@@ -2307,7 +2283,6 @@ export const HRMSProvider: React.FC<{ children: React.ReactNode }> = ({ children
         addNotification,
         markNotificationRead,
         markAllNotificationsRead,
-        resetToDefaultData,
 
         dashboardMetrics,
       }}
