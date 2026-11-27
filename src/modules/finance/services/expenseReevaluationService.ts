@@ -81,10 +81,16 @@ export function isHistoricalNoOpConsistent(
 export async function evaluateAndUpdateRow(
   row: EligibleExpenseRow,
   activeRules: ExpenseRule[],
-  hasExistingCategoryPaths: boolean = false
+  hasExistingCategoryPaths: boolean = false,
+  mode: 'historical_reevaluation' | 'targeted_rule_resync' = 'historical_reevaluation'
 ): Promise<RowReevaluationOutcome> {
-  // Explicitly skip NULL, 'manual', 'auto_rule', or unexpected sources without calling RPC
-  if (row.categorization_source !== 'unassigned' && row.categorization_source !== 'conflict') {
+  // Explicitly skip NULL, 'manual', 'auto_rule' (unless targeted_rule_resync), or unexpected sources without calling RPC
+  const isAllowedSource =
+    mode === 'targeted_rule_resync'
+      ? row.categorization_source === 'auto_rule'
+      : row.categorization_source === 'unassigned' || row.categorization_source === 'conflict';
+
+  if (!isAllowedSource) {
     return 'skipped';
   }
 
@@ -106,16 +112,17 @@ export async function evaluateAndUpdateRow(
   const ruled = ExpenseRuleEngine.applyExpenseRules(baseTx, activeRules);
 
   if (ruled.ruleConflict) {
-    if (isHistoricalNoOpConsistent(row, 'conflict', hasExistingCategoryPaths)) {
+    if (mode !== 'targeted_rule_resync' && isHistoricalNoOpConsistent(row, 'conflict', hasExistingCategoryPaths)) {
       return 'conflict';
     }
 
     const { error } = await supabase.rpc('sync_automated_expense_category_path', {
       p_expense_id: Number(row.id),
       p_expected_row_version: row.row_version,
-      p_mode: 'historical_reevaluation',
+      p_mode: mode,
       p_categorization_source: 'conflict',
       p_category_path: null,
+      p_category_paths: null,
       p_matched_rule_id: null
     });
 
@@ -128,16 +135,17 @@ export async function evaluateAndUpdateRow(
   }
 
   if (!ruled.main_category || ruled.main_category === 'Uncategorized') {
-    if (isHistoricalNoOpConsistent(row, 'unassigned', hasExistingCategoryPaths)) {
+    if (mode !== 'targeted_rule_resync' && isHistoricalNoOpConsistent(row, 'unassigned', hasExistingCategoryPaths)) {
       return 'unmatched';
     }
 
     const { error } = await supabase.rpc('sync_automated_expense_category_path', {
       p_expense_id: Number(row.id),
       p_expected_row_version: row.row_version,
-      p_mode: 'historical_reevaluation',
+      p_mode: mode,
       p_categorization_source: 'unassigned',
       p_category_path: null,
+      p_category_paths: null,
       p_matched_rule_id: null
     });
 
@@ -149,15 +157,22 @@ export async function evaluateAndUpdateRow(
     return 'unmatched';
   }
 
-  let sanitizedPath;
+  const rawPaths =
+    Array.isArray(ruled.category_paths) && ruled.category_paths.length > 0
+      ? ruled.category_paths
+      : [
+          {
+            main_category: ruled.main_category,
+            sub_category1: ruled.sub_category1 || '',
+            sub_category2: ruled.sub_category2 || null,
+            sub_category3: ruled.sub_category3 || null,
+            sub_category3_values: ruled.sub_category3_values || []
+          }
+        ];
+
+  let sanitizedPaths;
   try {
-    sanitizedPath = sanitizeCategoryPathForRpc({
-      main_category: ruled.main_category,
-      sub_category1: ruled.sub_category1 || '',
-      sub_category2: ruled.sub_category2 || null,
-      sub_category3: ruled.sub_category3 || null,
-      sub_category3_values: ruled.sub_category3_values || []
-    });
+    sanitizedPaths = rawPaths.map(sanitizeCategoryPathForRpc);
   } catch (err) {
     console.error(`[expenseReevaluationService] Invalid rule hierarchy for row ${row.id}:`, err);
     return 'failed';
@@ -166,9 +181,10 @@ export async function evaluateAndUpdateRow(
   const { error } = await supabase.rpc('sync_automated_expense_category_path', {
     p_expense_id: Number(row.id),
     p_expected_row_version: row.row_version,
-    p_mode: 'historical_reevaluation',
+    p_mode: mode,
     p_categorization_source: 'auto_rule',
-    p_category_path: sanitizedPath,
+    p_category_path: sanitizedPaths[0],
+    p_category_paths: sanitizedPaths,
     p_matched_rule_id: ruled.matchedRuleId || null
   });
 
@@ -426,4 +442,94 @@ export async function reevaluateHistoricalExpenses(
   });
 
   return finalSummary;
+}
+
+/**
+ * Targeted re-sync for active, non-manually-edited auto_rule expenses currently
+ * attributed to a specific ruleId (e.g. after updating a rule to assign multiple paths).
+ */
+export async function resyncExpensesForRule(
+  ruleId: string,
+  options: Pick<ReevaluationOptions, 'excludeExpenseId' | 'updateConcurrency'> = {}
+): Promise<ReevaluationSummary> {
+  if (!ruleId) {
+    return { updated: 0, unmatched: 0, conflicts: 0, skipped: 0, failed: 0 };
+  }
+
+  const concurrency = options.updateConcurrency ?? DEFAULT_UPDATE_CONCURRENCY;
+  const finalOutcomesById = new Map<string, RowReevaluationOutcome>();
+
+  const { data: rulePathLinks, error: linkError } = await supabase
+    .from(SUPABASE_TABLES.expenseCategoryPaths)
+    .select('expense_id')
+    .eq('matched_rule_id', ruleId);
+
+  if (linkError) {
+    console.error('[expenseReevaluationService] Failed to query matched_rule_id links:', linkError);
+    throw linkError;
+  }
+
+  const candidateIds = Array.from(
+    new Set(
+      (rulePathLinks || [])
+        .map(r => (r as { expense_id?: unknown }).expense_id)
+        .filter(id => id != null)
+        .map(id => String(id))
+    )
+  ).filter(id => !options.excludeExpenseId || id !== String(options.excludeExpenseId));
+
+  if (candidateIds.length === 0) {
+    return { updated: 0, unmatched: 0, conflicts: 0, skipped: 0, failed: 0 };
+  }
+
+  const { data: expenseRows, error: expError } = await supabase
+    .from(SUPABASE_TABLES.expenses)
+    .select(
+      'id, notes, amount, main_category, sub_category1, sub_category2, sub_category3, sub_category3_values, import_batch_id, manually_edited, categorization_source, row_version'
+    )
+    .in('id', candidateIds)
+    .eq('status', 'active')
+    .not('import_batch_id', 'is', null)
+    .eq('manually_edited', false)
+    .eq('categorization_source', 'auto_rule')
+    .order('id', { ascending: true });
+
+  if (expError) {
+    console.error('[expenseReevaluationService] Failed to fetch targeted re-sync expenses:', expError);
+    throw expError;
+  }
+
+  const candidates = (expenseRows || []) as EligibleExpenseRow[];
+  if (candidates.length === 0) {
+    return { updated: 0, unmatched: 0, conflicts: 0, skipped: 0, failed: 0 };
+  }
+
+  const activeRules = await ExpenseRuleEngine.fetchActiveRules();
+
+  for (let i = 0; i < candidates.length; i += concurrency) {
+    const chunk = candidates.slice(i, i + concurrency);
+    const outcomes = await Promise.allSettled(
+      chunk.map(row => evaluateAndUpdateRow(row, activeRules, true, 'targeted_rule_resync'))
+    );
+
+    for (let j = 0; j < chunk.length; j += 1) {
+      const row = chunk[j];
+      const outcome = outcomes[j];
+      finalOutcomesById.set(
+        row.id,
+        outcome.status === 'rejected' ? 'failed' : outcome.value
+      );
+    }
+  }
+
+  const summary = summarizeOutcomes(finalOutcomesById);
+
+  logActivity({
+    department: 'Finance',
+    action: 'Rule Re-sync',
+    description: `Targeted rule re-sync completed: ${summary.updated} updated, ${summary.unmatched} unmatched, ${summary.conflicts} conflicts, ${summary.skipped} skipped, ${summary.failed} failed.`,
+    metadata: { rule_id: ruleId, ...summary }
+  });
+
+  return summary;
 }

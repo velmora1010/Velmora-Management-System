@@ -160,6 +160,7 @@ export const UploadExpense = ({ onClose }: UploadExpenseProps) => {
           approved_by: tx.approved_by || null,
           manually_edited: false,
           matched_rule_id: !tx.ruleConflict && tx.matchedRuleId ? tx.matchedRuleId : null,
+          category_paths: !tx.ruleConflict && Array.isArray(tx.category_paths) ? tx.category_paths : [],
           categorization_source: tx.ruleConflict
             ? ('conflict' as const)
             : tx.main_category && tx.main_category !== 'Uncategorized'

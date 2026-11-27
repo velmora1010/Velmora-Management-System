@@ -228,10 +228,10 @@ export async function executeUploadBatch(
       !preExpenseError &&
       preExpenseCount === 0;
 
-    // 2. Prepare sanitized DB rows (strip transient matched_rule_id) & correlation keys
+    // 2. Prepare sanitized DB rows (strip transient matched_rule_id & category_paths) & correlation keys
     const submittedKeyCounts = new Map<string, number>();
     const preparedItems = expensesData.map(exp => {
-      const { matched_rule_id, ...rest } = exp;
+      const { matched_rule_id, category_paths, ...rest } = exp;
       const categorization_source = exp.categorization_source || 'unassigned';
       const dbRow = {
         ...rest,
@@ -247,6 +247,7 @@ export async function executeUploadBatch(
       return {
         dbRow,
         matchedRuleId: categorization_source === 'auto_rule' ? matched_rule_id ?? null : null,
+        categoryPaths: categorization_source === 'auto_rule' && Array.isArray(category_paths) ? category_paths : [],
         corrKey,
       };
     });
@@ -329,13 +330,14 @@ export async function executeUploadBatch(
         sub_category3?: string | null;
         sub_category3_values?: string[] | null;
       },
-      matchedRuleId: string | null
+      matchedRuleId: string | null,
+      categoryPaths: ExpenseCategoryPath[] = []
     ) => {
       const expenseIdStr = String(insertedRow.id);
       const main = (insertedRow.main_category || '').trim();
       const sub1 = (insertedRow.sub_category1 || '').trim();
 
-      if (!main || main === 'Uncategorized' || !sub1) {
+      if (categoryPaths.length === 0 && (!main || main === 'Uncategorized' || !sub1)) {
         pathSyncFailures.push({
           expenseId: expenseIdStr,
           error: 'Row marked auto_rule is missing required Department/Category.',
@@ -352,20 +354,28 @@ export async function executeUploadBatch(
       }
 
       try {
-        const sanitizedPath = sanitizeCategoryPathForRpc({
-          main_category: main,
-          sub_category1: sub1,
-          sub_category2: insertedRow.sub_category2 || null,
-          sub_category3: insertedRow.sub_category3 || null,
-          sub_category3_values: insertedRow.sub_category3_values || [],
-        });
+        const rawPaths: ExpenseCategoryPath[] =
+          categoryPaths.length > 0
+            ? categoryPaths
+            : [
+                {
+                  main_category: main,
+                  sub_category1: sub1,
+                  sub_category2: insertedRow.sub_category2 || null,
+                  sub_category3: insertedRow.sub_category3 || null,
+                  sub_category3_values: insertedRow.sub_category3_values || [],
+                },
+              ];
+
+        const sanitizedPaths = rawPaths.map(sanitizeCategoryPathForRpc);
 
         const { error: rpcError } = await client.rpc('sync_automated_expense_category_path', {
           p_expense_id: Number(insertedRow.id),
           p_expected_row_version: insertedRow.row_version,
           p_mode: 'initial_upload',
           p_categorization_source: 'auto_rule',
-          p_category_path: sanitizedPath,
+          p_category_path: sanitizedPaths[0],
+          p_category_paths: sanitizedPaths,
           p_matched_rule_id: matchedRuleId || null,
         });
 
@@ -395,7 +405,7 @@ export async function executeUploadBatch(
 
       if (!insertErr && insertedRow) {
         autoInsertedCount += 1;
-        await syncAutoRuleRow(insertedRow, item.matchedRuleId);
+        await syncAutoRuleRow(insertedRow, item.matchedRuleId, item.categoryPaths);
         return;
       }
 
@@ -442,7 +452,7 @@ export async function executeUploadBatch(
       const { data: rbRows, error: rbErr } = await rbQuery;
       if (!rbErr && rbRows && rbRows.length === 1) {
         autoInsertedCount += 1;
-        await syncAutoRuleRow(rbRows[0], item.matchedRuleId);
+        await syncAutoRuleRow(rbRows[0], item.matchedRuleId, item.categoryPaths);
         return;
       }
 
