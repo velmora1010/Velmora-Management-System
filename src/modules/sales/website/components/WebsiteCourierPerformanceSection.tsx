@@ -1020,16 +1020,6 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                   <ArrowUpDown size={12} className={sortField === 'courier' ? 'text-purple-400' : 'text-slate-600'} />
                 </div>
               </th>
-              {/* EXACT COLUMN 2: CANCELLED ORDERS */}
-              <th
-                onClick={() => handleSort('cancelled')}
-                className="py-3 px-3 text-right cursor-pointer hover:text-rose-300 transition-colors"
-              >
-                <div className="flex items-center justify-end gap-1.5">
-                  <span>Cancelled Orders</span>
-                  <ArrowUpDown size={12} className={sortField === 'cancelled' ? 'text-rose-400' : 'text-slate-600'} />
-                </div>
-              </th>
               <th
                 onClick={() => handleSort('total')}
                 className="py-3 px-3 text-right cursor-pointer hover:text-white transition-colors"
@@ -1055,6 +1045,16 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                 <div className="flex items-center justify-end gap-1.5">
                   <span>RTO</span>
                   <ArrowUpDown size={12} className={sortField === 'rto' ? 'text-rose-400' : 'text-slate-600'} />
+                </div>
+              </th>
+              {/* EXACT COLUMN 5: CANCELLED ORDERS */}
+              <th
+                onClick={() => handleSort('cancelled')}
+                className="py-3 px-3 text-right cursor-pointer hover:text-rose-300 transition-colors"
+              >
+                <div className="flex items-center justify-end gap-1.5">
+                  <span>Cancelled Orders</span>
+                  <ArrowUpDown size={12} className={sortField === 'cancelled' ? 'text-rose-400' : 'text-slate-600'} />
                 </div>
               </th>
               <th
@@ -1160,25 +1160,6 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                       </div>
                     </td>
 
-                    {/* CANCELLED ORDERS */}
-                    <td className="py-3 px-3 text-right font-bold font-mono">
-                      {row.cancelled > 0 ? (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenCancelledOrdersModal(row.courier);
-                          }}
-                          className="text-rose-400 hover:text-rose-300 hover:underline cursor-pointer"
-                          title={`Click to inspect ${row.cancelled} cancelled orders for ${row.courier}`}
-                        >
-                          {row.cancelled.toLocaleString('en-IN')}
-                        </button>
-                      ) : (
-                        <span className="text-slate-600 font-mono text-xs">-</span>
-                      )}
-                    </td>
-
                     {/* Total Shipments */}
                     <td className="py-3 px-3 text-right text-slate-300 font-bold">
                       <button
@@ -1219,6 +1200,25 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                       >
                         {row.rto.toLocaleString('en-IN')}
                       </button>
+                    </td>
+
+                    {/* EXACT COLUMN 5: CANCELLED ORDERS */}
+                    <td className="py-3 px-3 text-right font-bold font-mono">
+                      {row.cancelled > 0 ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenCancelledOrdersModal(row.courier);
+                          }}
+                          className="text-rose-400 hover:text-rose-300 hover:underline cursor-pointer"
+                          title={`Click to inspect ${row.cancelled} cancelled orders for ${row.courier}`}
+                        >
+                          {row.cancelled.toLocaleString('en-IN')}
+                        </button>
+                      ) : (
+                        <span className="text-slate-600 font-mono text-xs">-</span>
+                      )}
                     </td>
 
                     {/* In Transit */}
@@ -1361,7 +1361,16 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                 <td className="py-3 px-4 font-sans uppercase tracking-wider text-xs text-purple-300">
                   Total Reconciled
                 </td>
-                {/* EXACT COLUMN 2: TOTAL CANCELLED ORDERS */}
+                <td className="py-3 px-3 text-right text-white">
+                  {totals.totalOrders.toLocaleString('en-IN')}
+                </td>
+                <td className="py-3 px-3 text-right text-emerald-400">
+                  {totals.totalDelivered.toLocaleString('en-IN')}
+                </td>
+                <td className="py-3 px-3 text-right text-rose-400">
+                  {totals.totalRto.toLocaleString('en-IN')}
+                </td>
+                {/* EXACT COLUMN 5: TOTAL CANCELLED ORDERS */}
                 <td className="py-3 px-3 text-right font-bold font-mono text-rose-400">
                   {totals.totalCancelled > 0 ? (
                     <button
@@ -1375,15 +1384,6 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
                   ) : (
                     <span className="text-slate-600 font-mono text-xs">-</span>
                   )}
-                </td>
-                <td className="py-3 px-3 text-right text-white">
-                  {totals.totalOrders.toLocaleString('en-IN')}
-                </td>
-                <td className="py-3 px-3 text-right text-emerald-400">
-                  {totals.totalDelivered.toLocaleString('en-IN')}
-                </td>
-                <td className="py-3 px-3 text-right text-rose-400">
-                  {totals.totalRto.toLocaleString('en-IN')}
                 </td>
                 <td className="py-3 px-3 text-right text-blue-400">
                   {totals.totalInTransit.toLocaleString('en-IN')}
