@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { useHRMS } from '../../../context/HRMSContext';
 import { useAuth } from '../../../context/AuthContext';
-import { Building2, Clock, CalendarDays, Shield, RefreshCw, Save, Check } from 'lucide-react';
+import { Building2, Clock, CalendarDays, Shield, Save, Check } from 'lucide-react';
 
 export const SettingsModule: React.FC = () => {
-  const { settings, updateSettings, resetToDefaultData } = useHRMS();
+  const { settings, updateSettings } = useHRMS();
   const { canManageSettings, currentUser } = useAuth();
 
   const [companyName, setCompanyName] = useState(settings.companyName);
@@ -300,23 +300,6 @@ export const SettingsModule: React.FC = () => {
             </tbody>
           </table>
         </div>
-      </div>
-
-      {/* Danger Zone: Reset Sample Database */}
-      <div className="bg-red-50/40 rounded-2xl border border-red-200/80 p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h4 className="text-sm font-bold text-red-900">Reset Local Database to Sample State</h4>
-          <p className="text-xs text-red-700/80 mt-0.5 max-w-xl leading-relaxed">
-            Restores all 16 employees, 6 departments, timesheets, shift rosters, and payroll vouchers to the pristine factory test dataset.
-          </p>
-        </div>
-        <button
-          onClick={resetToDefaultData}
-          className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-colors flex-shrink-0"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-          <span>Reset Database</span>
-        </button>
       </div>
     </div>
   );

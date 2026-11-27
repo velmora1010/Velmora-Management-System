@@ -16,7 +16,6 @@ import { NavigationTab } from './Sidebar';
 import { UserRole } from '../../types/hrms';
 import { findLinkedEmployee } from '../../utils/employeeIdentity';
 import { Avatar } from '../common/Avatar';
-import { supabase } from '../../../../lib/supabase';
 import { WORK_ASSIGNMENT_ENABLED } from '../../config/hrModuleConfig';
 
 interface TopNavProps {
@@ -379,28 +378,12 @@ export const TopNav: React.FC<TopNavProps> = ({
                     setIsProfileOpen(false);
                     onOpenMyProfile();
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 hover:text-white rounded-xl transition-colors mb-1 cursor-pointer"
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/5 hover:text-white rounded-xl transition-colors cursor-pointer"
                 >
                   <UserCircle className="w-4 h-4 text-primary" />
                   <span>My Profile</span>
                 </button>
               )}
-
-              {/* Logout Action */}
-              <button
-                onClick={async () => {
-                  setIsProfileOpen(false);
-                  if (activeHRAccountType === 'employee') {
-                    clearEmployeeSession();
-                  } else {
-                    await supabase.auth.signOut();
-                  }
-                }}
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-red-400 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer"
-              >
-                <LogOut className="w-4 h-4 text-red-400" />
-                <span>Logout</span>
-              </button>
             </div>
           )}
         </div>

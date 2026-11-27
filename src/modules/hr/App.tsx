@@ -155,30 +155,17 @@ const HRMSAppContent: React.FC = () => {
   }, [currentUser, employees, showToast]);
 
   const handleOpenMyProfileProductSelect = useCallback(() => {
-    const ownEmp = findLinkedEmployee(currentUser, employees);
-    if (!ownEmp) {
-      showToast('Your account is not linked to an employee profile. Please contact HR.', 'error');
-      return;
-    }
-    setEmployeeDetailInitialTab('product_select');
-    setSelectedEmployee(ownEmp);
-  }, [currentUser, employees, showToast]);
+    setCurrentTab('employee-welfare');
+  }, []);
 
   // Redirect restricted routes based on role when account or tab changes
   useEffect(() => {
-    if (!canManageEmployees && currentTab === 'employee-welfare') {
-      setCurrentTab('employees');
-      const ownEmp = findLinkedEmployee(currentUser, employees);
-      if (ownEmp) {
-        setEmployeeDetailInitialTab('product_select');
-        setSelectedEmployee(ownEmp);
-      }
-    } else if (!canManageEmployees && currentTab === 'work-assignment') {
+    if (!canManageEmployees && currentTab === 'work-assignment') {
       setCurrentTab('assigned-works');
     } else if (canManageEmployees && currentTab === 'assigned-works') {
       setCurrentTab('work-assignment');
     }
-  }, [canManageEmployees, currentTab, currentUser, employees]);
+  }, [canManageEmployees, currentTab]);
 
   const handleNavigateTab = useCallback(
     (tab: NavigationTab) => {
@@ -186,9 +173,8 @@ const HRMSAppContent: React.FC = () => {
         setCurrentTab('dashboard');
         return;
       }
-      if (tab === 'employee-welfare' && !canManageEmployees) {
-        setCurrentTab('employees');
-        handleOpenMyProfileProductSelect();
+      if (tab === 'product-select') {
+        setCurrentTab('employee-welfare');
         return;
       }
       if (tab === 'work-assignment' && !canManageEmployees) {
@@ -332,7 +318,7 @@ const HRMSAppContent: React.FC = () => {
 
           {WORK_ASSIGNMENT_ENABLED && effectiveTab === 'assigned-works' && !canManageEmployees && <AssignedWorksModule />}
 
-          {effectiveTab === 'employee-welfare' && canManageEmployees && <EmployeeWelfareModule />}
+          {(effectiveTab === 'employee-welfare' || effectiveTab === 'product-select') && <EmployeeWelfareModule />}
 
           {effectiveTab === 'payroll' && (
             <PayrollModule
