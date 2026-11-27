@@ -924,6 +924,147 @@ export interface CourierPerformanceSummary {
   otherOrders?: any[];
   cancelledOrders?: any[];
   deletedOrders?: any[];
+  otherStatusBreakdown?: Record<string, number>;
+}
+
+export interface OtherStatusOrderDetail {
+  orderId: string;
+  awbNumber: string;
+  customerName: string;
+  courier: string;
+  originalCarrierStatus: string;
+  normalizedStatus: string;
+  orderDate: string;
+  latestTrackingEvent: string;
+  classificationReason: string;
+  city?: string;
+  state?: string;
+  orderAmount?: number;
+  order: any;
+}
+
+/**
+ * Retrieves the genuine, un-normalized carrier status or operational tracking remark
+ * for an order classified under Other Statuses. Preserves carrier source integrity.
+ */
+export function getOrderOriginalCarrierStatus(order: any): string {
+  if (!order) return 'Awaiting Tracking Update';
+  const extra = order.extra_data || {};
+
+  // 1. Explicit carrier remarks (e.g. "Shipment damaged", "Package found in Audit", "Consignee Unavailable")
+  const remark = order.remarks || extra.delhivery_remarks || extra.remarks || order.lastEvent || extra.lastEvent;
+  if (remark && typeof remark === 'string' && remark.trim()) {
+    const rLower = remark.toLowerCase().trim();
+    if (!rLower.includes('sync not available') && !rLower.includes('parsing error') && !rLower.includes('tracking not uploaded')) {
+      const trimmed = remark.trim();
+      return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+    }
+  }
+
+  // 2. Carrier Current Status (from consignment register or tracking API)
+  const currentStatus = extra.current_status || extra['Current Status'] || extra['Current stauts'] || extra.delhivery_current_status || order.current_status || order.currentStatus;
+  if (currentStatus && typeof currentStatus === 'string' && currentStatus.trim() && currentStatus !== 'undefined' && currentStatus !== 'null') {
+    const cs = currentStatus.trim();
+    return cs.charAt(0).toUpperCase() + cs.slice(1);
+  }
+
+  // 3. Carrier Status Type
+  const statusType = extra.status_type || extra['Status Type'] || extra.delhivery_status_type || order.status_type;
+  if (statusType && typeof statusType === 'string' && statusType.trim() && statusType !== 'undefined' && statusType !== 'null') {
+    const st = statusType.trim();
+    return st.charAt(0).toUpperCase() + st.slice(1);
+  }
+
+  // 4. Shipment / Tracking status (e.g. "Awaiting Tracking Update")
+  const stat = order.status || order.shipment_status || extra.status;
+  if (stat && typeof stat === 'string' && stat.trim() && stat !== 'undefined' && stat !== 'null') {
+    return stat.trim();
+  }
+
+  // 5. Raw status
+  const raw = order.raw_status || order.rawStatus || extra.raw_status;
+  if (raw && typeof raw === 'string' && raw.trim() && raw !== 'undefined' && raw !== 'null') {
+    return raw.trim();
+  }
+
+  // 6. Dispatch status
+  const disp = order.dispatch_status || order.dispatchStatus;
+  if (disp && typeof disp === 'string' && disp.trim() && disp !== 'undefined' && disp !== 'null') {
+    return disp.trim();
+  }
+
+  return 'Awaiting Tracking Update';
+}
+
+/**
+ * Builds a comprehensive, transparent diagnostics object for any order in Other Statuses.
+ */
+export function getOtherStatusDetail(order: any): OtherStatusOrderDetail {
+  const extra = order.extra_data || {};
+  const rawId = order.order_id || order.orderId || order.id || '';
+  const orderId = String(rawId).replace(/^[#]/, '').trim();
+  const awbNumber = String(order.awb_number || order.awbNumber || extra.awb_number || extra.awb || '').trim() || 'No AWB';
+  const customerName = order.customer_name || order.customerName || 'Customer';
+  const courier = normalizeCourierName(order.courier || order.courier_name || extra.courier);
+  const originalCarrierStatus = getOrderOriginalCarrierStatus(order);
+  const normalizedStatus = getCanonicalStatus(order);
+  const orderDate = order.order_date || order.orderDate || 'N/A';
+  const city = order.city || extra.city || '';
+  const state = order.state || extra.state || '';
+  const orderAmount = parseOrderAmount(order.amount ?? order.totalAmount ?? order.price ?? order.order_total) || 0;
+
+  // Determine latest tracking event
+  const stTrack = extra.st_courier_tracking || {};
+  const botEvents: Array<{ activity?: string; location?: string; timestamp?: string }> = Array.isArray(stTrack.events) ? stTrack.events : [];
+  let latestTrackingEvent = 'Awaiting initial carrier report scan';
+
+  if (botEvents.length > 0 && botEvents[0]?.activity) {
+    latestTrackingEvent = `${botEvents[0].activity}${botEvents[0].location ? ` (${botEvents[0].location})` : ''}`;
+  } else if (order.remarks || extra.delhivery_remarks) {
+    const loc = order.last_location || order.lastLocation || extra.last_location;
+    latestTrackingEvent = `${order.remarks || extra.delhivery_remarks}${loc ? ` at ${loc}` : ''}`;
+  } else if (order.lastEvent || extra.lastEvent) {
+    latestTrackingEvent = order.lastEvent || extra.lastEvent;
+  } else if (order.dispatch_date || order.dispatchDate) {
+    latestTrackingEvent = `Dispatched on ${order.dispatch_date || order.dispatchDate}; awaiting courier milestone update`;
+  }
+
+  // Determine classification reason
+  let classificationReason = '';
+  const isSt = courier.toLowerCase().includes('st');
+  const cleanAwb = awbNumber.replace(/[^0-9]/g, '');
+
+  if (isSt && cleanAwb && cleanAwb.length !== 11) {
+    classificationReason = `Manual AWB (${awbNumber}, ${cleanAwb.length} digits) does not match standard 11-digit ST Courier format; not found in carrier consignment file.`;
+  } else if (isSt && cleanAwb.length === 11) {
+    classificationReason = `ST Courier waybill present but no delivery, RTO, or transit scan found in consignment files.`;
+  } else if (originalCarrierStatus.toLowerCase().includes('damaged')) {
+    classificationReason = `Carrier reported shipment damaged in transit; held at hub without delivery or RTO resolution.`;
+  } else if (originalCarrierStatus.toLowerCase().includes('audit')) {
+    classificationReason = `Package flagged during carrier hub audit; held in transit pending clearance.`;
+  } else if (originalCarrierStatus.toLowerCase().includes('unavailable') || originalCarrierStatus.toLowerCase().includes('attempt')) {
+    classificationReason = `Delivery attempt failed (consignee unavailable); awaiting carrier reattempt.`;
+  } else if (awbNumber === 'No AWB' || !cleanAwb) {
+    classificationReason = `Order has no waybill generated; excluded from carrier manifests.`;
+  } else {
+    classificationReason = `Dispatched order with AWB ${awbNumber}; awaiting terminal delivery or RTO confirmation.`;
+  }
+
+  return {
+    orderId,
+    awbNumber,
+    customerName,
+    courier,
+    originalCarrierStatus,
+    normalizedStatus,
+    orderDate,
+    latestTrackingEvent,
+    classificationReason,
+    city,
+    state,
+    orderAmount,
+    order
+  };
 }
 
 export function normalizeCourierName(courierName?: string | null): string {
@@ -1081,6 +1222,7 @@ export function calculateCanonicalRtoMetrics(orders: any[], options?: { delivere
     otherOrders: any[];
     cancelledOrders: any[];
     deletedOrders: any[];
+    otherStatusBreakdown: Record<string, number>;
   }>();
 
   orders.forEach(order => {
@@ -1110,7 +1252,8 @@ export function calculateCanonicalRtoMetrics(orders: any[], options?: { delivere
         inTransitOrders: [],
         otherOrders: [],
         cancelledOrders: [],
-        deletedOrders: []
+        deletedOrders: [],
+        otherStatusBreakdown: {}
       });
     }
     const cEntry = courierMap.get(courier)!;
@@ -1205,6 +1348,8 @@ export function calculateCanonicalRtoMetrics(orders: any[], options?: { delivere
     } else {
       cEntry.otherStatuses++;
       cEntry.otherOrders.push(order);
+      const origStatus = getOrderOriginalCarrierStatus(order);
+      cEntry.otherStatusBreakdown[origStatus] = (cEntry.otherStatusBreakdown[origStatus] || 0) + 1;
     }
   });
 
@@ -1238,7 +1383,8 @@ export function calculateCanonicalRtoMetrics(orders: any[], options?: { delivere
       inTransitOrders: c.inTransitOrders,
       otherOrders: c.otherOrders,
       cancelledOrders: c.cancelledOrders,
-      deletedOrders: c.deletedOrders || []
+      deletedOrders: c.deletedOrders || [],
+      otherStatusBreakdown: c.otherStatusBreakdown
     };
   }).sort((a, b) => b.total - a.total);
 
