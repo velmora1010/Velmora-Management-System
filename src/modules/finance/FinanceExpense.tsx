@@ -13,6 +13,8 @@ import { supabase } from '../../lib/supabase';
 import { UploadExpense } from './UploadExpense';
 import { UploadDrCrStatement } from './UploadDrCrStatement';
 import { ExpenseAnalytics } from './ExpenseAnalytics';
+import { ExpenseDateRangePicker } from './components/ExpenseDateRangePicker';
+import { matchesExpenseDateRange, type DateRangeValue } from './services/expenseDateRangeUtils';
 import toast from 'react-hot-toast';
 
 export const FinanceExpense = () => {
@@ -21,6 +23,7 @@ export const FinanceExpense = () => {
   const [categorizationFilter, setCategorizationFilter] = useState<
     'all' | 'categorized' | 'uncategorized' | 'conflict' | 'load_error'
   >('all');
+  const [appliedDateRange, setAppliedDateRange] = useState<DateRangeValue>({ from: null, to: null });
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const handleRefresh = async () => {
@@ -134,6 +137,10 @@ export const FinanceExpense = () => {
       selectedSub3Filter !== 'all';
 
     const filtered = expenses.filter(expense => {
+      if (!matchesExpenseDateRange(expense.created_at, appliedDateRange)) {
+        return false;
+      }
+
       const resolved = resolveExpenseCategoryPaths(expense);
       const completionStatus = getCategoryCompletionStatus(expense);
 
@@ -209,7 +216,7 @@ export const FinanceExpense = () => {
       if (!isValidA && isValidB) return 1;
       return 0;
     });
-  }, [expenses, selectedDeptFilter, selectedSectionFilter, selectedSub2Filter, selectedSub3Filter, categorizationFilter, searchQuery]);
+  }, [expenses, appliedDateRange, selectedDeptFilter, selectedSectionFilter, selectedSub2Filter, selectedSub3Filter, categorizationFilter, searchQuery]);
 
   const formatDate = (dateStr: string | null | undefined) => {
     if (!dateStr) return '-';
@@ -251,6 +258,7 @@ export const FinanceExpense = () => {
     setSelectedSub2Filter('all');
     setSelectedSub3Filter('all');
     setCategorizationFilter('all');
+    setAppliedDateRange({ from: null, to: null });
   };
 
   const handleAddNew = () => {
@@ -415,7 +423,14 @@ export const FinanceExpense = () => {
               <option value="load_error" className="bg-slate-900 text-slate-100">Load Error</option>
             </select>
 
-            {/* 7. Refresh Button */}
+            {/* 7. Date Range Filter */}
+            <ExpenseDateRangePicker
+              appliedRange={appliedDateRange}
+              onApply={(range) => setAppliedDateRange(range)}
+              onClear={() => setAppliedDateRange({ from: null, to: null })}
+            />
+
+            {/* 8. Refresh Button */}
             <button
               type="button"
               onClick={handleRefresh}
@@ -428,14 +443,14 @@ export const FinanceExpense = () => {
               <span>{isRefreshing ? 'Refreshing...' : 'Refresh'}</span>
             </button>
 
-            {/* 8. Expense Count Badge */}
+            {/* 9. Expense Count Badge */}
             <span className="h-[42px] shrink-0 inline-flex items-center px-3.5 rounded-xl text-xs font-medium bg-slate-800/80 border border-slate-700/80 text-slate-400 whitespace-nowrap">
               {filteredExpenses.length} {filteredExpenses.length === 1 ? 'expense' : 'expenses'}
-              {(searchQuery || selectedDeptFilter !== 'all' || selectedSectionFilter !== 'all' || selectedSub2Filter !== 'all' || selectedSub3Filter !== 'all' || categorizationFilter !== 'all') && ` of ${expenses.length}`}
+              {(searchQuery || selectedDeptFilter !== 'all' || selectedSectionFilter !== 'all' || selectedSub2Filter !== 'all' || selectedSub3Filter !== 'all' || categorizationFilter !== 'all' || appliedDateRange.from || appliedDateRange.to) && ` of ${expenses.length}`}
             </span>
 
             {/* Optional Clear Filters Button */}
-            {(searchQuery || selectedDeptFilter !== 'all' || selectedSectionFilter !== 'all' || selectedSub2Filter !== 'all' || selectedSub3Filter !== 'all' || categorizationFilter !== 'all') && (
+            {(searchQuery || selectedDeptFilter !== 'all' || selectedSectionFilter !== 'all' || selectedSub2Filter !== 'all' || selectedSub3Filter !== 'all' || categorizationFilter !== 'all' || appliedDateRange.from || appliedDateRange.to) && (
               <button
                 type="button"
                 onClick={handleClearFilters}
