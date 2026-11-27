@@ -114,6 +114,7 @@ import { TrackingModal } from './TrackingModal';
 import { BulkTrackingSyncModal } from './components/BulkTrackingSyncModal';
 import { bulkTrackingSyncService } from '../../services/tracking/bulkTrackingSyncService';
 import { trackingEngine } from '../../services/tracking/trackingEngine';
+import { stCourierBotQueue, StCourierBotJobState } from '../sales/website/services/stCourierBotService';
 
 import { CONFIGURED_COURIERS, normalizeCourier } from '../../config/courierConfig';
 
@@ -1460,6 +1461,67 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
 
 
+  // ST Courier Auto-Tracking BOT Sync in Logistics
+  const [stBotState, setStBotState] = useState<StCourierBotJobState | null>(null);
+  const [isStSyncing, setIsStSyncing] = useState<boolean>(false);
+
+  useEffect(() => {
+    return stCourierBotQueue.subscribe(state => {
+      setStBotState(state);
+      setIsStSyncing(state?.status === 'RUNNING');
+    });
+  }, []);
+
+  useEffect(() => {
+    const handleLogisticsUpdateEvent = () => {
+      handleRefresh();
+    };
+    window.addEventListener('velmora:logistics_updated', handleLogisticsUpdateEvent);
+    return () => {
+      window.removeEventListener('velmora:logistics_updated', handleLogisticsUpdateEvent);
+    };
+  }, []);
+
+  const handleSyncStCourier = async () => {
+    if (isStSyncing) return;
+    setIsStSyncing(true);
+
+    const stOrders = orders.filter(o => {
+      const c = (o.courier || '').toLowerCase();
+      const isSt = c.includes('st') || c.includes('st courier');
+      const cleanAwb = (o.awbNumber || '').replace(/[^0-9]/g, '');
+      return isSt && cleanAwb.length === 11;
+    });
+
+    const toastId = 'st-logistics-sync';
+    toast.loading('Starting ST Courier tracking sync...', { id: toastId });
+
+    try {
+      await stCourierBotQueue.syncExistingShipments(
+        stOrders.length > 0 
+          ? stOrders.map(o => ({
+              orderId: o.displayOrderId || o.orderId,
+              awbNumber: o.awbNumber,
+              courier: 'ST Courier',
+              customerName: o.customerName,
+              currentSalesStatus: o.status,
+              deliveredDate: o.deliveredDate,
+              amount: o.orderTotal,
+              paymentMode: o.paymentMode,
+              orderDate: o.orderDate
+            }))
+          : undefined
+      );
+
+      toast.success('ST Courier tracking sync complete! Verified statuses & dates updated.', { id: toastId, duration: 4000 });
+      await handleRefresh();
+    } catch (e: any) {
+      toast.error(`Sync error: ${e.message || 'Unknown error'}`, { id: toastId });
+    } finally {
+      setIsStSyncing(false);
+    }
+  };
+
   // View Report Synchronization Summary and Health
   const handleBulkSyncAll = async () => {
     setIsBulkSyncModalOpen(true);
@@ -2448,24 +2510,31 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
 
 
 
-              {/* Sync Button */}
-
+              {/* Prominent ST Courier Auto-Tracking Sync Button */}
               <button
-
                 type="button"
-
-                onClick={handleBulkSyncAll}
-
-                className="h-9 px-3 bg-[#0e1626] hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-xl transition-colors text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-
-                title="View report synchronization status"
-
+                onClick={handleSyncStCourier}
+                disabled={isStSyncing}
+                className="h-9 px-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl transition-all text-xs font-bold flex items-center gap-2 shadow-lg shadow-blue-600/25 border border-blue-400/30 cursor-pointer disabled:opacity-50"
+                title="Automatically retrieve live ST Courier statuses and delivery dates from official tracking portal"
               >
+                <RefreshCw size={13} className={isStSyncing ? 'animate-spin text-white' : 'text-blue-200'} />
+                <span>
+                  {isStSyncing 
+                    ? `Syncing (${stBotState?.processedCount || 0}/${stBotState?.totalToTrack || 0})...` 
+                    : 'Sync ST Courier'}
+                </span>
+              </button>
 
-                <RefreshCw size={13} className={isBulkSyncing ? 'animate-spin text-purple-400' : ''} />
-
-                <span>{isBulkSyncing ? 'Syncing...' : 'Sync'}</span>
-
+              {/* Courier Report Health Status */}
+              <button
+                type="button"
+                onClick={handleBulkSyncAll}
+                className="h-9 px-2.5 bg-[#0e1626] hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 rounded-xl transition-colors text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+                title="View report synchronization status"
+              >
+                <RefreshCw size={12} className={isBulkSyncing ? 'animate-spin text-purple-400' : ''} />
+                <span>Report Health</span>
               </button>
 
 
@@ -2899,7 +2968,15 @@ export const UnifiedLogisticsWorkspace: React.FC = () => {
                 <div className="text-lg font-bold font-mono text-sky-200 mt-0.5">
                   {trackingMetrics.stCourierCount.toLocaleString()}
                 </div>
-                <div className="text-[10px] text-sky-400/60 truncate">Report-Based Tracking</div>
+                <div className="text-[10px] text-sky-400/80 flex items-center justify-between">
+                  <span>Tracking BOT</span>
+                  <span 
+                    onClick={(e) => { e.stopPropagation(); handleSyncStCourier(); }}
+                    className="text-[9px] text-sky-300 hover:text-white underline font-bold"
+                  >
+                    Sync
+                  </span>
+                </div>
               </div>
 
               {/* 4. In Transit */}

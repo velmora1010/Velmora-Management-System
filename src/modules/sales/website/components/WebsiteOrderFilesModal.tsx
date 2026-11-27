@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   X, 
   UploadCloud, 
@@ -551,6 +551,7 @@ export const WebsiteOrderFilesModal: React.FC<WebsiteOrderFilesModalProps> = ({
                     >
                       Cancel
                     </button>
+
                     <button
                       type="button"
                       onClick={handleProcessOrders}

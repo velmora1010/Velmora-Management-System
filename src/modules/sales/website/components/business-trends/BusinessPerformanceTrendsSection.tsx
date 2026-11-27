@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import {
   TrendingUp,
   Calendar,
@@ -62,17 +62,23 @@ export const BusinessPerformanceTrendsSection: React.FC<BusinessPerformanceTrend
   const [yearOrdersCache, setYearOrdersCache] = useState<Record<number, WebsiteConsolidatedOrder[]>>({});
   const [isLoadingYearData, setIsLoadingYearData] = useState<boolean>(false);
   const [loadingYearLabel, setLoadingYearLabel] = useState<string>('');
+  const fetchedYearsRef = useRef<Set<number>>(new Set());
+  const inFlightYearsRef = useRef<Set<number>>(new Set());
 
   // Fetch full year data from Supabase if not yet cached or if parent orders are constrained
   const fetchFullYearOrders = useCallback(async (year: number) => {
-    // If already in cache with records, skip
-    if (yearOrdersCache[year] && yearOrdersCache[year].length > 0) {
+    // If already fetched or currently fetching, skip
+    if (fetchedYearsRef.current.has(year) || inFlightYearsRef.current.has(year)) {
       return;
     }
+
+    inFlightYearsRef.current.add(year);
 
     // Check if incoming `orders` already contains full data for this year (> 500 orders across months)
     const matchingInProp = orders.filter(o => o.order_date && o.order_date.startsWith(String(year)));
     if (matchingInProp.length > 500) {
+      fetchedYearsRef.current.add(year);
+      inFlightYearsRef.current.delete(year);
       setYearOrdersCache(prev => ({ ...prev, [year]: matchingInProp }));
       return;
     }
@@ -86,14 +92,16 @@ export const BusinessPerformanceTrendsSection: React.FC<BusinessPerformanceTrend
         endDate: `${year}-12-31`
       });
 
+      fetchedYearsRef.current.add(year);
       setYearOrdersCache(prev => ({ ...prev, [year]: yearOrders }));
     } catch (err: any) {
       console.warn(`[BusinessTrends] Failed to fetch full year ${year} from Supabase:`, err);
     } finally {
+      inFlightYearsRef.current.delete(year);
       setIsLoadingYearData(false);
       setLoadingYearLabel('');
     }
-  }, [yearOrdersCache, orders]);
+  }, [orders]);
 
   // Effect: automatically trigger fetch when year preset is selected
   useEffect(() => {
@@ -192,6 +200,8 @@ export const BusinessPerformanceTrendsSection: React.FC<BusinessPerformanceTrend
   const handleRefresh = () => {
     if (['2026', '2025', '2024', '2023'].includes(datePreset)) {
       const y = parseInt(datePreset, 10);
+      fetchedYearsRef.current.delete(y);
+      inFlightYearsRef.current.delete(y);
       setYearOrdersCache(prev => {
         const next = { ...prev };
         delete next[y];

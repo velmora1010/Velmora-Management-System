@@ -100,7 +100,10 @@ export interface MultiCourierImportResult {
  * Normalizes header keys for case-insensitive and punctuation-free matching.
  */
 function normalizeKey(str: string): string {
-  return String(str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  let s = String(str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  // Normalize common typos in courier exports: "stauts" -> "status"
+  s = s.replace(/stauts/g, 'status');
+  return s;
 }
 
 /**
@@ -216,16 +219,17 @@ export function normalizeStCourierStatus(
   const isRemRto = normRem.includes('returntoorigin') || normRem.includes('returntoorgin') || normRem.includes('rto');
 
   if (isCsRto || isStRto || isRemRto) {
-    if (rtoDeliveredDate && rtoDeliveredDate !== 'N/A') {
-      return {
-        status: 'RTO Delivered to Seller',
-        isConflict: false,
-        isNeedsReview: false
-      };
-    }
+    const isConflictWithDelivered = normSt === 'delivered' || (Boolean(deliveredDate && deliveredDate !== 'N/A' && deliveredDate !== '-') && !rtoDeliveredDate);
+    const rtoStatus = (rtoDeliveredDate && rtoDeliveredDate !== 'N/A') || normCs.includes('rtodelivered') || normCs.includes('deliveredtoseller')
+      ? 'RTO Delivered to Seller'
+      : 'RTO - In Transit';
+
     return {
-      status: 'RTO - In Transit',
-      isConflict: false,
+      status: rtoStatus,
+      isConflict: isConflictWithDelivered,
+      conflictReason: isConflictWithDelivered
+        ? `Status Type is 'Delivered' but explicit Current Status confirms RTO ('${cs || st}')`
+        : undefined,
       isNeedsReview: false
     };
   }
@@ -384,12 +388,12 @@ export async function parseAndValidateCourierFile(
   ]);
 
   const orderStatusIdx = findColumnIndex(rawHeaders, [
-    'currentstatus', 'current_status', 'orderstatus', 'order_status', 'shipmentstatus',
-    'deliverystatus', 'status'
+    'currentstatus', 'current_status', 'currentstauts', 'current_stauts', 'currentstaut', 'stauts',
+    'orderstatus', 'order_status', 'shipmentstatus', 'deliverystatus', 'status'
   ]);
 
   const statusTypeIdx = findColumnIndex(rawHeaders, [
-    'statustype', 'status_type', 'type_status', 'substatus', 'sub_status'
+    'statustype', 'status_type', 'type_status', 'stautstype', 'substatus', 'sub_status'
   ]);
 
   const dispatchStatusIdx = findColumnIndex(rawHeaders, [
@@ -1127,6 +1131,7 @@ export async function commitMultiCourierImport(
             courier: item.courier || 'ST Courier',
             status: item.normalizedStatus,
             raw_status: item.rawStatus || item.normalizedStatus,
+            current_status: item.rawStatus || item.normalizedStatus,
             status_source: `COURIER_REPORT_${(item.courier || 'ST_COURIER').toUpperCase().replace(/\s+/g, '_')}`,
             source_type: 'COURIER_EXPORT',
             dispatch_date: item.dispatchDate || nowIso.slice(0, 10),
@@ -1204,6 +1209,9 @@ export async function commitMultiCourierImport(
               awb_number: item.awbNumber || existingExtra.awb_number,
               courier: item.courier || existingExtra.courier || 'ST Courier',
               raw_status: item.rawStatus || existingExtra.raw_status,
+              current_status: item.rawStatus || existingExtra.current_status,
+              'Current Status': item.rawStatus || existingExtra['Current Status'],
+              'Current stauts': item.rawStatus || existingExtra['Current stauts'],
               status_type: item.statusType || existingExtra.status_type,
               remarks: item.remarks || existingExtra.remarks,
               delivered_date: item.deliveredDate || existingExtra.delivered_date,

@@ -239,8 +239,90 @@ export function getCanonicalStatus(order: any): CanonicalLogisticsStatus {
   const finStr = (order.financialStatus || order.financial_status || extra.financial_status || '').toLowerCase().trim();
   const todayStr = formatLocalYMD(new Date());
 
+  // === TIER 1: BOT Verified Tracking Events Precedence ===
+  const stTrack = extra.st_courier_tracking || {};
+  const botEvents: Array<{ activity?: string; location?: string; timestamp?: string }> = Array.isArray(stTrack.events) ? stTrack.events : [];
+  let botHasRtoEvent = false;
+  let botHasTerminalDelivery = false;
+
+  if (botEvents.length > 0) {
+    for (let i = 0; i < botEvents.length; i++) {
+      const act = (botEvents[i]?.activity || '').toLowerCase().trim();
+      if (
+        act.includes('rto') ||
+        act.includes('return to origin') ||
+        act.includes('return to orgin') ||
+        act.includes('returntoorigin') ||
+        act.includes('returntoorgin') ||
+        act.includes('returned to seller') ||
+        act.includes('party refused') ||
+        act.includes('address not found') ||
+        act.includes('no service')
+      ) {
+        botHasRtoEvent = true;
+      }
+      // If the latest event (index 0) is explicitly Delivered, it confirms physical delivery
+      if (i === 0 && (act === 'delivered' || act.includes('delivered to consignee'))) {
+        botHasTerminalDelivery = true;
+      }
+    }
+  }
+
+  const botStatusStr = String(stTrack.status || '').toLowerCase().trim();
+  if (botStatusStr === 'rto' || botStatusStr.includes('rto')) {
+    botHasRtoEvent = true;
+  }
+  if (botStatusStr === 'delivered') {
+    botHasTerminalDelivery = true;
+  }
+
+  // === TIER 2: Carrier File Current Status / Current stauts Precedence ===
+  const currentStatusStr = String(
+    extra.current_status ||
+    extra['Current Status'] ||
+    extra['Current stauts'] ||
+    extra.st_current_status ||
+    order.current_status ||
+    order.currentStatus ||
+    rawStatusStr ||
+    ''
+  ).toLowerCase().trim();
+
+  const isCurrentStatusRto =
+    currentStatusStr.includes('return to origin') ||
+    currentStatusStr.includes('return to orgin') ||
+    currentStatusStr.includes('returntoorigin') ||
+    currentStatusStr.includes('returntoorgin') ||
+    currentStatusStr === 'rto' ||
+    currentStatusStr.startsWith('rto ') ||
+    currentStatusStr.includes(' rto ') ||
+    currentStatusStr.endsWith(' rto') ||
+    currentStatusStr.includes('returned to origin') ||
+    currentStatusStr.includes('delivered to seller') ||
+    currentStatusStr.includes('returned to seller');
+
+  const isCurrentStatusCancelled =
+    currentStatusStr === 'cancelled' ||
+    currentStatusStr === 'canceled' ||
+    currentStatusStr.includes('cancel');
+
+  const isCurrentStatusDelivered =
+    currentStatusStr === 'delivered' ||
+    currentStatusStr.includes('delivered to consignee');
+
+  // === TIER 3: Status Type Fallback ===
+  const statusTypeStr = String(
+    extra.status_type ||
+    extra['Status Type'] ||
+    order.status_type ||
+    ''
+  ).toLowerCase().trim();
+
   // 0. Explicit RTO Detection (Carrier return confirmation takes absolute precedence over stale dispatch flags)
+  // Precedence 1 (BOT RTO without subsequent delivery) or Precedence 2 (Carrier file Current Status confirms RTO)
   const isExplicitRto =
+    (botHasRtoEvent && !botHasTerminalDelivery) ||
+    isCurrentStatusRto ||
     statusStr.includes('rto') ||
     statusStr.includes('return to origin') ||
     statusStr.includes('return to orgin') ||
@@ -276,8 +358,9 @@ export function getCanonicalStatus(order: any): CanonicalLogisticsStatus {
     remarksStr.includes('returntoorgin') ||
     remarksStr.includes('delivered to seller');
 
-  // 1. Cancelled (Commercial source cancellation takes precedence over batch removal/soft delete)
+  // 1. Cancelled (Commercial source cancellation or carrier file cancellation takes precedence over generic Un Delivered)
   const isCancelled =
+    isCurrentStatusCancelled ||
     order.order_status === 'CANCELLED' ||
     (order.order_status || '').toLowerCase() === 'cancelled' ||
     statusStr === 'cancelled' || 
@@ -336,36 +419,33 @@ export function getCanonicalStatus(order: any): CanonicalLogisticsStatus {
 
   // 4. Delivered (Terminal delivery protection: physical delivery takes precedence when not RTO)
   const isDelivered = 
+    botHasTerminalDelivery ||
+    isCurrentStatusDelivered ||
+    statusTypeStr === 'delivered' ||
     statusStr === 'delivered' || 
     rawStatusStr === 'delivered' || 
     String(order.dispatch_status || '').toLowerCase().trim() === 'delivered' ||
     Boolean(order.delivered_date || order.deliveredDate) ||
-    (eventStr.includes('delivered') && !eventStr.includes('undelivered') && !eventStr.includes('attempt'));
+    (eventStr.includes('delivered') && !eventStr.includes('undelivered') && !eventStr.includes('un delivered') && !eventStr.includes('attempt'));
 
   if (isDelivered) {
     return 'Delivered';
   }
 
-  // 3. Delivered (Do not infer delivered merely because AWB exists)
+  // 5. Delivery Attempt Failed / Undelivered (Never map generic Un Delivered to RTO)
   if (
-    statusStr === 'delivered' || 
-    rawStatusStr === 'delivered' || 
-    String(order.dispatch_status || '').toLowerCase().trim() === 'delivered' ||
-    (eventStr.includes('delivered') && !eventStr.includes('undelivered') && !eventStr.includes('attempt'))
-  ) {
-    return 'Delivered';
-  }
-
-  // 4. Delivery Attempt Failed / Undelivered
-  if (
+    statusTypeStr.includes('undelivered') ||
+    statusTypeStr.includes('un delivered') ||
     statusStr.includes('failed attempt') || 
     statusStr === 'failed attempt' ||
     rawStatusStr.includes('undelivered') || 
+    rawStatusStr.includes('un delivered') ||
     rawStatusStr.includes('attempt failed') || 
     rawStatusStr.includes('delivery failed') ||
     eventStr.includes('failed attempt') ||
     eventStr.includes('customer not available') ||
-    eventStr.includes('undelivered')
+    eventStr.includes('undelivered') ||
+    eventStr.includes('un delivered')
   ) {
     return 'Delivery Attempt Failed';
   }

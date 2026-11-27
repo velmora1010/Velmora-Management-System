@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   X, 
   UploadCloud, 
@@ -16,10 +16,12 @@ import {
   Send,
   Mail,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Bot
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
+import { stCourierBotQueue, StCourierBotJobState } from '../services/stCourierBotService';
 import {
   CourierUploadType,
   MultiCourierPreviewItem,
@@ -64,6 +66,14 @@ export const DedicatedCourierUploadModal: React.FC<DedicatedCourierUploadModalPr
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [isValidating, setIsValidating] = useState<boolean>(false);
+  const [uploadedRawRows, setUploadedRawRows] = useState<any[][]>([]);
+  const [trackingJobState, setTrackingJobState] = useState<StCourierBotJobState | null>(null);
+
+  useEffect(() => {
+    if (courierType === 'st_courier') {
+      return stCourierBotQueue.subscribe(state => setTrackingJobState(state));
+    }
+  }, [courierType]);
 
   const [analysisResult, setAnalysisResult] = useState<MultiCourierAnalysisResult | null>(null);
   const [importResult, setImportResult] = useState<MultiCourierImportResult | null>(null);
@@ -147,6 +157,7 @@ export const DedicatedCourierUploadModal: React.FC<DedicatedCourierUploadModalPr
         return;
       }
 
+      setUploadedRawRows(rawRows);
       const result = await parseAndValidateCourierFile(rawRows, courierType, selectedFile.name);
       setAnalysisResult(result);
       setStep('preview');
@@ -188,6 +199,15 @@ export const DedicatedCourierUploadModal: React.FC<DedicatedCourierUploadModalPr
         onImportSuccess();
       }
       toast.success(`Successfully reconciled ${res.updatedShipmentsCount} shipments!`);
+
+      // Automatically trigger ST Courier live tracking in the background
+      if (courierType === 'st_courier' && analysisResult.previewItems.length > 0) {
+        stCourierBotQueue.enqueueAndStart(analysisResult.previewItems);
+        toast.success(`ST Courier auto-tracking queued in background!`, {
+          duration: 4000,
+          icon: '🚚'
+        });
+      }
     } catch (err: any) {
       console.error('Import error:', err);
       toast.error(`Import failed: ${err.message || 'Unknown error'}`);
@@ -701,6 +721,91 @@ export const DedicatedCourierUploadModal: React.FC<DedicatedCourierUploadModalPr
                     <Download size={13} />
                     <span>Download Unmatched CSV</span>
                   </button>
+                </div>
+              )}
+
+              {/* Automatic ST Courier Tracking Progress Card */}
+              {courierType === 'st_courier' && (
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-950/40 via-indigo-950/30 to-slate-900/60 border border-blue-500/30 text-left space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0">
+                        <Bot size={18} className={trackingJobState?.status === 'RUNNING' ? 'animate-spin' : ''} />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold text-white block">
+                          ST Courier Live Tracking & Database Sync
+                        </span>
+                        <span className="text-[11px] text-slate-400">
+                          {trackingJobState?.status === 'RUNNING'
+                            ? `Fetching live delivery data (${trackingJobState.processedCount} of ${trackingJobState.totalToTrack} checked)...`
+                            : trackingJobState?.status === 'COMPLETED' || (trackingJobState?.processedCount && trackingJobState.processedCount >= trackingJobState.totalToTrack)
+                            ? `Auto-tracking completed (${trackingJobState?.processedCount} verified and updated directly).`
+                            : 'Shipments enqueued for automated live tracking'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                      trackingJobState?.status === 'RUNNING'
+                        ? 'bg-blue-500/20 text-blue-300 border-blue-500/30 animate-pulse'
+                        : trackingJobState?.status === 'COMPLETED' || (trackingJobState?.processedCount && trackingJobState.processedCount >= trackingJobState.totalToTrack)
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                        : 'bg-slate-800 text-slate-400 border-slate-700'
+                    }`}>
+                      {trackingJobState?.status === 'RUNNING' ? 'Syncing...' : 'Sync Complete'}
+                    </span>
+                  </div>
+
+                  {trackingJobState && trackingJobState.totalToTrack > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-[11px] text-slate-400">
+                        <span>Progress: {trackingJobState.processedCount} / {trackingJobState.totalToTrack} checked</span>
+                        <span className="font-mono text-blue-400 font-bold">
+                          {Math.round((trackingJobState.processedCount / trackingJobState.totalToTrack) * 100)}%
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-300"
+                          style={{
+                            width: `${Math.min(100, Math.round((trackingJobState.processedCount / trackingJobState.totalToTrack) * 100))}%`
+                          }}
+                        />
+                      </div>
+                      {/* Simple 6-Metric Indicator */}
+                      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 pt-1 text-[11px]">
+                        <div className="p-2 rounded-xl bg-slate-900/90 border border-slate-800 text-center">
+                          <span className="text-[10px] text-slate-400 block font-medium">Total AWBs</span>
+                          <span className="font-bold text-white text-xs">{trackingJobState.totalToTrack}</span>
+                        </div>
+                        <div className="p-2 rounded-xl bg-blue-950/40 border border-blue-800/40 text-center">
+                          <span className="text-[10px] text-blue-400 block font-medium">Checked</span>
+                          <span className="font-bold text-blue-300 text-xs">{trackingJobState.processedCount}</span>
+                        </div>
+                        <div className="p-2 rounded-xl bg-emerald-950/40 border border-emerald-800/40 text-center">
+                          <span className="text-[10px] text-emerald-400 block font-medium">Delivered</span>
+                          <span className="font-bold text-emerald-300 text-xs">{trackingJobState.deliveredCount || trackingJobState.newDeliveredCount || 0}</span>
+                        </div>
+                        <div className="p-2 rounded-xl bg-rose-950/40 border border-rose-800/40 text-center">
+                          <span className="text-[10px] text-rose-400 block font-medium">RTO</span>
+                          <span className="font-bold text-rose-300 text-xs">{trackingJobState.rtoCount || trackingJobState.newRtoCount || 0}</span>
+                        </div>
+                        <div className="p-2 rounded-xl bg-cyan-950/40 border border-cyan-800/40 text-center">
+                          <span className="text-[10px] text-cyan-400 block font-medium">In Transit</span>
+                          <span className="font-bold text-cyan-300 text-xs">{trackingJobState.inTransitCount || 0}</span>
+                        </div>
+                        <div className="p-2 rounded-xl bg-amber-950/40 border border-amber-800/40 text-center">
+                          <span className="text-[10px] text-amber-400 block font-medium">Failed / Other</span>
+                          <span className="font-bold text-amber-300 text-xs">{trackingJobState.failedCount || 0}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Verified shipment statuses and delivery dates are directly saved to database records and synchronized across Sales and Logistics. Failed or ambiguous records remain unchanged.
+                  </p>
                 </div>
               )}
             </div>

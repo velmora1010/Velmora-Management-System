@@ -764,12 +764,16 @@ export class WebsiteSalesService {
 
       const finalCourier = trackRec?.courier || logRec?.courier || extra.courier || extra.logistics_courier || o.courier || '';
       const finalAwb = trackRec?.awb_number || logRec?.awbNumber || extra.awb_number || o.awb_number || '';
+      const isOrderRto = o.dispatch_status === 'RTO' || 
+        (trackRec?.status && trackRec.status.includes('RTO')) || 
+        (trackRec?.raw_status && (trackRec.raw_status.toLowerCase().includes('return to orgin') || trackRec.raw_status.toLowerCase().includes('return to origin') || trackRec.raw_status.toLowerCase().includes('rto'))) ||
+        (extra.current_status && (extra.current_status.toLowerCase().includes('return to orgin') || extra.current_status.toLowerCase().includes('return to origin')));
       const finalShipmentStatus = isOrderDeleted
         ? 'Deleted'
-        : (trackRec?.status || logRec?.status || (o.dispatch_status === 'RTO' ? 'RTO' : (finalAwb ? 'Dispatched' : (o.dispatch_status === 'DELIVERED' ? 'Delivered' : (isCancelledInSource ? 'Cancelled' : 'Pending Manifest')))));
+        : (isOrderRto ? 'RTO' : (trackRec?.status || logRec?.status || (finalAwb ? 'Dispatched' : (o.dispatch_status === 'DELIVERED' ? 'Delivered' : (isCancelledInSource ? 'Cancelled' : 'Pending Manifest')))));
       const finalRawStatus = isOrderDeleted
         ? 'DELETED'
-        : (trackRec?.raw_status || logRec?.rawStatus || (logRec as any)?.raw_status || extra.delhivery_current_status || extra.raw_status || (o.dispatch_status === 'RTO' ? 'RTO' : (o.dispatch_status === 'DELIVERED' ? 'DELIVERED' : (isCancelledInSource ? 'CANCELLED' : ''))));
+        : (isOrderRto ? (trackRec?.raw_status || extra.current_status || 'RTO') : (trackRec?.raw_status || logRec?.rawStatus || (logRec as any)?.raw_status || extra.delhivery_current_status || extra.current_status || extra.raw_status || (o.dispatch_status === 'DELIVERED' ? 'DELIVERED' : (isCancelledInSource ? 'CANCELLED' : ''))));
 
       return {
         id: o.id,

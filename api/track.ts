@@ -4,35 +4,59 @@ const normalizeStatus = (rawStatus: string): string => {
   const s = (rawStatus || '').toLowerCase().trim();
   if (!s) return 'Pending AWB';
 
-  // 1. Cancelled
-  if (s.includes('cancel')) return 'Cancelled';
-
-  // 2. RTO statuses
-  if (s.includes('rto delivered') || s.includes('delivered to seller') || s.includes('returned to origin') || s.includes('return to seller') || s.includes('rto_delivered')) {
+  // 1. Explicit RTO statuses (Check first before any generic delivery or transit flags)
+  if (
+    s.includes('rto delivered') || 
+    s.includes('delivered to seller') || 
+    s.includes('delivered to sender') || 
+    s.includes('returned to origin') || 
+    s.includes('return to seller') || 
+    s.includes('rto_delivered')
+  ) {
     return 'RTO Delivered to Seller';
   }
-  if (s.includes('rto in transit') || s.includes('returning to origin') || s.includes('return in transit') || s.includes('return to origin') || s.includes('rto_in_transit')) {
+  if (
+    s.includes('rto in transit') || 
+    s.includes('returning to origin') || 
+    s.includes('return in transit') || 
+    s.includes('return to origin') || 
+    s.includes('return to orgin') || 
+    s.includes('returntoorigin') || 
+    s.includes('returntoorgin') || 
+    s.includes('rto_in_transit')
+  ) {
     return 'RTO In Transit';
   }
-  if (s.includes('rto initiated') || s.includes('rto created') || s.includes('return initiated') || s.includes('rto_initiated')) {
+  if (
+    s.includes('rto initiated') || 
+    s.includes('rto created') || 
+    s.includes('return initiated') || 
+    s.includes('rto_initiated')
+  ) {
     return 'RTO Initiated';
   }
-  if (s.includes('rto') || s.includes('returned') || s.includes('return')) {
+  if (
+    s === 'rto' ||
+    s.startsWith('rto ') ||
+    s.includes(' rto ') ||
+    s.endsWith(' rto') ||
+    s.includes('return to origin') ||
+    s.includes('return to orgin') ||
+    s.includes('returntoorigin') ||
+    s.includes('returntoorgin')
+  ) {
     return 'RTO In Transit';
   }
 
-  // 3. Delivered
-  if (s === 'dl' || s.includes('delivered')) return 'Delivered';
+  // 2. Cancelled
+  if (s.includes('cancel')) return 'Cancelled';
 
-  // 4. Out for Delivery
-  if (s === 'ofd' || s.includes('out for delivery') || s.includes('out_for_delivery')) {
-    return 'Out for Delivery';
-  }
-
-  // 5. Failed Attempt / Undelivered
+  // 3. Failed Attempt / Undelivered (MUST be checked BEFORE delivered, because "un delivered" contains "delivered"!)
   if (
     s === 'ud' ||
     s.includes('undelivered') ||
+    s.includes('un delivered') ||
+    s.includes('un-delivered') ||
     s.includes('failed attempt') ||
     s.includes('attempted') ||
     s.includes('delivery failed') ||
@@ -41,7 +65,21 @@ const normalizeStatus = (rawStatus: string): string => {
     s.includes('consignee not available') ||
     s.includes('refused')
   ) {
-    return 'Failed Attempt';
+    return 'Un Delivered';
+  }
+
+  // 4. Out for Delivery
+  if (s === 'ofd' || s.includes('out for delivery') || s.includes('out_for_delivery')) {
+    return 'Out for Delivery';
+  }
+
+  // 5. Delivered (Strict check: ensure it is NOT an un-delivered substring)
+  if (
+    s === 'dl' ||
+    s.includes('delivered to consignee') ||
+    (s.includes('delivered') && !s.includes('undelivered') && !s.includes('un delivered') && !s.includes('un-delivered'))
+  ) {
+    return 'Delivered';
   }
 
   // 6. Exception
@@ -172,6 +210,7 @@ export default async function handler(req: IncomingMessage & { query?: Record<st
   const nowStr = new Date().toLocaleString();
   let awbNumber = '';
   let courier = '';
+  let skipDbUpdate = false;
 
   // Parse parameters from body (POST) or URL query (GET)
   if (req.method === 'POST') {
@@ -180,6 +219,9 @@ export default async function handler(req: IncomingMessage & { query?: Record<st
       const parsed = JSON.parse(rawBody || '{}');
       awbNumber = parsed.awbNumber || parsed.awb || '';
       courier = parsed.courier || '';
+      if (parsed.skipDbUpdate !== undefined) {
+        skipDbUpdate = Boolean(parsed.skipDbUpdate);
+      }
     } catch (e) {
       res.statusCode = 400;
       res.end(JSON.stringify({
@@ -194,6 +236,10 @@ export default async function handler(req: IncomingMessage & { query?: Record<st
     const urlObj = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
     awbNumber = urlObj.searchParams.get('awbNumber') || urlObj.searchParams.get('awb') || (req.query && (req.query.awbNumber || req.query.awb)) || '';
     courier = urlObj.searchParams.get('courier') || (req.query && req.query.courier) || '';
+    const skipParam = urlObj.searchParams.get('skipDbUpdate') || (req.query && req.query.skipDbUpdate);
+    if (skipParam === 'true' || skipParam === '1') {
+      skipDbUpdate = true;
+    }
   }
 
   if (!awbNumber) {
@@ -258,40 +304,94 @@ export default async function handler(req: IncomingMessage & { query?: Record<st
       const statusMatch = htmlContent.match(/Current\s+Status\s*<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
       const rawCurrentStatus = statusMatch ? statusMatch[1].replace(/<[^>]+>/g, '').trim() : '';
 
+      const originMatch = htmlContent.match(/Orgin\s+SRC\s*<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
+      const origin = originMatch ? originMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+
+      const destMatch = htmlContent.match(/Destination\s*<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
+      const destination = destMatch ? destMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+
       const bookMatch = htmlContent.match(/Book\s+Date\/Time\s*<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
       const bookDateTime = bookMatch ? bookMatch[1].replace(/<[^>]+>/g, '').trim() : '';
 
       const delivMatch = htmlContent.match(/Delivery\s+Date\/Time\s*<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>/i);
       const deliveryDateTime = delivMatch ? delivMatch[1].replace(/<[^>]+>/g, '').trim() : '';
 
-      let latestEvent = '';
-      let latestLocation = '';
-      let latestDateTime = '';
-
-      const timelineBlockMatch = htmlContent.match(/class="[^"]*tl24[^"]*"[^>]*>([\s\S]*?)(?:<div[^>]*class="[^"]*tl24[^"]*"|<\/div>\s*<\/div>\s*<\/div>\s*<\/div>)/i);
-      if (timelineBlockMatch) {
-        const block = timelineBlockMatch[1];
+      // Collect all timeline events from structural tl26 blocks
+      const events: Array<{ timestamp: string; activity: string; location: string }> = [];
+      const parts = htmlContent.split(/tl26/i);
+      for (let i = 1; i < parts.length; i++) {
+        const p = parts[i];
+        const timeMatch = p.match(/width:\s*25%[^>]*>([\s\S]*?)<\/div>/i);
+        const descMatch = p.match(/width:\s*65%[^>]*>([\s\S]*?)<\/div>/i);
         
-        const timeMatch = block.match(/width:\s*25%[^>]*>([\s\S]*?)<\/div>/i);
-        if (timeMatch) {
-          latestDateTime = timeMatch[1].replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+        if (timeMatch && descMatch) {
+          const rawTime = timeMatch[1].replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+          const rawDescParts = descMatch[1].split(/<br\s*\/?>/gi)
+            .map(s => s.replace(/&nbsp;/g, ' ').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim())
+            .filter(Boolean);
+          
+          const activity = rawDescParts[0] || '';
+          const location = rawDescParts.slice(1).join(', ').trim() || '';
+          
+          if (rawTime || activity) {
+            events.push({
+              timestamp: rawTime,
+              activity,
+              location
+            });
+          }
         }
+      }
 
-        const descMatch = block.match(/width:\s*65%[^>]*>([\s\S]*?)<\/div>/i);
-        if (descMatch) {
-          const parts = descMatch[1].split(/<br\s*\/?>/gi).map(s => s.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
-          latestEvent = parts[0] || '';
-          latestLocation = parts.slice(1).join(' - ');
+      let latestEvent = events[0]?.activity || '';
+      let latestLocation = events[0]?.location || '';
+      let latestDateTime = events[0]?.timestamp || '';
+
+      // Fallback: older tl24 format if tl26 not matched
+      if (events.length === 0) {
+        const timelineBlockMatch = htmlContent.match(/class="[^"]*tl24[^"]*"[^>]*>([\s\S]*?)(?:<div[^>]*class="[^"]*tl24[^"]*"|<\/div>\s*<\/div>\s*<\/div>\s*<\/div>)/i);
+        if (timelineBlockMatch) {
+          const block = timelineBlockMatch[1];
+          const timeMatch = block.match(/width:\s*25%[^>]*>([\s\S]*?)<\/div>/i);
+          if (timeMatch) {
+            latestDateTime = timeMatch[1].replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+          }
+          const descMatch = block.match(/width:\s*65%[^>]*>([\s\S]*?)<\/div>/i);
+          if (descMatch) {
+            const actParts = descMatch[1].split(/<br\s*\/?>/gi).map(s => s.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
+            latestEvent = actParts[0] || '';
+            latestLocation = actParts.slice(1).join(' - ');
+            events.push({
+              timestamp: latestDateTime,
+              activity: latestEvent,
+              location: latestLocation
+            });
+          }
         }
       }
 
       // Determine the primary status: prioritize rawCurrentStatus from table, or latest event
       const finalRawStatus = rawCurrentStatus || latestEvent || '';
-      const normalized = normalizeStatus(finalRawStatus);
+      let normalized = normalizeStatus(finalRawStatus);
+
+      // Check if any historical timeline event explicitly indicates RTO
+      const rtoEvent = events.find(e => {
+        const act = (e.activity || '').toLowerCase();
+        return act.includes('rto') || act.includes('return to origin') || act.includes('return to orgin') || act.includes('returned to seller');
+      });
+
+      if (rtoEvent && normalized !== 'Cancelled') {
+        const isDeliveredBack = events.some(e => {
+          const act = (e.activity || '').toLowerCase();
+          const loc = (e.location || '').toLowerCase();
+          return act.includes('delivered to seller') || act.includes('delivered to sender') || (act.includes('delivered') && loc.includes('sankagiri'));
+        });
+        normalized = isDeliveredBack ? 'RTO Delivered to Seller' : 'RTO In Transit';
+      }
 
       // Latest actual event is used for the application's REMARKS column
       const remarks = latestEvent || rawCurrentStatus || undefined;
-      const finalDeliveryDate = (normalized === 'Delivered' && deliveryDateTime) ? deliveryDateTime : undefined;
+      const finalDeliveryDate = (normalized === 'Delivered' && deliveryDateTime) ? deliveryDateTime : (normalized === 'Delivered' && latestDateTime ? latestDateTime : undefined);
       const finalDispatchedDate = bookDateTime ? bookDateTime.split(' ')[0] : undefined;
 
       // Development diagnostics
@@ -301,6 +401,7 @@ export default async function handler(req: IncomingMessage & { query?: Record<st
       console.log(`[ST TRACKING] Remarks: ${remarks || 'N/A'}`);
       console.log(`[ST TRACKING] Delivery Date: ${finalDeliveryDate || 'N/A'}`);
       console.log(`[ST TRACKING] Dispatched Date: ${finalDispatchedDate || 'N/A'}`);
+      console.log(`[ST TRACKING] Events Count: ${events.length}`);
 
       // Verify AWB match if present on page
       const pageAwbMatch = htmlContent.match(/Status\s+of\s+AWB\s+No\.?\s*<span[^>]*>([a-zA-Z0-9]+)/i);
@@ -317,10 +418,11 @@ export default async function handler(req: IncomingMessage & { query?: Record<st
       }
 
       // If neither table status nor timeline event was matched
-      if (!finalRawStatus || (!statusMatch && !timelineBlockMatch)) {
+      if (!finalRawStatus && events.length === 0) {
         res.statusCode = 200;
         res.end(JSON.stringify({
           success: false,
+          notFound: true,
           status: 'Tracking Not Available',
           error: htmlContent.includes('No Record') ? 'No Record Found on ST Courier' : 'Tracking information not found on ST Courier',
           lastSyncedAt: nowStr
@@ -328,49 +430,30 @@ export default async function handler(req: IncomingMessage & { query?: Record<st
         return;
       }
 
-      // Sync ST Courier status to Supabase customer_tracking_shipments
-      const sbUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'https://utusdosvijjuxtowzhta.supabase.co';
-      const sbKey = process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
-      if (sbUrl && sbKey) {
-        try {
-          const existingCheckRes = await fetch(`${sbUrl}/rest/v1/customer_tracking_shipments?awb_number=eq.${encodeURIComponent(awbNumber)}&select=id,status,order_id`, {
-            headers: { 'apikey': sbKey, 'Authorization': `Bearer ${sbKey}` }
-          });
-          let finalNormalized = normalized;
-          let matchedOrderId = '';
-          if (existingCheckRes.ok) {
-            const existingList = await existingCheckRes.json();
-            const existing = existingList?.[0];
-            if (existing) {
-              matchedOrderId = existing.order_id || '';
-              const curStatus = existing.status || '';
-              if (curStatus === 'Delivered' && normalized !== 'Delivered' && !normalized.includes('RTO')) {
-                finalNormalized = 'Delivered';
+      // Sync ST Courier status to Supabase customer_tracking_shipments ONLY if not skipping DB update
+      if (!skipDbUpdate) {
+        const sbUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'https://utusdosvijjuxtowzhta.supabase.co';
+        const sbKey = process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+        if (sbUrl && sbKey) {
+          try {
+            const existingCheckRes = await fetch(`${sbUrl}/rest/v1/customer_tracking_shipments?awb_number=eq.${encodeURIComponent(awbNumber)}&select=id,status,order_id`, {
+              headers: { 'apikey': sbKey, 'Authorization': `Bearer ${sbKey}` }
+            });
+            let finalNormalized = normalized;
+            let matchedOrderId = '';
+            if (existingCheckRes.ok) {
+              const existingList = await existingCheckRes.json();
+              const existing = existingList?.[0];
+              if (existing) {
+                matchedOrderId = existing.order_id || '';
+                const curStatus = existing.status || '';
+                if (curStatus === 'Delivered' && normalized !== 'Delivered' && !normalized.includes('RTO')) {
+                  finalNormalized = 'Delivered';
+                }
               }
             }
-          }
 
-          await fetch(`${sbUrl}/rest/v1/customer_tracking_shipments?awb_number=eq.${encodeURIComponent(awbNumber)}`, {
-            method: 'PATCH',
-            headers: {
-              'apikey': sbKey,
-              'Authorization': `Bearer ${sbKey}`,
-              'Content-Type': 'application/json',
-              'Prefer': 'return=minimal'
-            },
-            body: JSON.stringify({
-              status: finalNormalized,
-              raw_status: finalRawStatus,
-              remarks: remarks || null,
-              delivered_date: finalDeliveryDate || null,
-              last_location: latestLocation || null,
-              tracking_date_time: latestDateTime || deliveryDateTime || null,
-              last_synced_at: new Date().toISOString()
-            })
-          });
-
-          if (finalNormalized === 'Delivered' && matchedOrderId) {
-            await fetch(`${sbUrl}/rest/v1/sales_orders?order_id=eq.${encodeURIComponent(matchedOrderId)}`, {
+            await fetch(`${sbUrl}/rest/v1/customer_tracking_shipments?awb_number=eq.${encodeURIComponent(awbNumber)}`, {
               method: 'PATCH',
               headers: {
                 'apikey': sbKey,
@@ -379,26 +462,51 @@ export default async function handler(req: IncomingMessage & { query?: Record<st
                 'Prefer': 'return=minimal'
               },
               body: JSON.stringify({
-                dispatch_status: 'DELIVERED',
-                updated_at: new Date().toISOString()
+                status: finalNormalized,
+                raw_status: finalRawStatus,
+                remarks: remarks || null,
+                delivered_date: finalDeliveryDate || null,
+                last_location: latestLocation || null,
+                tracking_date_time: latestDateTime || deliveryDateTime || null,
+                last_synced_at: new Date().toISOString()
               })
             });
+
+            if (finalNormalized === 'Delivered' && matchedOrderId) {
+              await fetch(`${sbUrl}/rest/v1/sales_orders?order_id=eq.${encodeURIComponent(matchedOrderId)}`, {
+                method: 'PATCH',
+                headers: {
+                  'apikey': sbKey,
+                  'Authorization': `Bearer ${sbKey}`,
+                  'Content-Type': 'application/json',
+                  'Prefer': 'return=minimal'
+                },
+                body: JSON.stringify({
+                  dispatch_status: 'DELIVERED',
+                  updated_at: new Date().toISOString()
+                })
+              });
+            }
+          } catch (sbErr) {
+            console.warn('[ST COURIER] Supabase sync note:', sbErr);
           }
-        } catch (sbErr) {
-          console.warn('[ST COURIER] Supabase sync note:', sbErr);
         }
       }
 
       res.statusCode = 200;
       res.end(JSON.stringify({
         success: true,
+        awb: awbNumber,
         status: normalized,
         rawStatus: finalRawStatus,
         remarks: remarks,
+        origin: origin || undefined,
+        destination: destination || undefined,
         deliveryDate: finalDeliveryDate,
         dispatchedDate: finalDispatchedDate,
         lastLocation: latestLocation || undefined,
         trackingDateTime: latestDateTime || deliveryDateTime || bookDateTime || undefined,
+        events: events,
         lastSyncedAt: nowStr
       }));
     } else if (courier === 'Delhivery' || (courier.toLowerCase() === 'delhivery' && !courier.toLowerCase().includes('ithink'))) {

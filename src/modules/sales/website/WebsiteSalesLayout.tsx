@@ -7,7 +7,10 @@ import {
   BarChart3,
   ShoppingBag,
   RotateCcw,
-  History as HistoryIcon
+  History as HistoryIcon,
+  Bot,
+  Truck,
+  X
 } from 'lucide-react';
 import { WebsiteDashboard } from './WebsiteDashboard';
 import { WebsiteOrders } from './WebsiteOrders';
@@ -21,6 +24,7 @@ import { WebsiteOrderFilesModal } from './components/WebsiteOrderFilesModal';
 import { WebsiteUploadChoiceModal } from './components/WebsiteUploadChoiceModal';
 import { DelhiveryUploadModal } from './components/DelhiveryUploadModal';
 import { DedicatedCourierUploadModal } from './components/DedicatedCourierUploadModal';
+import { stCourierBotQueue, StCourierBotJobState } from './services/stCourierBotService';
 
 export const WebsiteSalesLayout: React.FC = () => {
   const navigate = useNavigate();
@@ -31,6 +35,16 @@ export const WebsiteSalesLayout: React.FC = () => {
   const [isAmazonModalOpen, setIsAmazonModalOpen] = useState(false);
   const [isSTCourierModalOpen, setIsSTCourierModalOpen] = useState(false);
   const [isIndiaPostModalOpen, setIsIndiaPostModalOpen] = useState(false);
+  const [isSTBotOpen, setIsSTBotOpen] = useState(false);
+  const [botJobState, setBotJobState] = useState<StCourierBotJobState | null>(null);
+  const [dismissedJobId, setDismissedJobId] = useState<string | null>(null);
+
+  // Subscribe to background ST Courier auto-tracking queue
+  useEffect(() => {
+    return stCourierBotQueue.subscribe(state => {
+      setBotJobState(state);
+    });
+  }, []);
 
   // Required 3-tab navigation: Dashboard, Orders, Analytics
   const tabs = [
@@ -40,11 +54,16 @@ export const WebsiteSalesLayout: React.FC = () => {
     { id: 'history', label: 'History', path: '/sales/website/history', icon: HistoryIcon }
   ];
 
-  // Global listener to open upload selector modal from dashboard or anywhere in website sales
+  // Global listener to open upload selector modal or BOT from dashboard or anywhere in website sales
   useEffect(() => {
     const handleOpenModal = () => setIsChoiceModalOpen(true);
+    const handleOpenBot = () => setIsSTBotOpen(true);
     window.addEventListener('velmora:open_website_upload_modal', handleOpenModal);
-    return () => window.removeEventListener('velmora:open_website_upload_modal', handleOpenModal);
+    window.addEventListener('velmora:open_st_courier_bot', handleOpenBot);
+    return () => {
+      window.removeEventListener('velmora:open_website_upload_modal', handleOpenModal);
+      window.removeEventListener('velmora:open_st_courier_bot', handleOpenBot);
+    };
   }, []);
 
   // Active tab matching
@@ -223,6 +242,72 @@ export const WebsiteSalesLayout: React.FC = () => {
             }
           }}
         />
+
+        {/* NON-BLOCKING FLOATING ST COURIER AUTO-TRACKING BANNER */}
+        {botJobState &&
+          botJobState.totalToTrack > 0 &&
+          botJobState.status !== 'CANCELLED' &&
+          botJobState.jobId !== dismissedJobId && (
+            <div className="fixed bottom-6 right-6 z-40 max-w-sm sm:max-w-md w-full bg-slate-900/95 border border-indigo-500/40 rounded-2xl shadow-2xl backdrop-blur-md p-4 animate-in slide-in-from-bottom duration-300">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
+                    <Truck size={18} className={botJobState.status === 'RUNNING' ? 'animate-pulse' : ''} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-white text-xs">ST Courier Auto-Tracking</span>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                        botJobState.status === 'RUNNING'
+                          ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                          : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      }`}>
+                        {botJobState.status === 'RUNNING' ? 'Live Tracking' : 'Sync Complete'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      {botJobState.status === 'RUNNING'
+                        ? `Checking ${botJobState.processedCount} of ${botJobState.totalToTrack} shipments...`
+                        : `${botJobState.processedCount} shipments tracked & saved (${botJobState.deliveredCount || botJobState.newDeliveredCount || 0} delivered, ${botJobState.rtoCount || botJobState.newRtoCount || 0} RTO)`}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setDismissedJobId(botJobState.jobId)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                  title="Dismiss banner"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              {/* Progress bar */}
+              <div className="mt-3 space-y-1.5">
+                <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 transition-all duration-300"
+                    style={{
+                      width: `${Math.min(100, Math.round((botJobState.processedCount / botJobState.totalToTrack) * 100))}%`
+                    }}
+                  />
+                </div>
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[10px] text-slate-500 font-mono">
+                    {Math.round((botJobState.processedCount / botJobState.totalToTrack) * 100)}% complete
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setDismissedJobId(botJobState.jobId)}
+                    className="px-3 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-semibold text-xs border border-slate-700 transition-all cursor-pointer"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
       </div>
     </WebsiteSalesDateRangeProvider>
   );

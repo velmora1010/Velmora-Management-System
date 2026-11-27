@@ -20,7 +20,9 @@ import {
   Copy,
   Check,
   ShieldAlert,
-  ShoppingBag
+  ShoppingBag,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import type { WebsiteConsolidatedOrder, WebsiteFullOrderDetails } from '../types';
 import { formatPhoneNumber, formatSalesDateDisplay } from '../websiteSalesUtils';
@@ -43,6 +45,7 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [fullDetails, setFullDetails] = useState<WebsiteFullOrderDetails | null>(null);
   const [loadingDetails, setLoadingDetails] = useState<boolean>(true);
+  const [showTrackingEvents, setShowTrackingEvents] = useState(false);
 
   useEffect(() => {
     if (!order) {
@@ -383,65 +386,143 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
               </div>
 
               <div className="space-y-2.5">
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
-                    <span className="text-[10px] uppercase font-bold text-slate-500 block">Courier Partner</span>
-                    <span className="font-bold text-slate-200 text-xs mt-0.5 block truncate">
-                      {logistics.courier || order.courier || 'Pending Allocation'}
-                    </span>
-                  </div>
+                {(() => {
+                  const courierPartner = logistics.courier || order.courier || 'Pending Allocation';
+                  const isStCourier = courierPartner.toLowerCase().includes('st courier') || courierPartner.toLowerCase().includes('stcourier');
+                  const awbNum = logistics.awb_number || order.awb_number;
+                  const effectiveTrackingUrl = logistics.tracking_url || (isStCourier && awbNum ? 'https://stcourier.com/track/shipment' : undefined);
+                  const stTracking = (order as any).extra_data?.st_courier_tracking || (logistics as any).extra_data?.st_courier_tracking;
 
-                  <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
-                    <span className="text-[10px] uppercase font-bold text-slate-500 block">AWB / Tracking #</span>
-                    {logistics.awb_number || order.awb_number ? (
-                      <div className="flex items-center justify-between mt-0.5">
-                        <span className="font-mono font-bold text-indigo-300 text-xs">
-                          {logistics.awb_number || order.awb_number}
-                        </span>
-                        {logistics.tracking_url && (
-                          <a
-                            href={logistics.tracking_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-purple-400 hover:text-purple-300"
-                            title="Open courier tracking link"
-                          >
-                            <ExternalLink size={12} />
-                          </a>
+                  return (
+                    <>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                          <span className="text-[10px] uppercase font-bold text-slate-500 block">Courier Partner</span>
+                          <span className="font-bold text-slate-200 text-xs mt-0.5 block truncate">
+                            {courierPartner}
+                          </span>
+                        </div>
+
+                        <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                          <span className="text-[10px] uppercase font-bold text-slate-500 block">AWB / Tracking #</span>
+                          {awbNum ? (
+                            <div className="flex items-center justify-between mt-0.5">
+                              <span className="font-mono font-bold text-indigo-300 text-xs">
+                                {awbNum}
+                              </span>
+                              {effectiveTrackingUrl && (
+                                <a
+                                  href={effectiveTrackingUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-purple-400 hover:text-purple-300"
+                                  title={`Open ${isStCourier ? 'ST Courier' : 'courier'} tracking page`}
+                                >
+                                  <ExternalLink size={12} />
+                                </a>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-slate-500 italic text-xs mt-0.5 block">Not manifested yet</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1 text-[11px]">
+                        <div className="flex justify-between text-slate-400">
+                          <span>Order Date:</span>
+                          <span className="font-mono text-slate-200">{formatSalesDateDisplay(order.order_date)}</span>
+                        </div>
+                        {order.original_order_date && order.original_order_date !== order.order_date && (
+                          <div className="flex justify-between text-slate-500">
+                            <span>Source Timestamp:</span>
+                            <span className="font-mono truncate max-w-[200px]">{order.original_order_date}</span>
+                          </div>
+                        )}
+                        {logistics.manifested_date && (
+                          <div className="flex justify-between text-slate-400">
+                            <span>Manifested Date:</span>
+                            <span className="font-mono text-cyan-300">{formatSalesDateDisplay(logistics.manifested_date)}</span>
+                          </div>
+                        )}
+                        {(logistics.delivered_date || (order as any).delivered_date || (order as any).fulfilled_date) && (
+                          <div className="flex justify-between text-slate-400">
+                            <span>Delivered Date:</span>
+                            <span className="font-mono text-emerald-400">
+                              {formatSalesDateDisplay(logistics.delivered_date || (order as any).delivered_date || (order as any).fulfilled_date)}
+                            </span>
+                          </div>
+                        )}
+
+                        {stTracking?.lastLocation && (
+                          <div className="flex justify-between text-slate-400">
+                            <span>Last Location:</span>
+                            <span className="font-mono text-indigo-300 truncate max-w-[180px]">{stTracking.lastLocation}</span>
+                          </div>
+                        )}
+                        {stTracking?.remarks && (
+                          <div className="flex justify-between text-slate-400">
+                            <span>Latest Activity:</span>
+                            <span className="font-mono text-cyan-300 truncate max-w-[180px]">{stTracking.remarks}</span>
+                          </div>
+                        )}
+                        {stTracking?.trackingDateTime && (
+                          <div className="flex justify-between text-slate-400">
+                            <span>Latest Update:</span>
+                            <span className="font-mono text-slate-300">{stTracking.trackingDateTime}</span>
+                          </div>
+                        )}
+
+                        {/* ST Courier Event Timeline Drawer */}
+                        {stTracking?.events && stTracking.events.length > 0 && (
+                          <div className="pt-2 mt-1 border-t border-slate-800">
+                            <button
+                              type="button"
+                              onClick={() => setShowTrackingEvents(prev => !prev)}
+                              className="w-full flex items-center justify-between text-indigo-400 hover:text-indigo-300 font-bold text-[11px] py-0.5 transition-colors cursor-pointer"
+                            >
+                              <span className="flex items-center gap-1.5">
+                                <Clock size={12} />
+                                Tracking Timeline ({stTracking.events.length} events)
+                              </span>
+                              {showTrackingEvents ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                            </button>
+
+                            {showTrackingEvents && (
+                              <div className="mt-2 space-y-2 max-h-48 overflow-y-auto pr-1">
+                                {stTracking.events.map((ev: any, idx: number) => (
+                                  <div key={idx} className="p-2 rounded bg-slate-950/80 border border-slate-800 text-[10px] space-y-0.5">
+                                    <div className="flex items-center justify-between text-slate-400">
+                                      <span className="font-mono text-slate-300">{ev.timestamp}</span>
+                                      {ev.location && (
+                                        <span className="text-slate-400 flex items-center gap-1">
+                                          <MapPin size={10} className="text-indigo-400" />
+                                          {ev.location}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="font-bold text-slate-200">{ev.activity}</div>
+                                  </div>
+                                ))}
+                                <div className="pt-1 text-center">
+                                  <a
+                                    href="https://stcourier.com/track/shipment"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-[10px] text-blue-400 hover:text-blue-300 inline-flex items-center gap-1 font-semibold"
+                                  >
+                                    <span>Verify on Official ST Courier Site</span>
+                                    <ExternalLink size={10} />
+                                  </a>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
-                    ) : (
-                      <span className="text-slate-500 italic text-xs mt-0.5 block">Not manifested yet</span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1 text-[11px]">
-                  <div className="flex justify-between text-slate-400">
-                    <span>Order Date:</span>
-                    <span className="font-mono text-slate-200">{formatSalesDateDisplay(order.order_date)}</span>
-                  </div>
-                  {order.original_order_date && order.original_order_date !== order.order_date && (
-                    <div className="flex justify-between text-slate-500">
-                      <span>Source Timestamp:</span>
-                      <span className="font-mono truncate max-w-[200px]">{order.original_order_date}</span>
-                    </div>
-                  )}
-                  {logistics.manifested_date && (
-                    <div className="flex justify-between text-slate-400">
-                      <span>Manifested Date:</span>
-                      <span className="font-mono text-cyan-300">{formatSalesDateDisplay(logistics.manifested_date)}</span>
-                    </div>
-                  )}
-                  {(logistics.delivered_date || (order as any).delivered_date || (order as any).fulfilled_date) && (
-                    <div className="flex justify-between text-slate-400">
-                      <span>Delivered Date:</span>
-                      <span className="font-mono text-emerald-400">
-                        {formatSalesDateDisplay(logistics.delivered_date || (order as any).delivered_date || (order as any).fulfilled_date)}
-                      </span>
-                    </div>
-                  )}
-                </div>
+                    </>
+                  );
+                })()}
               </div>
             </div>
           </div>

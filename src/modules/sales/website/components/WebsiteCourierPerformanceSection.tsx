@@ -19,7 +19,8 @@ import {
   Layers,
   FileQuestion,
   Ban,
-  Trash2
+  Trash2,
+  Activity
 } from 'lucide-react';
 import type { WebsiteConsolidatedOrder } from '../types';
 import type { CourierPerformanceSummary } from '../../../Logistics/utils/logisticsAnalyticsUtils';
@@ -61,6 +62,11 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
   const [isDiagnosticModalOpen, setIsDiagnosticModalOpen] = useState(false);
   const [selectedDiagnosticKey, setSelectedDiagnosticKey] = useState<string>('ALL');
   const [diagnosticSearch, setDiagnosticSearch] = useState('');
+
+  // ST Courier Reconciliation Diagnostic Modal State
+  const [isStDiagnosticModalOpen, setIsStDiagnosticModalOpen] = useState(false);
+  const [stDiagnosticOutcomeFilter, setStDiagnosticOutcomeFilter] = useState<'ALL' | 'RTO' | 'CANCELLED' | 'DELIVERED' | 'CONFLICT'>('ALL');
+  const [stDiagnosticSearch, setStDiagnosticSearch] = useState('');
 
   // 1. Overall totals across all couriers
   const totals = useMemo(() => {
@@ -354,6 +360,137 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
     document.body.removeChild(link);
   };
 
+  // 3. ST Courier Status Reconciliation Diagnostics dataset
+  const stReconciliationItems = useMemo(() => {
+    const list = (allOrders.length > 0 ? allOrders : courierPerformance.flatMap(c => c.orders));
+    const stOrders = list.filter(o => {
+      const c = (o.courier || o.extra_data?.courier || '').toLowerCase();
+      return c.includes('st') || c === 'st courier';
+    });
+
+    return stOrders.map(o => {
+      const extra = o.extra_data || {};
+      const stTrack = extra.st_courier_tracking || {};
+      const botEvents: Array<{ activity?: string; location?: string; timestamp?: string }> = Array.isArray(stTrack.events) ? stTrack.events : [];
+      
+      const rawStatus = o.raw_status || extra.raw_status || o.fulfillment_status || 'N/A';
+      const statusType = extra.status_type || extra['Status Type'] || o.status_type || 'N/A';
+      const currentStatus = extra.current_status || extra['Current Status'] || extra['Current stauts'] || extra.st_current_status || o.current_status || 'N/A';
+      const awb = o.awb_number || extra.awb_number || 'N/A';
+      const canonical = getCanonicalStatus(o);
+
+      // Identify conflicts
+      let conflict = 'None';
+      let isConflict = false;
+      const normSt = statusType.toLowerCase().replace(/[^a-z]/g, '');
+      const normCs = currentStatus.toLowerCase().replace(/[^a-z]/g, '');
+
+      if (normSt === 'delivered' && (normCs.includes('returntoorigin') || normCs.includes('returntoorgin') || normCs.includes('rto'))) {
+        conflict = `Status Type is 'Delivered' but Current Status confirms RTO ('${currentStatus}')`;
+        isConflict = true;
+      } else if (normSt === 'undelivered' && normCs === 'canceled') {
+        conflict = `Status Type is 'Un Delivered' but Current Status is 'Canceled'`;
+        isConflict = true;
+      } else if (normSt === 'delivered' && normCs === 'undelivered') {
+        conflict = `Status Type is 'Delivered' but Current Status is 'Un Delivered'`;
+        isConflict = true;
+      } else if (normSt === 'undelivered' && normCs === 'delivered') {
+        conflict = `Status Type is 'Un Delivered' but Current Status is 'Delivered'`;
+        isConflict = true;
+      }
+
+      // Determine Precedence Reason
+      let reason = '';
+      let source = 'Carrier Report';
+      if (botEvents.length > 0) {
+        source = 'Tracking BOT + Carrier Report';
+      }
+
+      if (canonical.includes('RTO')) {
+        const matchingEv = botEvents.find(e => {
+          const act = (e.activity || '').toLowerCase();
+          return act.includes('rto') || act.includes('party refused') || act.includes('address not found') || act.includes('no service') || act.includes('return to origin') || act.includes('return to orgin');
+        });
+
+        if (matchingEv) {
+          reason = `Precedence 1 (BOT Event): '${matchingEv.activity}' overrides dispatch status`;
+        } else if (normCs.includes('returntoorigin') || normCs.includes('returntoorgin') || normCs.includes('rto')) {
+          reason = `Precedence 2 (Carrier Report): Current Status '${currentStatus}' confirms RTO over Status Type '${statusType}'`;
+        } else {
+          reason = `Precedence 3: Dispatch status/waybill confirmed RTO return`;
+        }
+      } else if (canonical === 'Cancelled') {
+        if (normCs === 'canceled' || normCs === 'cancelled') {
+          reason = `Precedence 2 (Carrier Report): Current Status '${currentStatus}' maps to Cancelled (Never generic RTO)`;
+        } else if (o.order_status === 'CANCELLED') {
+          reason = `Source Order Cancelled in Shopify/Sales`;
+        } else {
+          reason = `Status Type indicates cancellation`;
+        }
+      } else if (canonical === 'Delivered') {
+        if (botEvents.length > 0 && (botEvents[0]?.activity === 'Delivered' || (botEvents[0]?.activity || '').toLowerCase().includes('delivered'))) {
+          reason = `Precedence 1 (BOT Event): Final delivery verified at ${botEvents[0]?.location || 'destination'}`;
+        } else if (normCs === 'delivered') {
+          reason = `Precedence 2 (Carrier Report): Current Status confirms physical delivery`;
+        } else {
+          reason = `Precedence 3: Order dispatch status / verified delivery date confirms delivery`;
+        }
+      } else {
+        reason = `In transit / pending delivery scan`;
+      }
+
+      return {
+        orderId: o.order_id,
+        awb,
+        customerName: o.customer_name || 'Customer',
+        rawStatus,
+        statusType,
+        currentStatus,
+        canonical,
+        conflict,
+        isConflict,
+        source,
+        reason,
+        latestBotEvent: botEvents[0]?.activity || stTrack.latest_activity || 'None',
+        order: o
+      };
+    });
+  }, [allOrders, courierPerformance]);
+
+  const handleExportStReconciliationCsv = () => {
+    if (stReconciliationItems.length === 0) return;
+
+    const rows = stReconciliationItems.map(item => {
+      return [
+        `"#${item.orderId}"`,
+        `"${item.awb}"`,
+        `"${(item.customerName || '').replace(/"/g, '""')}"`,
+        `"${(item.source || '').replace(/"/g, '""')}"`,
+        `"${(item.rawStatus || '').replace(/"/g, '""')}"`,
+        `"${(item.statusType || '').replace(/"/g, '""')}"`,
+        `"${(item.currentStatus || '').replace(/"/g, '""')}"`,
+        `"${(item.latestBotEvent || '').replace(/"/g, '""')}"`,
+        `"${(item.conflict || '').replace(/"/g, '""')}"`,
+        `"${item.canonical}"`,
+        `"${(item.reason || '').replace(/"/g, '""')}"`
+      ].join(',');
+    });
+
+    const csvContent = [
+      'Order ID,AWB Number,Customer Name,Source,Raw Status,Status Type,Current Status,BOT Event,Conflicting Fields,Final Classification,Precedence Reason',
+      ...rows
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `ST_Courier_Status_Reconciliation_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
       {/* 1. Header & Diagnostic Action */}
@@ -377,6 +514,16 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
 
         {/* Action Controls */}
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsStDiagnosticModalOpen(true)}
+            className="px-3 py-1.5 bg-sky-950/50 hover:bg-sky-900/60 text-sky-300 hover:text-white border border-sky-800/60 hover:border-sky-600 rounded-xl font-bold text-xs transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+            title="Inspect ST Courier Status Reconciliation Diagnostics & 3-Tier Precedence"
+          >
+            <Activity size={13} className="text-sky-400" />
+            <span>ST Courier Status Reconciliation ({stReconciliationItems.length})</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setIsDiagnosticModalOpen(true)}
@@ -836,22 +983,38 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
 
                     {/* Action */}
                     <td className="py-3 px-4 text-center">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (isUnknown) {
-                            setIsDiagnosticModalOpen(true);
-                          } else {
-                            onViewCourierOrders(row.courier, row.orders, outcomeFilter);
-                          }
-                        }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-purple-600/30 text-purple-300 text-xs font-sans font-bold transition-all border border-slate-700/60 hover:border-purple-500/40 cursor-pointer"
-                        title={isUnknown ? "Inspect Unknown Diagnostic Details" : `View underlying shipments for ${row.courier}`}
-                      >
-                        <span>{isUnknown ? 'Diagnose' : 'View'}</span>
-                        <ChevronRight size={12} />
-                      </button>
+                      <div className="flex items-center justify-center gap-1.5">
+                        {isStCourier && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setIsStDiagnosticModalOpen(true);
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-sky-950/70 hover:bg-sky-900/80 text-sky-300 text-xs font-sans font-bold transition-all border border-sky-800/60 hover:border-sky-500/50 cursor-pointer"
+                            title="Inspect ST Courier Status Reconciliation Diagnostic Details"
+                          >
+                            <Activity size={12} className="text-sky-400" />
+                            <span>Diagnose</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isUnknown) {
+                              setIsDiagnosticModalOpen(true);
+                            } else {
+                              onViewCourierOrders(row.courier, row.orders, outcomeFilter);
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-purple-600/30 text-purple-300 text-xs font-sans font-bold transition-all border border-slate-700/60 hover:border-purple-500/40 cursor-pointer"
+                          title={isUnknown ? "Inspect Unknown Diagnostic Details" : `View underlying shipments for ${row.courier}`}
+                        >
+                          <span>{isUnknown ? 'Diagnose' : 'View'}</span>
+                          <ChevronRight size={12} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -1123,6 +1286,256 @@ export const WebsiteCourierPerformanceSection: React.FC<WebsiteCourierPerformanc
               <button
                 type="button"
                 onClick={() => setIsDiagnosticModalOpen(false)}
+                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold transition-all cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 6. ST Courier Status Reconciliation Diagnostic Modal */}
+      {isStDiagnosticModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-6xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/20 flex items-center justify-center">
+                  <Activity size={16} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold text-white">ST Courier Status Reconciliation Diagnostics</h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-500/10 text-sky-300 border border-sky-500/20">
+                      3-Tier Precedence Engine
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Precedence: (1) BOT Verified Event &gt; (2) Carrier Current Status / stauts &gt; (3) Status Type fallback
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleExportStReconciliationCsv}
+                  className="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                  title="Download ST Courier Status Reconciliation as CSV"
+                >
+                  <Download size={13} />
+                  <span>Export CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsStDiagnosticModalOpen(false)}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Toolbar */}
+            <div className="p-3 bg-slate-950/60 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setStDiagnosticOutcomeFilter('ALL')}
+                  className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                    stDiagnosticOutcomeFilter === 'ALL'
+                      ? 'bg-sky-600 text-white shadow-sm'
+                      : 'bg-slate-900 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  All Records ({stReconciliationItems.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStDiagnosticOutcomeFilter('RTO')}
+                  className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                    stDiagnosticOutcomeFilter === 'RTO'
+                      ? 'bg-rose-600 text-white shadow-sm'
+                      : 'bg-slate-900 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  RTO ({stReconciliationItems.filter(i => i.canonical.includes('RTO')).length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStDiagnosticOutcomeFilter('CANCELLED')}
+                  className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                    stDiagnosticOutcomeFilter === 'CANCELLED'
+                      ? 'bg-slate-700 text-white shadow-sm'
+                      : 'bg-slate-900 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Cancelled ({stReconciliationItems.filter(i => i.canonical === 'Cancelled').length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStDiagnosticOutcomeFilter('DELIVERED')}
+                  className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                    stDiagnosticOutcomeFilter === 'DELIVERED'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'bg-slate-900 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Delivered ({stReconciliationItems.filter(i => i.canonical === 'Delivered').length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStDiagnosticOutcomeFilter('CONFLICT')}
+                  className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                    stDiagnosticOutcomeFilter === 'CONFLICT'
+                      ? 'bg-amber-600 text-white shadow-sm'
+                      : 'bg-slate-900 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Conflicting Fields ({stReconciliationItems.filter(i => i.isConflict).length})
+                </button>
+              </div>
+
+              <div className="relative min-w-[240px]">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search order ID, AWB, customer..."
+                  value={stDiagnosticSearch}
+                  onChange={e => setStDiagnosticSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"
+                />
+              </div>
+            </div>
+
+            {/* Table Content */}
+            <div className="flex-1 overflow-auto p-4">
+              {(() => {
+                let displayed = stReconciliationItems;
+                if (stDiagnosticOutcomeFilter === 'RTO') {
+                  displayed = displayed.filter(i => i.canonical.includes('RTO'));
+                } else if (stDiagnosticOutcomeFilter === 'CANCELLED') {
+                  displayed = displayed.filter(i => i.canonical === 'Cancelled');
+                } else if (stDiagnosticOutcomeFilter === 'DELIVERED') {
+                  displayed = displayed.filter(i => i.canonical === 'Delivered');
+                } else if (stDiagnosticOutcomeFilter === 'CONFLICT') {
+                  displayed = displayed.filter(i => i.isConflict);
+                }
+
+                if (stDiagnosticSearch.trim()) {
+                  const q = stDiagnosticSearch.toLowerCase().trim();
+                  displayed = displayed.filter(i =>
+                    String(i.orderId).toLowerCase().includes(q) ||
+                    String(i.awb).toLowerCase().includes(q) ||
+                    String(i.customerName).toLowerCase().includes(q) ||
+                    String(i.currentStatus).toLowerCase().includes(q) ||
+                    String(i.statusType).toLowerCase().includes(q)
+                  );
+                }
+
+                if (displayed.length === 0) {
+                  return (
+                    <div className="text-center py-12 text-slate-400 text-xs">
+                      No records match the selected diagnostic criteria.
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="overflow-x-auto rounded-xl border border-slate-800">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-slate-950 text-slate-400 border-b border-slate-800 font-bold uppercase text-[10px] tracking-wider">
+                          <th className="py-2.5 px-3">Order ID</th>
+                          <th className="py-2.5 px-3">AWB No</th>
+                          <th className="py-2.5 px-3">Source</th>
+                          <th className="py-2.5 px-3">Status Type</th>
+                          <th className="py-2.5 px-3">Current Status</th>
+                          <th className="py-2.5 px-3">BOT Event</th>
+                          <th className="py-2.5 px-3">Conflicting Fields</th>
+                          <th className="py-2.5 px-3 text-center">Final Classification</th>
+                          <th className="py-2.5 px-3">Precedence Reason</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
+                        {displayed.slice(0, 150).map(item => {
+                          const isRto = item.canonical.includes('RTO');
+                          const isDeliv = item.canonical === 'Delivered';
+                          const isCanc = item.canonical === 'Cancelled';
+
+                          return (
+                            <tr key={item.orderId} className="hover:bg-slate-800/30 transition-colors">
+                              <td className="py-2.5 px-3 font-bold text-white">#{item.orderId}</td>
+                              <td className="py-2.5 px-3 text-slate-300">{item.awb}</td>
+                              <td className="py-2.5 px-3 font-sans text-[10px] text-slate-400">{item.source}</td>
+                              <td className="py-2.5 px-3 font-sans">
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                                  item.statusType.toLowerCase().includes('deliv')
+                                    ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-800/40'
+                                    : (item.statusType.toLowerCase().includes('un delivered')
+                                      ? 'bg-amber-950/60 text-amber-300 border border-amber-800/40'
+                                      : 'bg-slate-800 text-slate-300')
+                                }`}>
+                                  {item.statusType}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 font-sans">
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                                  item.currentStatus.toLowerCase().includes('return') || item.currentStatus.toLowerCase().includes('rto')
+                                    ? 'bg-rose-950/60 text-rose-300 border border-rose-800/40 font-bold'
+                                    : (item.currentStatus.toLowerCase().includes('cancel')
+                                      ? 'bg-slate-800 text-slate-300 border border-slate-700'
+                                      : 'bg-emerald-950/60 text-emerald-300 border border-emerald-800/40')
+                                }`}>
+                                  {item.currentStatus}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 font-sans text-[10px] text-slate-300 max-w-[160px] truncate" title={item.latestBotEvent}>
+                                {item.latestBotEvent}
+                              </td>
+                              <td className="py-2.5 px-3 font-sans text-[10px]">
+                                {item.isConflict ? (
+                                  <span className="text-amber-300 font-semibold">{item.conflict}</span>
+                                ) : (
+                                  <span className="text-slate-500">None</span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-center">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  isRto
+                                    ? 'bg-rose-950/90 text-rose-300 border border-rose-600/50'
+                                    : (isCanc
+                                      ? 'bg-slate-800 text-slate-400 border border-slate-700'
+                                      : (isDeliv
+                                        ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-600/40'
+                                        : 'bg-blue-950/60 text-blue-400 border border-blue-600/40'))
+                                }`}>
+                                  {item.canonical}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 font-sans text-[10px] text-slate-300">
+                                {item.reason}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+              <span>
+                Showing {stReconciliationItems.length} ST Courier records reconciled according to 3-tier precedence rules.
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsStDiagnosticModalOpen(false)}
                 className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold transition-all cursor-pointer"
               >
                 Close
