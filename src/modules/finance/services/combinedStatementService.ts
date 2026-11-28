@@ -228,10 +228,14 @@ export function annotateCombinedRowsWithDuplicates(params: {
       existingFingerprints.has(fpNoTimeNoRef);
 
     // Only flag intra-file duplicates when the row has a unique timestamp or reference number.
-    // Statements without timestamps/references may contain genuine identical same-day transactions.
+    // Include normalized running balance when available so same-second transactions with distinct balances are preserved.
     const hasDistinguishingIdentity = Boolean(row.postedDateTimeIso || row.chequeRef);
+    const intraFileKey =
+      row.balance != null && !Number.isNaN(Number(row.balance))
+        ? `${row.fingerprint}|bal:${Number(row.balance).toFixed(2)}`
+        : row.fingerprint;
     const matchesWithinFile =
-      hasDistinguishingIdentity && seenInCurrentFile.has(row.fingerprint);
+      hasDistinguishingIdentity && seenInCurrentFile.has(intraFileKey);
 
     if (isFileLevelDup || matchesExistingDb || matchesWithinFile) {
       return {
@@ -248,7 +252,7 @@ export function annotateCombinedRowsWithDuplicates(params: {
     }
 
     if (hasDistinguishingIdentity) {
-      seenInCurrentFile.add(row.fingerprint);
+      seenInCurrentFile.add(intraFileKey);
     }
     return { ...row, isDuplicate: false, saveState: 'pending' };
   });
