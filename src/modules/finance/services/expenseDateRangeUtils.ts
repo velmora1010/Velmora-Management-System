@@ -89,28 +89,49 @@ export function formatAppliedExpenseDateRange(range: DateRangeValue): string {
 }
 
 /**
- * Matches an expense against the selected local calendar date range using `created_at`,
- * consistent with ExpenseAnalytics.tsx and View Expense sorting/grouping.
+ * Parses either an ISO timestamp (e.g. `created_at`) or a pure `YYYY-MM-DD` date string
+ * (e.g. `credit.transaction_date`) into a normalized local calendar Date without UTC shift.
+ */
+function parseNormalizedFilterDate(rawDate: string): Date | null {
+  const trimmed = rawDate.trim();
+  if (!trimmed) return null;
+
+  const pureDateMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (pureDateMatch) {
+    const year = Number(pureDateMatch[1]);
+    const month = Number(pureDateMatch[2]) - 1;
+    const day = Number(pureDateMatch[3]);
+    const localDate = new Date(year, month, day);
+    return Number.isNaN(localDate.getTime()) ? null : normalizeExpenseDate(localDate);
+  }
+
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? null : normalizeExpenseDate(parsed);
+}
+
+/**
+ * Matches an expense or credit against the selected local calendar date range.
+ * Preserves records with missing/invalid date values to match ExpenseAnalytics.tsx.
  */
 export function matchesExpenseDateRange(
-  createdAt: string | null | undefined,
+  dateValue: string | null | undefined,
   range: DateRangeValue
 ): boolean {
   if (!range.from && !range.to) return true;
-  if (!createdAt) return true;
+  if (!dateValue) return true;
 
-  const d = new Date(createdAt);
-  if (Number.isNaN(d.getTime())) return true;
+  const parsed = parseNormalizedFilterDate(dateValue);
+  if (!parsed) return true;
 
-  const expDate = normalizeExpenseDate(d).getTime();
+  const recordTime = parsed.getTime();
 
   if (range.from) {
     const from = normalizeExpenseDate(range.from).getTime();
-    if (expDate < from) return false;
+    if (recordTime < from) return false;
   }
   if (range.to) {
     const to = normalizeExpenseDate(range.to).getTime();
-    if (expDate > to) return false;
+    if (recordTime > to) return false;
   }
   return true;
 }

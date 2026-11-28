@@ -7,6 +7,8 @@ import { CreditCard } from './CreditCard';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import { CreditCardEditor } from './CreditCardEditor';
 import { CreditAnalytics } from './CreditAnalytics';
+import { ExpenseDateRangePicker } from './components/ExpenseDateRangePicker';
+import { matchesExpenseDateRange, type DateRangeValue } from './services/expenseDateRangeUtils';
 import toast from 'react-hot-toast';
 
 export const FinanceCredit = () => {
@@ -22,6 +24,7 @@ export const FinanceCredit = () => {
   const [selectedSectionFilter, setSelectedSectionFilter] = useState<string>('all');
   const [selectedSub2Filter, setSelectedSub2Filter] = useState<string>('all');
   const [categorizationFilter, setCategorizationFilter] = useState<'all' | 'categorized' | 'uncategorized'>('all');
+  const [appliedDateRange, setAppliedDateRange] = useState<DateRangeValue>({ from: null, to: null });
 
   // Modal / Editing state
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
@@ -72,6 +75,9 @@ export const FinanceCredit = () => {
       // Exclude archived credits visually
       if (credit.status === 'archived') return false;
 
+      // Date range filter (using credit.transaction_date)
+      if (!matchesExpenseDateRange(credit.transaction_date, appliedDateRange)) return false;
+
       // Dept filter
       if (selectedDeptFilter !== 'all' && credit.main_category !== selectedDeptFilter) return false;
       // Section filter
@@ -111,7 +117,7 @@ export const FinanceCredit = () => {
       if (!isValidA && isValidB) return 1;
       return 0;
     });
-  }, [credits, selectedDeptFilter, selectedSectionFilter, selectedSub2Filter, categorizationFilter, searchQuery]);
+  }, [credits, appliedDateRange, selectedDeptFilter, selectedSectionFilter, selectedSub2Filter, categorizationFilter, searchQuery]);
 
   const formatDate = (dateStr: string | null | undefined) => {
     if (!dateStr) return '-';
@@ -164,6 +170,7 @@ export const FinanceCredit = () => {
     setSelectedSectionFilter('all');
     setSelectedSub2Filter('all');
     setCategorizationFilter('all');
+    setAppliedDateRange({ from: null, to: null });
   };
 
   return (
@@ -290,6 +297,12 @@ export const FinanceCredit = () => {
               <option value="uncategorized" className="bg-slate-900 text-slate-100">Uncategorized</option>
             </select>
 
+            <ExpenseDateRangePicker
+              appliedRange={appliedDateRange}
+              onApply={(range) => setAppliedDateRange(range)}
+              onClear={() => setAppliedDateRange({ from: null, to: null })}
+            />
+
             <button
               type="button"
               onClick={async () => {
@@ -314,9 +327,9 @@ export const FinanceCredit = () => {
             <div className="ml-auto flex items-center gap-2">
               <span className="h-[42px] flex items-center px-3.5 rounded-xl text-xs font-medium bg-slate-800/80 border border-slate-700/80 text-slate-400">
                 {filteredCredits.length} {filteredCredits.length === 1 ? 'credit' : 'credits'}
-                {(searchQuery || selectedDeptFilter !== 'all' || selectedSectionFilter !== 'all' || selectedSub2Filter !== 'all' || categorizationFilter !== 'all') && ` of ${credits.length}`}
+                {(searchQuery || selectedDeptFilter !== 'all' || selectedSectionFilter !== 'all' || selectedSub2Filter !== 'all' || categorizationFilter !== 'all' || appliedDateRange.from || appliedDateRange.to) && ` of ${credits.length}`}
               </span>
-              {(searchQuery || selectedDeptFilter !== 'all' || selectedSectionFilter !== 'all' || selectedSub2Filter !== 'all' || categorizationFilter !== 'all') && (
+              {(searchQuery || selectedDeptFilter !== 'all' || selectedSectionFilter !== 'all' || selectedSub2Filter !== 'all' || categorizationFilter !== 'all' || appliedDateRange.from || appliedDateRange.to) && (
                 <button
                   type="button"
                   onClick={handleClearFilters}

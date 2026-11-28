@@ -75,4 +75,27 @@ assert.equal(matchesExpenseDateRange(new Date(2026, 4, 22, 0, 0, 1).toISOString(
 assert.equal(formatAppliedExpenseDateRange(customRange), '15 May 2026 - 21 May 2026');
 console.log('PASS: Test 9 - Custom range & full end-date inclusion');
 
-console.log('ALL 9 DATE RANGE TESTS PASSED.');
+// 10. Pure YYYY-MM-DD (credit.transaction_date) timezone-safe matching across all 8 quick ranges & custom range
+assert.equal(matchesExpenseDateRange('2026-11-27', todayRange), true);
+assert.equal(matchesExpenseDateRange('2026-11-26', todayRange), false);
+assert.equal(matchesExpenseDateRange('2026-11-26', yestRange), true);
+assert.equal(matchesExpenseDateRange('2026-11-27', yestRange), false);
+assert.equal(matchesExpenseDateRange('2026-11-23', weekRange), true);
+assert.equal(matchesExpenseDateRange('2026-11-22', weekRange), false);
+assert.equal(matchesExpenseDateRange('2026-11-21', last7Range), true);
+assert.equal(matchesExpenseDateRange('2026-11-20', last7Range), false);
+assert.equal(matchesExpenseDateRange('2026-11-01', thisMonth), true);
+assert.equal(matchesExpenseDateRange('2026-10-31', thisMonth), false);
+assert.equal(matchesExpenseDateRange('2026-10-01', prevMonth), true);
+assert.equal(matchesExpenseDateRange('2026-10-31', prevMonth), true);
+assert.equal(matchesExpenseDateRange('2026-11-01', prevMonth), false);
+assert.equal(matchesExpenseDateRange('2026-10-29', last30), true);
+assert.equal(matchesExpenseDateRange('2026-10-28', last30), false);
+assert.equal(matchesExpenseDateRange('2026-01-01', thisYear), true);
+assert.equal(matchesExpenseDateRange('2025-12-31', thisYear), false);
+assert.equal(matchesExpenseDateRange('2026-05-15', customRange), true);
+assert.equal(matchesExpenseDateRange('2026-05-21', customRange), true);
+assert.equal(matchesExpenseDateRange('2026-05-22', customRange), false);
+console.log('PASS: Test 10 - Pure YYYY-MM-DD credit.transaction_date across all quick & custom ranges');
+
+console.log('ALL 10 DATE RANGE TESTS PASSED.');
