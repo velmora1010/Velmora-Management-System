@@ -1,8 +1,9 @@
 import { useState, useMemo } from 'react';
-import { Trash2, Edit2, Search, ChevronRight, ChevronLeft, Plus, Folder, Briefcase, Tags, Layers, Component } from 'lucide-react';
+import { Trash2, Edit2, Search, X, ChevronRight, ChevronLeft, Plus, Folder, Briefcase, Tags, Layers, Component } from 'lucide-react';
 import { useFinanceCategories, type FinanceCategoryRow } from '../../hooks/finance/useFinanceCategories';
 import { ConfirmModal } from '../../components/ui/ConfirmModal';
 import toast from 'react-hot-toast';
+import { searchCategoryPaths, type CategorySearchResult } from './services/categorySearchUtils';
 
 export const FinanceCategoryManagement = () => {
   const {
@@ -18,6 +19,11 @@ export const FinanceCategoryManagement = () => {
   const [selectedCat, setSelectedCat] = useState<string>('');
   const [selectedSub1, setSelectedSub1] = useState<string>('');
   const [selectedSub2, setSelectedSub2] = useState<string>('');
+  const [selectedSub3, setSelectedSub3] = useState<string>('');
+
+  // Search state
+  const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Add Mode State
   const [addingTo, setAddingTo] = useState<1 | 2 | 3 | 4 | 5 | null>(null);
@@ -80,6 +86,7 @@ export const FinanceCategoryManagement = () => {
     setSelectedCat('');
     setSelectedSub1('');
     setSelectedSub2('');
+    setSelectedSub3('');
     setAddingTo(null);
   };
 
@@ -87,18 +94,36 @@ export const FinanceCategoryManagement = () => {
     setSelectedCat(cat);
     setSelectedSub1('');
     setSelectedSub2('');
+    setSelectedSub3('');
     setAddingTo(null);
   };
 
   const handleSelectSub1 = (sub1: string) => {
     setSelectedSub1(sub1);
     setSelectedSub2('');
+    setSelectedSub3('');
     setAddingTo(null);
   };
 
   const handleSelectSub2 = (sub2: string) => {
     setSelectedSub2(sub2);
+    setSelectedSub3('');
     setAddingTo(null);
+  };
+
+  const searchResults = useMemo(
+    () => searchCategoryPaths(categories, searchQuery),
+    [categories, searchQuery]
+  );
+
+  const handleSelectSearchResult = (result: CategorySearchResult) => {
+    setSelectedDept(result.selection.dept);
+    setSelectedCat(result.selection.cat);
+    setSelectedSub1(result.selection.sub1);
+    setSelectedSub2(result.selection.sub2);
+    setSelectedSub3(result.selection.sub3);
+    setAddingTo(null);
+    setEditingId(null);
   };
 
   // --- Add/Edit Handlers ---
@@ -331,15 +356,105 @@ export const FinanceCategoryManagement = () => {
 
   return (
     <div className="flex flex-col h-full fade-in text-slate-200">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-6 gap-4">
         <div>
           <h2 className="text-2xl font-bold text-main tracking-tight mb-1">Finance Categories</h2>
           <p className="text-sm text-muted">Manage the 5-level hierarchical category tree</p>
         </div>
-        <button onClick={() => fetchCategories()} className="flex items-center gap-2 bg-card border border-border/50 text-main px-4 py-2 rounded-xl text-sm font-medium hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
-          Refresh Data
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              setIsSearchOpen(prev => {
+                const next = !prev;
+                if (!next) setSearchQuery('');
+                return next;
+              });
+            }}
+            aria-label="Search category paths"
+            aria-expanded={isSearchOpen}
+            className={`flex items-center gap-2 border px-3.5 py-2 rounded-xl text-sm font-medium transition-colors ${
+              isSearchOpen
+                ? 'bg-primary/15 border-primary/50 text-primary'
+                : 'bg-card border-border/50 text-main hover:bg-black/5 dark:hover:bg-white/5'
+            }`}
+          >
+            <Search size={16} />
+            <span>Search</span>
+          </button>
+          <button onClick={() => fetchCategories()} className="flex items-center gap-2 bg-card border border-border/50 text-main px-4 py-2 rounded-xl text-sm font-medium hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+            Refresh Data
+          </button>
+        </div>
       </div>
+
+      {isSearchOpen && (
+        <div className="mb-4 bg-card border border-border/50 rounded-2xl p-4 shadow-sm">
+          <div className="relative flex items-center">
+            <Search size={16} className="absolute left-3.5 text-muted pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search category paths across Department, Category, Sub Category 1, 2, 3..."
+              autoFocus
+              className="w-full bg-background/70 border border-border/60 rounded-xl pl-10 pr-10 py-2.5 text-sm text-main placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/60"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                if (searchQuery) {
+                  setSearchQuery('');
+                } else {
+                  setIsSearchOpen(false);
+                }
+              }}
+              aria-label={searchQuery ? 'Clear search' : 'Close search'}
+              className="absolute right-2.5 p-1.5 rounded-lg text-muted hover:text-main hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          {searchQuery.trim() && (
+            <div className="mt-3 pt-3 border-t border-border/40">
+              {searchResults.length === 0 ? (
+                <p className="text-sm text-muted py-2 px-1">No matching category paths found</p>
+              ) : (
+                <>
+                  <div className="text-xs text-muted mb-2 px-1">
+                    {searchResults.length} matching {searchResults.length === 1 ? 'path' : 'paths'}
+                  </div>
+                  <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1">
+                    {searchResults.map((result) => (
+                      <button
+                        key={result.key}
+                        type="button"
+                        onClick={() => handleSelectSearchResult(result)}
+                        className="w-full text-left flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 rounded-xl bg-background/50 hover:bg-primary/10 border border-border/40 hover:border-primary/40 transition-colors group"
+                      >
+                        <span className="text-sm text-main font-medium group-hover:text-primary transition-colors">
+                          {result.displayPath}
+                        </span>
+                        <span className="flex flex-wrap items-center gap-1.5 shrink-0">
+                          {result.matchedLevels.map((level) => (
+                            <span
+                              key={level}
+                              className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/30"
+                            >
+                              {level}
+                            </span>
+                          ))}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex-1 bg-card border border-border/50 rounded-2xl shadow-sm overflow-hidden flex flex-col relative">
         {isLoading ? (
@@ -355,7 +470,7 @@ export const FinanceCategoryManagement = () => {
             {renderColumn('Category', 2, currentCategories, selectedCat, handleSelectCat, <Folder size={16} />, !!selectedDept, [selectedDept], () => setSelectedDept(''))}
             {renderColumn('Sub Category 1', 3, currentSub1s, selectedSub1, handleSelectSub1, <Layers size={16} />, !!selectedCat, [selectedDept, selectedCat], () => setSelectedCat(''))}
             {renderColumn('Sub Category 2', 4, currentSub2s, selectedSub2, handleSelectSub2, <Component size={16} />, !!selectedSub1, [selectedDept, selectedCat, selectedSub1], () => setSelectedSub1(''))}
-            {renderColumn('Sub Category 3', 5, currentSub3Rows, '', () => {}, <Tags size={16} />, !!selectedSub2, [selectedDept, selectedCat, selectedSub1, selectedSub2], () => setSelectedSub2(''))}
+            {renderColumn('Sub Category 3', 5, currentSub3Rows, selectedSub3, setSelectedSub3, <Tags size={16} />, !!selectedSub2, [selectedDept, selectedCat, selectedSub1, selectedSub2], () => setSelectedSub2(''))}
           </div>
         )}
       </div>
